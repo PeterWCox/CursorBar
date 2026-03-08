@@ -1,6 +1,46 @@
 import SwiftUI
 import AppKit
 
+enum BrandStatusIcon {
+    static func makeImage() -> NSImage {
+        let size = NSSize(width: 18, height: 18)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let ringRect = rect.insetBy(dx: 3.5, dy: 3.5)
+            let ring = NSBezierPath(ovalIn: ringRect)
+            ring.lineWidth = 1.7
+            NSColor.labelColor.setStroke()
+            ring.stroke()
+
+            let dotRect = NSRect(x: rect.midX - 1.8, y: rect.midY - 1.8, width: 3.6, height: 3.6)
+            NSBezierPath(ovalIn: dotRect).fill()
+
+            let spark = NSBezierPath()
+            spark.lineWidth = 1.5
+            spark.lineCapStyle = .round
+            spark.move(to: NSPoint(x: rect.maxX - 5.7, y: rect.maxY - 3.9))
+            spark.line(to: NSPoint(x: rect.maxX - 2.9, y: rect.maxY - 1.1))
+            spark.move(to: NSPoint(x: rect.maxX - 5.7, y: rect.maxY - 1.1))
+            spark.line(to: NSPoint(x: rect.maxX - 2.9, y: rect.maxY - 3.9))
+            spark.stroke()
+
+            let orbit = NSBezierPath()
+            orbit.lineWidth = 1.3
+            orbit.lineCapStyle = .round
+            orbit.move(to: NSPoint(x: rect.minX + 2.8, y: rect.midY - 1.2))
+            orbit.curve(
+                to: NSPoint(x: rect.midX + 5.2, y: rect.minY + 3.1),
+                controlPoint1: NSPoint(x: rect.minX + 5.0, y: rect.minY + 1.8),
+                controlPoint2: NSPoint(x: rect.midX + 1.8, y: rect.minY + 2.2)
+            )
+            orbit.stroke()
+
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+}
+
 @main
 struct CursorMenuBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
@@ -21,7 +61,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "bubble.left.and.bubble.right.fill", accessibilityDescription: "Cursor Quick Prompt")
+            button.image = BrandStatusIcon.makeImage()
+            button.image?.accessibilityDescription = "CursorBar"
             button.action = #selector(togglePanel)
             button.target = self
         }
@@ -65,13 +106,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class FloatingPanel: NSPanel {
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 360),
+            contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        isOpaque = false
+        backgroundColor = .clear
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         level = .floating

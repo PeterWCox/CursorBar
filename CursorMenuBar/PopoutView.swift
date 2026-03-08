@@ -64,6 +64,8 @@ struct SubmittableTextEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         textView.backgroundColor = .clear
+        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.insertionPointColor = NSColor.white.withAlphaComponent(0.9)
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
@@ -147,6 +149,52 @@ private let availableModels: [(id: String, label: String)] = [
     ("gemini-3.1-pro", "Gemini 3.1 Pro"),
 ]
 
+struct BrandMark: View {
+    var size: CGFloat = 52
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.29, green: 0.52, blue: 1.0),
+                            Color(red: 0.47, green: 0.27, blue: 0.98),
+                            Color(red: 0.08, green: 0.13, blue: 0.28)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            Circle()
+                .stroke(Color.white.opacity(0.9), lineWidth: size * 0.07)
+                .frame(width: size * 0.48, height: size * 0.48)
+
+            Circle()
+                .fill(Color.white)
+                .frame(width: size * 0.11, height: size * 0.11)
+
+            Path { path in
+                path.move(to: CGPoint(x: size * 0.18, y: size * 0.6))
+                path.addCurve(
+                    to: CGPoint(x: size * 0.58, y: size * 0.78),
+                    control1: CGPoint(x: size * 0.26, y: size * 0.86),
+                    control2: CGPoint(x: size * 0.44, y: size * 0.84)
+                )
+            }
+            .stroke(Color.white.opacity(0.75), style: StrokeStyle(lineWidth: size * 0.055, lineCap: .round))
+
+            Image(systemName: "sparkle")
+                .font(.system(size: size * 0.18, weight: .bold))
+                .foregroundStyle(.white)
+                .offset(x: size * 0.22, y: -size * 0.22)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: Color.black.opacity(0.25), radius: 18, y: 12)
+    }
+}
+
 struct PopoutView: View {
     @EnvironmentObject var appState: AppState
     var dismiss: () -> Void = {}
@@ -159,177 +207,351 @@ struct PopoutView: View {
     @State private var hasAttachedScreenshot = false
     
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .top, spacing: 6) {
-                    SubmittableTextEditor(text: $prompt, isDisabled: isRunning, onSubmit: sendPrompt, onPasteImage: pasteScreenshot)
-                        .frame(height: 72)
-                    Button {
-                        pasteScreenshot()
-                    } label: {
-                        Image(systemName: hasAttachedScreenshot ? "photo.fill" : "photo.badge.plus")
-                            .symbolRenderingMode(hasAttachedScreenshot ? .multicolor : .monochrome)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(hasAttachedScreenshot ? .accentColor : .secondary)
-                    .keyboardShortcut("v", modifiers: [.command, .shift])
-                    .help("Paste screenshot (⌘V or ⌘⇧V)")
-                }
-                .padding(8)
-                .background(Color(NSColor.textBackgroundColor).opacity(0.5))
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                )
-                .onChange(of: prompt) { _, newValue in
-                    hasAttachedScreenshot = newValue.contains("[Screenshot attached:")
-                }
-                
-                if hasAttachedScreenshot {
-                    let imageURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(".cursor", isDirectory: true).appendingPathComponent("pasted-screenshot.png")
-                    if let nsImage = NSImage(contentsOf: imageURL) {
-                        ZStack(alignment: .topTrailing) {
-                            Image(nsImage: nsImage)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(maxHeight: 660)
-                                .cornerRadius(6)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
-                                )
-                            Button {
-                                deleteScreenshot()
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.title2)
-                                    .foregroundStyle(.white)
-                                    .shadow(color: .black.opacity(0.6), radius: 2, x: 0, y: 1)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(6)
-                        }
-                    }
-                }
-                
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.07, green: 0.08, blue: 0.11),
+                    Color(red: 0.10, green: 0.11, blue: 0.15),
+                    Color(red: 0.06, green: 0.07, blue: 0.10)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 12) {
+                topBar
+
                 if let error = errorMessage {
                     Text(error)
-                        .font(.caption)
-                        .foregroundColor(.red)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                        )
                 }
-                
-                HStack(spacing: 6) {
-                    Button(action: { appState.changeWorkspace() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "folder")
-                            Text(appState.workspaceDisplayName)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                        .font(.caption)
+
+                outputCard
+                    .frame(maxHeight: .infinity)
+
+                composerDock
+            }
+            .padding(14)
+        }
+        .frame(width: 460, height: 780)
+        .onChange(of: prompt) { _, newValue in
+            hasAttachedScreenshot = newValue.contains("[Screenshot attached:")
+        }
+    }
+
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            BrandMark(size: 28)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("CursorBar")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                Text(isRunning ? "Streaming response" : "Ready")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            Spacer()
+
+            Button {
+                (NSApp.delegate as? AppDelegate)?.showSettingsWindow(nil)
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.05), in: Circle())
+            }
+            .buttonStyle(.plain)
+
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.05), in: Circle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var composerDock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if hasAttachedScreenshot {
+                screenshotCard
+            }
+
+            HStack(spacing: 10) {
+                Button(action: { appState.changeWorkspace() }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                        Text(appState.workspaceDisplayName)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    .buttonStyle(.accessoryBar)
-                    
-                    Menu {
-                        ForEach(availableModels, id: \.id) { model in
-                            Button {
-                                selectedModel = model.id
-                            } label: {
-                                if model.id == selectedModel {
-                                    Label(model.label, systemImage: "checkmark")
-                                } else {
-                                    Text(model.label)
-                                }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.88))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(.plain)
+
+                Menu {
+                    ForEach(availableModels, id: \.id) { model in
+                        Button {
+                            selectedModel = model.id
+                        } label: {
+                            if model.id == selectedModel {
+                                Label(model.label, systemImage: "checkmark")
+                            } else {
+                                Text(model.label)
                             }
                         }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "cpu")
-                            Text(selectedModelLabel)
-                                .lineLimit(1)
-                        }
-                        .font(.caption)
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    
-                    Spacer()
-                    
-                    Button(action: sendPrompt) {
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "cpu")
+                        Text(selectedModelLabel)
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.86))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                }
+                .menuStyle(.borderlessButton)
+                .foregroundColor(.white)
+                .colorScheme(.dark)
+
+                Spacer()
+
+                Button {
+                    pasteScreenshot()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: hasAttachedScreenshot ? "photo.fill" : "paperclip")
+                        Text(hasAttachedScreenshot ? "Attached" : "Attach")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+            }
+
+            HStack(alignment: .bottom, spacing: 10) {
+                SubmittableTextEditor(text: $prompt, isDisabled: isRunning, onSubmit: sendPrompt, onPasteImage: pasteScreenshot)
+                    .frame(height: 82)
+                    .padding(12)
+                    .background(editorBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+
+                Button(action: sendPrompt) {
+                    Group {
                         if isRunning {
                             ProgressView()
-                                .scaleEffect(0.7)
-                                .frame(width: 50)
+                                .tint(.white)
+                                .scaleEffect(0.8)
                         } else {
-                            Label("Send", systemImage: "paperplane.fill")
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 16, weight: .bold))
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isRunning)
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.35, green: 0.56, blue: 1.0), Color(red: 0.50, green: 0.32, blue: 1.0)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: Circle()
+                    )
+                    .opacity(canSend ? 1 : 0.45)
                 }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
             }
-            .padding(12)
-            
-            Divider()
-            
+
+            Text("You've used 1% of your included API usage")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.42))
+        }
+        .padding(14)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(cardBorder, lineWidth: 1)
+        )
+    }
+
+    private var screenshotCard: some View {
+        let imageURL = URL(fileURLWithPath: workspacePath)
+            .appendingPathComponent(".cursor", isDirectory: true)
+            .appendingPathComponent("pasted-screenshot.png")
+
+        return Group {
+            if let nsImage = NSImage(contentsOf: imageURL) {
+                HStack(spacing: 12) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 84, height: 84)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                        )
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Attached screenshot")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
+
+                        Text(".cursor/pasted-screenshot.png")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.46))
+                            .lineLimit(1)
+
+                        Text("Included with your next prompt")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.56))
+                    }
+
+                    Spacer()
+
+                    Button(action: deleteScreenshot) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(.white.opacity(0.72))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(12)
+                .background(editorBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+            }
+        }
+    }
+
+    private var outputCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Agent")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.88))
+
+                Spacer()
+
+                Text(isRunning ? "Streaming" : "Idle")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(isRunning ? Color(red: 0.59, green: 0.83, blue: 1.0) : .white.opacity(0.4))
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(output.isEmpty ? "Response will appear here..." : output)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(output.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
-                        .textSelection(.enabled)
-                        .id("outputEnd")
+                    Group {
+                        if output.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Response will appear here...")
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.58))
+
+                                Text("Ask a question below and CursorBar will stream the answer into this panel.")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.38))
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                        } else {
+                            Text(output)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.white.opacity(0.88))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .id("outputEnd")
                 }
                 .frame(maxHeight: .infinity)
+                .background(editorBackground, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
                 .onChange(of: output) { _, _ in
-                    withAnimation {
+                    withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo("outputEnd", anchor: .bottom)
                     }
                 }
             }
-            
-            Divider()
-            
-            HStack(spacing: 12) {
-                Button {
-                    (NSApp.delegate as? AppDelegate)?.showSettingsWindow(nil)
-                } label: {
-                    Image(systemName: "gear")
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.plain)
-                .font(.caption)
-                .foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
-        .frame(width: 380, height: 800)
-        .overlay(alignment: .topTrailing) {
-            Button(action: dismiss) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(6)
-        }
+        .padding(14)
+        .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(cardBorder, lineWidth: 1)
+        )
     }
-    
+
     private var selectedModelLabel: String {
         availableModels.first { $0.id == selectedModel }?.label ?? selectedModel
+    }
+
+    private var cardBackground: some ShapeStyle {
+        LinearGradient(
+            colors: [
+                Color.white.opacity(0.12),
+                Color.white.opacity(0.06)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var editorBackground: some ShapeStyle {
+        LinearGradient(
+            colors: [
+                Color.black.opacity(0.22),
+                Color.black.opacity(0.34)
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+
+    private var cardBorder: Color {
+        Color.white.opacity(0.11)
+    }
+
+    private var canSend: Bool {
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isRunning
     }
     
     private func deleteScreenshot() {
