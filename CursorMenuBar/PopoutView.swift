@@ -176,22 +176,18 @@ struct PopoutView: View {
         
         Task {
             do {
-                let result = try await AgentRunner.run(prompt: trimmed, workspacePath: workspacePath)
-                await MainActor.run {
-                    output = result
-                    isRunning = false
-                    prompt = ""
+                let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: workspacePath)
+                prompt = ""
+                for try await chunk in stream {
+                    output += chunk
                 }
+                isRunning = false
             } catch let error as AgentRunnerError {
-                await MainActor.run {
-                    errorMessage = error.userMessage
-                    isRunning = false
-                }
+                errorMessage = error.userMessage
+                isRunning = false
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    isRunning = false
-                }
+                errorMessage = error.localizedDescription
+                isRunning = false
             }
         }
     }

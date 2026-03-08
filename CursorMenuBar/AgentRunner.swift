@@ -1,5 +1,21 @@
 import Foundation
 
+// MARK: - Stream JSON event types (Cursor CLI stream-json format)
+private struct StreamEvent: Decodable {
+    let type: String?
+    let subtype: String?
+    let message: StreamMessage?
+}
+
+private struct StreamMessage: Decodable {
+    let content: [StreamContent]?
+}
+
+private struct StreamContent: Decodable {
+    let type: String?
+    let text: String?
+}
+
 enum AgentRunnerError: Error {
     case agentNotFound
     case notAuthenticated
@@ -26,18 +42,24 @@ enum AgentRunnerError: Error {
 
 @MainActor
 final class AgentRunner {
-    static func run(prompt: String, workspacePath: String) async throws -> String {
+    static func stream(prompt: String, workspacePath: String, model: String? = nil) throws -> AsyncThrowingStream<String, Error> {
         guard let agentPath = findAgentPath() else {
             throw AgentRunnerError.agentNotFound
         }
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: agentPath)
-        process.arguments = [
+        var args = [
             "-f",
             "-p", prompt,
-            "--workspace", workspacePath
+            "--workspace", workspacePath,
+            "--output-format", "stream-json",
+            "--stream-partial-output"
         ]
+        if let model, !model.isEmpty {
+            args += ["--model", model]
+        }
+        process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: workspacePath)
         
         let env = ProcessInfo.processInfo.environment
@@ -53,23 +75,75 @@ final class AgentRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         
-        let stdoutHandle = stdoutPipe.fileHandleForReading
-        let stderrHandle = stderrPipe.fileHandleForReading
+        try process.run()
         
-        process.launch()
-        
-        let stdoutData = stdoutHandle.readDataToEndOfFile()
-        let stderrData = stderrHandle.readDataToEndOfFile()
-        process.waitUntilExit()
-        
-        let stdoutStr = String(data: stdoutData, encoding: .utf8) ?? ""
-        let stderrStr = String(data: stderrData, encoding: .utf8) ?? ""
-        
-        guard process.terminationStatus == 0 else {
-            throw AgentRunnerError.processFailed(exitCode: process.terminationStatus, stderr: stderrStr)
+        return AsyncThrowingStream { continuation in
+            continuation.onTermination = { @Sendable _ in
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
+            
+            Task.detached {
+                let stderrTask = Task.detached { () -> String in
+                    let data = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    return String(data: data, encoding: .utf8) ?? ""
+                }
+                
+                let handle = stdoutPipe.fileHandleForReading
+                let decoder = JSONDecoder()
+                var lineBuffer = ""
+                var streamComplete = false
+                
+                while true {
+                    let data = handle.availableData
+                    if data.isEmpty { break }
+                    
+                    guard let chunk = String(data: data, encoding: .utf8) else { continue }
+                    lineBuffer += chunk
+                    
+                    while let newlineIndex = lineBuffer.firstIndex(of: "\n") {
+                        let line = String(lineBuffer[..<newlineIndex])
+                        lineBuffer = String(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+                        
+                        let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        guard !trimmed.isEmpty else { continue }
+                        
+                        do {
+                            let event = try decoder.decode(StreamEvent.self, from: Data(trimmed.utf8))
+                            
+                            if event.type == "result" {
+                                streamComplete = true
+                                break
+                            }
+                            
+                            if event.type == "assistant", let message = event.message, let content = message.content {
+                                for item in content {
+                                    if item.type == "text", let text = item.text, !text.isEmpty {
+                                        continuation.yield(text)
+                                    }
+                                }
+                            }
+                        } catch {
+                            // Skip malformed JSON lines
+                            continue
+                        }
+                    }
+                    
+                    if streamComplete { break }
+                }
+                
+                process.waitUntilExit()
+                let stderrStr = await stderrTask.value
+                
+                if process.terminationStatus != 0 {
+                    continuation.finish(throwing: AgentRunnerError.processFailed(
+                        exitCode: process.terminationStatus, stderr: stderrStr))
+                } else {
+                    continuation.finish()
+                }
+            }
         }
-        
-        return stdoutStr
     }
     
     private static func findAgentPath() -> String? {
