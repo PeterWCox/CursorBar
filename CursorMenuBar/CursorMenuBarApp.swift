@@ -136,7 +136,7 @@ class FloatingPanel: NSPanel {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -152,6 +152,8 @@ class FloatingPanel: NSPanel {
         standardWindowButton(.closeButton)?.isHidden = true
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
+        contentMinSize = NSSize(width: 360, height: 400)
+        contentMaxSize = NSSize(width: 900, height: 1200)
     }
 
     override var canBecomeKey: Bool { true }

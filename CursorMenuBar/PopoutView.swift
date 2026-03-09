@@ -507,7 +507,7 @@ struct PopoutView: View {
             composerDock
         }
         .padding(16)
-        .frame(width: 460, height: 780)
+        .frame(minWidth: 360, minHeight: 400, maxWidth: .infinity, maxHeight: .infinity)
         .background(CursorTheme.panelGradient)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
