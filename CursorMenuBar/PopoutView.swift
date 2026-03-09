@@ -112,44 +112,6 @@ struct PopoutView: View {
         .padding(.horizontal, 4)
     }
 
-    private var quickActionButtons: some View {
-        HStack(spacing: 8) {
-            Button {
-                sendInCurrentTab(prompt: QuickActionPrompts.fixBuild)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "wrench.and.screwdriver")
-                    Text("Fix build")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(CursorTheme.surfaceMuted, in: Capsule())
-                .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .disabled(tab.isRunning)
-
-            Button {
-                sendInCurrentTab(prompt: QuickActionPrompts.commitAndPush)
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.circle")
-                    Text("Commit & push")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(CursorTheme.surfaceMuted, in: Capsule())
-                .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
-            }
-            .buttonStyle(.plain)
-            .disabled(tab.isRunning)
-        }
-    }
-
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
@@ -228,10 +190,18 @@ struct PopoutView: View {
     private var composerDock: some View {
         let attachedPaths = screenshotPaths(from: tab.prompt)
         return VStack(alignment: .leading, spacing: 12) {
-            quickActionButtons
+            QuickActionButtonsView(
+                isDisabled: tab.isRunning,
+                onFixBuild: { sendInCurrentTab(prompt: QuickActionPrompts.fixBuild) },
+                onCommitAndPush: { sendInCurrentTab(prompt: QuickActionPrompts.commitAndPush) }
+            )
 
             ForEach(Array(attachedPaths.enumerated()), id: \.offset) { _, path in
-                screenshotCard(path: path)
+                ScreenshotCardView(
+                    path: path,
+                    workspacePath: workspacePath,
+                    onDelete: { deleteScreenshot(path: path) }
+                )
             }
 
             ZStack(alignment: .topLeading) {
@@ -267,127 +237,45 @@ struct PopoutView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Menu {
-                    ForEach(devFolders, id: \.path) { folder in
-                        Button {
-                            workspacePath = folder.path
-                            appState.workspacePath = folder.path
-                        } label: {
-                            if folder.path == workspacePath {
-                                Label(folder.lastPathComponent, systemImage: "checkmark")
-                            } else {
-                                Text(folder.lastPathComponent)
-                            }
-                        }
-                    }
-                    Divider()
-                    Button("Browse other folder...") {
-                        appState.changeWorkspace()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder")
-                        Text(appState.workspaceDisplayName)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                }
-                .menuStyle(.borderlessButton)
-                .foregroundColor(.white)
-                .colorScheme(.dark)
-                .onAppear { devFolders = loadDevFolders() }
+                WorkspacePickerView(
+                    displayName: appState.workspaceDisplayName,
+                    folders: devFolders,
+                    selectedPath: workspacePath,
+                    onSelectFolder: { path in
+                        workspacePath = path
+                        appState.workspacePath = path
+                    },
+                    onBrowse: { appState.changeWorkspace() },
+                    onAppear: { devFolders = loadDevFolders() }
+                )
 
-                Menu {
-                    ForEach(AvailableModels.all, id: \.id) { model in
-                        Button {
-                            selectedModel = model.id
-                        } label: {
-                            if model.id == selectedModel {
-                                Label(model.label, systemImage: "checkmark")
-                            } else {
-                                Text(model.label)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "cpu")
-                        Text(selectedModelLabel)
-                            .lineLimit(1)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                }
-                .menuStyle(.borderlessButton)
-                .foregroundColor(.white)
-                .colorScheme(.dark)
+                ModelPickerView(
+                    selectedModelId: selectedModel,
+                    models: AvailableModels.all,
+                    onSelect: { selectedModel = $0 }
+                )
 
-                Menu {
-                    ForEach(gitBranches, id: \.self) { branch in
-                        Button {
-                            if branch != currentBranch {
-                                if let err = gitCheckout(branch: branch, workspacePath: workspacePath) {
-                                    tab.errorMessage = err
-                                } else {
-                                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
-                                    currentBranch = cur
-                                    gitBranches = list
-                                    tab.errorMessage = nil
-                                }
-                            }
-                        } label: {
-                            if branch == currentBranch {
-                                Label(branch, systemImage: "checkmark")
+                GitBranchPickerView(
+                    branches: gitBranches,
+                    currentBranch: currentBranch,
+                    onSelectBranch: { branch in
+                        if branch != currentBranch {
+                            if let err = gitCheckout(branch: branch, workspacePath: workspacePath) {
+                                tab.errorMessage = err
                             } else {
-                                Text(branch)
+                                let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                                currentBranch = cur
+                                gitBranches = list
+                                tab.errorMessage = nil
                             }
                         }
+                    },
+                    onAppear: {
+                        let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                        currentBranch = cur
+                        gitBranches = list
                     }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.branch")
-                        Text(currentBranch.isEmpty ? "No branch" : currentBranch)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                }
-                .menuStyle(.borderlessButton)
-                .foregroundColor(.white)
-                .colorScheme(.dark)
-                .disabled(gitBranches.isEmpty)
-                .onAppear {
-                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
-                    currentBranch = cur
-                    gitBranches = list
-                }
+                )
                 .onChange(of: workspacePath) { _, _ in
                     let (cur, list) = loadGitBranches(workspacePath: workspacePath)
                     currentBranch = cur
@@ -395,74 +283,14 @@ struct PopoutView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                Spacer()
-
-                Button {
-                    clearContext()
-                } label: {
-                    let hasContext = !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    HStack(spacing: 6) {
-                        Image(systemName: "trash")
-                        Text("Summarize")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hasContext ? CursorTheme.textPrimary : CursorTheme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        hasContext
-                            ? CursorTheme.surfaceRaised
-                            : CursorTheme.surfaceMuted,
-                        in: Capsule()
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(tab.isRunning)
-
-                Button(action: {
-                    if tab.isRunning {
-                        stopStreaming()
-                    } else {
-                        sendPrompt()
-                    }
-                }) {
-                    Group {
-                        if tab.isRunning {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 12, weight: .black))
-                        } else {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 15, weight: .bold))
-                        }
-                    }
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .frame(width: 36, height: 36)
-                    .background {
-                        if tab.isRunning {
-                            Circle().fill(CursorTheme.surfaceRaised)
-                        } else {
-                            Circle().fill(CursorTheme.brandGradient)
-                        }
-                    }
-                    .overlay(
-                        Circle()
-                            .stroke(
-                                tab.isRunning
-                                    ? CursorTheme.borderStrong
-                                    : Color.white.opacity(0.14),
-                                lineWidth: 1
-                            )
-                    )
-                    .opacity(tab.isRunning || canSend ? 1 : 0.45)
-                }
-                .buttonStyle(.plain)
-                .disabled(!tab.isRunning && !canSend)
-            }
+            ComposerActionButtonsView(
+                hasContext: !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                isRunning: tab.isRunning,
+                canSend: canSend,
+                onSummarize: clearContext,
+                onSend: sendPrompt,
+                onStop: { stopStreaming() }
+            )
 
             contextUsageView
         }
@@ -493,56 +321,6 @@ struct PopoutView: View {
                 .tint(fraction > 0.85 ? CursorTheme.brandAmber : CursorTheme.brandBlue)
                 .background(CursorTheme.surfaceMuted)
                 .scaleEffect(y: 1.2, anchor: .center)
-        }
-    }
-
-    private func screenshotCard(path: String) -> some View {
-        let imageURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
-
-        return Group {
-            if let nsImage = NSImage(contentsOf: imageURL) {
-                HStack(spacing: 12) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 84, height: 84)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                        )
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Attached screenshot")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(CursorTheme.textPrimary)
-
-                        Text(path)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                            .lineLimit(1)
-
-                        Text("Included with your next prompt")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                    }
-
-                    Spacer()
-
-                    Button(action: { deleteScreenshot(path: path) }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(12)
-                .background(editorBackground, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-            }
         }
     }
 

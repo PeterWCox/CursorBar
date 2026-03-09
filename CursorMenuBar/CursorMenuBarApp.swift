@@ -87,6 +87,43 @@ struct CursorMenuBarApp: App {
     }
 }
 
+/// Status bar view that shows the icon, toggles panel on left click, and shows a context menu on right click.
+private final class StatusItemView: NSView {
+    var image: NSImage?
+    var onLeftClick: (() -> Void)?
+    var contextMenu: NSMenu?
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let image = image else { return }
+        let size = min(bounds.width, bounds.height, 18)
+        let rect = NSRect(
+            x: (bounds.width - size) / 2,
+            y: (bounds.height - size) / 2,
+            width: size,
+            height: size
+        )
+        image.draw(in: rect)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.type == .rightMouseDown {
+            showMenu()
+        } else {
+            onLeftClick?()
+        }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        showMenu()
+    }
+
+    private func showMenu() {
+        guard let contextMenu = contextMenu else { return }
+        let location = NSPoint(x: bounds.midX, y: bounds.minY)
+        contextMenu.popUp(positioning: nil, at: location, in: self)
+    }
+}
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var panel: FloatingPanel!
@@ -94,12 +131,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.image = BrandStatusIcon.makeImage()
-            button.image?.accessibilityDescription = "Cursor+"
-            button.action = #selector(togglePanel)
-            button.target = self
+
+        let image = BrandStatusIcon.makeImage()
+        image.accessibilityDescription = "Cursor+"
+
+        let menu = NSMenu()
+        let quitItem = NSMenuItem(title: "Quit Cursor+", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        let iconSize: CGFloat = 22
+        let view = StatusItemView(frame: NSRect(x: 0, y: 0, width: iconSize, height: iconSize))
+        view.image = image
+        view.contextMenu = menu
+        view.onLeftClick = { [weak self] in
+            self?.togglePanel()
         }
+        statusItem.view = view
 
         panel = FloatingPanel()
         let hostingView = NSHostingView(
@@ -119,6 +167,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             positionNearStatusItem()
             panel.makeKeyAndOrderFront(nil)
         }
+    }
+
+    @objc func quitApp() {
+        NSApp.terminate(nil)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Launch or reactivate from Dock: show the panel
+        if !panel.isVisible {
+            togglePanel()
+        }
+        return true
     }
 
     private func positionNearStatusItem() {
