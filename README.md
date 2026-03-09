@@ -1,35 +1,24 @@
 # CursorBar
 
-`CursorBar` is a native macOS menu bar app for sending prompts to the Cursor CLI agent without switching back to the editor. It opens as a floating panel, streams agent output live, and runs against the repository you choose.
+A native macOS menu bar app that lets you run the Cursor CLI agent from anywhere—without leaving your current app. Open a floating panel, type or paste a prompt, and watch responses stream live. Pick the repo and model, then keep working.
 
 <img width="681" height="908" alt="image" src="https://github.com/user-attachments/assets/a0135093-cb93-48b0-9a82-374c8047e214" />
 
+## Features
 
-## What It Does
-
-- Lives in the macOS menu bar with no Dock icon
-- Opens a polished floating panel anchored near the status item
-- Streams both agent thinking and final response output in real time
-- Supports multiple agent tabs with separate conversation history
-- Lets you choose the Cursor model for each run
-- Lets you switch workspaces/repositories from the UI
-- Accepts pasted screenshots and includes them in the next prompt
-- Handles common CLI failures like missing `agent` or missing auth
+- **Menu bar only** — No Dock icon; stays out of the way until you need it
+- **Floating panel** — Polished window anchored near the menu bar icon
+- **Live streaming** — See agent thinking and final output as it happens
+- **Multiple tabs** — Separate conversations, each with its own history
+- **Model picker** — Choose the Cursor model (Composer, Claude, GPT, Gemini) per run
+- **Workspace switching** — Point the agent at any repo from the UI; respects `.cursor/rules` and `AGENTS.md`
+- **Screenshot prompts** — Attach or paste images; they’re included in the next prompt automatically
 
 ## Requirements
 
-1. `macOS 14+`
-2. `Xcode` for building and running the app
-3. `Cursor CLI`, installed and authenticated
-
-Install and authenticate the CLI:
-
-```bash
-curl https://cursor.com/install -fsSL | bash
-agent login
-```
-
-The app looks for `agent` in common install locations such as `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, and your `PATH`.
+- **macOS 14+**
+- **Xcode** (to build and run)
+- **Cursor CLI** — [install](https://cursor.com/install) then run `agent login` to authenticate
 
 ## Build And Run
 
@@ -84,19 +73,7 @@ The panel includes a model picker for supported Cursor models, including:
 
 ### Screenshots
 
-You can attach a screenshot from the clipboard in either of these ways:
-
-- Click `Attach`
-- Paste an image directly into the prompt editor
-- Press `Cmd+Shift+V`
-
-When attached, the image is written to:
-
-```text
-.cursor/pasted-screenshot.png
-```
-
-The app automatically appends a reference to that file in the next prompt so the agent can use it.
+Attach a screenshot from the clipboard by clicking **Attach**, pasting into the prompt area, or pressing **⌘⇧V**. The image is saved in the workspace and automatically referenced in your next prompt so the agent can see it.
 
 ### Tabs And History
 
@@ -106,38 +83,8 @@ The app automatically appends a reference to that file in the next prompt so the
 
 ## How It Works
 
-`CursorBar` shells out to Cursor CLI using non-interactive prompt mode and requests JSON streaming output so the UI can update live as the agent responds.
+The app runs the Cursor CLI in non-interactive mode with streaming output, so you see responses as they’re generated. It uses your chosen workspace and model for each run.
 
-At a high level it runs the equivalent of:
+---
 
-```bash
-agent -f -p "<prompt>" --workspace "<repo>" --output-format stream-json --stream-partial-output
-```
-
-If a model is selected, the app also passes `--model <model>`.
-
-## Troubleshooting
-
-### `Cursor CLI not found`
-
-Install the CLI and make sure `agent` is available in one of the standard locations or on your `PATH`.
-
-### `Not authenticated`
-
-Run:
-
-```bash
-agent login
-```
-
-### Agent exits with an error
-
-The app surfaces stderr from the CLI in the panel so you can see the failure directly.
-
-## Project Structure
-
-- `CursorMenuBar/CursorMenuBarApp.swift` - app entry point, status item, floating panel, shared app state
-- `CursorMenuBar/PopoutView.swift` - main UI, tabs, prompt composer, screenshot attachment, streaming transcript rendering
-- `CursorMenuBar/AgentRunner.swift` - launches `agent`, parses stream JSON events, converts them into UI updates
-- `CursorMenuBar/SettingsView.swift` - workspace picker and repository configuration
-- `CursorMenuBar/Info.plist` - app metadata, including `LSUIElement` so it stays out of the Dock
+**Setup:** Ensure the [Cursor CLI](https://cursor.com/install) is installed and you’ve run `agent login`. The app looks for `agent` in `~/.local/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, or your `PATH`. If something goes wrong, the panel shows CLI output so you can debug from there.
