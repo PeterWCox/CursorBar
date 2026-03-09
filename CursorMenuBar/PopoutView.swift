@@ -88,7 +88,7 @@ struct SubmittableTextEditor: NSViewRepresentable {
         if textView.string != text {
             textView.string = text
         }
-        textView.isEditable = !isDisabled
+        textView.isEditable = true
         (textView as? PasteAwareTextView)?.onPasteImage = onPasteImage
     }
 
@@ -129,7 +129,7 @@ struct SubmittableTextEditor: NSViewRepresentable {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if NSEvent.modifierFlags.contains(.shift) {
                     textView.insertNewlineIgnoringFieldEditor(nil)
-                } else {
+                } else if !parent.isDisabled {
                     parent.onSubmit()
                 }
                 return true
@@ -507,7 +507,7 @@ struct PopoutView: View {
             composerDock
         }
         .padding(16)
-        .frame(minWidth: 360, minHeight: 400, maxWidth: .infinity, maxHeight: .infinity)
+        .frame(minWidth: 360, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
         .background(CursorTheme.panelGradient)
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay(
@@ -943,6 +943,10 @@ struct PopoutView: View {
         }
     }
 
+    private func assistantAttributedText(_ raw: String) -> AttributedString {
+        (try? AttributedString(markdown: raw, options: .init(interpretedSyntax: .full))) ?? AttributedString(raw)
+    }
+
     @ViewBuilder
     private func conversationSegmentView(_ segment: ConversationSegment) -> some View {
         switch segment.kind {
@@ -972,7 +976,7 @@ struct PopoutView: View {
                     .stroke(CursorTheme.border, lineWidth: 1)
             )
         case .assistant:
-            Text(segment.text)
+            Text(assistantAttributedText(segment.text))
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(CursorTheme.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
