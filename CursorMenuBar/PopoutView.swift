@@ -221,6 +221,8 @@ class AgentTab: ObservableObject, Identifiable {
     var streamTask: Task<Void, Never>?
     var activeRunID: UUID?
     var activeTurnID: UUID?
+    /// Cursor CLI chat ID for this tab; set after first message so follow-ups use the same conversation.
+    var cursorChatId: String?
 
     init(title: String = "Agent") {
         self.id = UUID()
@@ -1397,7 +1399,12 @@ struct PopoutView: View {
         
         let task = Task {
             do {
-                let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: workspacePath, model: selectedModel)
+                if currentTab.cursorChatId == nil {
+                    let chatId = try AgentRunner.createChat()
+                    guard currentTab.activeRunID == runID else { return }
+                    currentTab.cursorChatId = chatId
+                }
+                let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: workspacePath, model: selectedModel, conversationId: currentTab.cursorChatId)
                 guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID else { return }
                 for try await chunk in stream {
                     guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID, !Task.isCancelled else { return }

@@ -162,7 +162,40 @@ enum AgentRunnerError: Error {
 
 @MainActor
 final class AgentRunner {
-    static func stream(prompt: String, workspacePath: String, model: String? = nil) throws -> AsyncThrowingStream<AgentStreamChunk, Error> {
+    /// Creates a new Cursor CLI chat and returns its ID. Use this before the first message in a tab so follow-ups can use `--resume`.
+    static func createChat() throws -> String {
+        guard let agentPath = findAgentPath() else {
+            throw AgentRunnerError.agentNotFound
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: agentPath)
+        process.arguments = ["create-chat"]
+        let env = ProcessInfo.processInfo.environment
+        var fullEnv = env
+        if let path = env["PATH"], !path.contains(".local/bin") {
+            let home = env["HOME"] ?? NSHomeDirectory()
+            fullEnv["PATH"] = "\(home)/.local/bin:\(path)"
+        }
+        process.environment = fullEnv
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AgentRunnerError.processFailed(exitCode: process.terminationStatus, stderr: "")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let id = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .newlines)
+        guard let id = id, !id.isEmpty else {
+            throw AgentRunnerError.processFailed(exitCode: -1, stderr: "create-chat did not return a chat ID")
+        }
+        return id
+    }
+
+    static func stream(prompt: String, workspacePath: String, model: String? = nil, conversationId: String? = nil) throws -> AsyncThrowingStream<AgentStreamChunk, Error> {
         guard let agentPath = findAgentPath() else {
             throw AgentRunnerError.agentNotFound
         }
@@ -176,6 +209,9 @@ final class AgentRunner {
             "--output-format", "stream-json",
             "--stream-partial-output"
         ]
+        if let conversationId, !conversationId.isEmpty {
+            args += ["--resume", conversationId]
+        }
         if let model, !model.isEmpty {
             args += ["--model", model]
         }
