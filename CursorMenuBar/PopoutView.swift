@@ -730,7 +730,7 @@ struct PopoutView: View {
                 )
 
                 if tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text("Plan, @ for context, / for commands")
+                    Text("Send message and/or ⌘V to paste one or more screenshots from clipboard")
                         .font(.system(size: 13, weight: .regular, design: .monospaced))
                         .foregroundStyle(CursorTheme.textTertiary)
                         .padding(.leading, 16)
@@ -818,44 +818,12 @@ struct PopoutView: View {
                 Spacer()
 
                 Button {
-                    pasteScreenshot()
-                } label: {
-                    let count = screenshotPaths(from: tab.prompt).count
-                    HStack(spacing: 6) {
-                        Image(systemName: count > 0 ? "photo.fill" : "paperclip")
-                        Text(count > 0 ? "\(count) attached" : "Attach")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(count > 0 ? CursorTheme.textPrimary : CursorTheme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        count > 0
-                            ? CursorTheme.brandAmber.opacity(0.20)
-                            : CursorTheme.surfaceMuted,
-                        in: Capsule()
-                    )
-                    .overlay(
-                        Capsule()
-                            .stroke(
-                                count > 0
-                                    ? CursorTheme.brandAmber.opacity(0.40)
-                                    : CursorTheme.border,
-                                lineWidth: 1
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-                .keyboardShortcut("v", modifiers: [.command, .shift])
-                .disabled(screenshotPaths(from: tab.prompt).count >= maxScreenshots)
-
-                Button {
                     clearContext()
                 } label: {
                     let hasContext = !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     HStack(spacing: 6) {
                         Image(systemName: "trash")
-                        Text("Clear context")
+                        Text("Summarize")
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(hasContext ? CursorTheme.textPrimary : CursorTheme.textSecondary)
