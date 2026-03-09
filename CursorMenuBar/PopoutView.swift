@@ -115,7 +115,7 @@ struct PopoutView: View {
     private var quickActionButtons: some View {
         HStack(spacing: 8) {
             Button {
-                openNewTabAndSend(prompt: QuickActionPrompts.fixBuild)
+                sendInCurrentTab(prompt: QuickActionPrompts.fixBuild)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "wrench.and.screwdriver")
@@ -132,7 +132,7 @@ struct PopoutView: View {
             .disabled(tab.isRunning)
 
             Button {
-                openNewTabAndSend(prompt: QuickActionPrompts.commitAndPush)
+                sendInCurrentTab(prompt: QuickActionPrompts.commitAndPush)
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up.circle")
@@ -622,8 +622,9 @@ struct PopoutView: View {
         }
     }
 
-    private func openNewTabAndSend(prompt: String) {
-        tabManager.addTab(initialPrompt: prompt)
+    private func sendInCurrentTab(prompt: String) {
+        guard !tab.isRunning else { return }
+        tab.prompt = prompt
         sendPrompt()
     }
 
