@@ -8,10 +8,8 @@ XXX. Multiple agent / history
 XXX. Multiple screenshots
 XXX. Seperate thinking blocks
 XXX. Keyboard shortcut
+XXX. Agent forgets context
 6. Support live reload 
-
-
-XXX. Tool calls
-2. Agent forgets context
-4. Live reload
 5. Allow queueing of messages
+6. Show full message absolute positioned in chat above 
+7. Show as green when done 

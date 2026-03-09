@@ -12,6 +12,15 @@
 		A1000003 /* AgentRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000003 /* AgentRunner.swift */; };
 		A1000004 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* SettingsView.swift */; };
 		A1000005 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000005 /* Assets.xcassets */; };
+		A1000006 /* ConversationModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000006 /* ConversationModels.swift */; };
+		A1000007 /* CursorTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000007 /* CursorTheme.swift */; };
+		A1000008 /* WorkspaceHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000008 /* WorkspaceHelpers.swift */; };
+		A1000009 /* AgentTabState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000009 /* AgentTabState.swift */; };
+		A1000010 /* SubmittableTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* SubmittableTextEditor.swift */; };
+		A1000011 /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* BrandMark.swift */; };
+		A1000012 /* TabChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* TabChip.swift */; };
+		A1000013 /* OutputScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013 /* OutputScrollView.swift */; };
+		A1000014 /* ConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* ConversationViews.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +30,15 @@
 		A2000003 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
 		A2000004 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		A2000005 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A2000006 /* ConversationModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModels.swift; sourceTree = "<group>"; };
+		A2000007 /* CursorTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorTheme.swift; sourceTree = "<group>"; };
+		A2000008 /* WorkspaceHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceHelpers.swift; sourceTree = "<group>"; };
+		A2000009 /* AgentTabState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTabState.swift; sourceTree = "<group>"; };
+		A2000010 /* SubmittableTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmittableTextEditor.swift; sourceTree = "<group>"; };
+		A2000011 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
+		A2000012 /* TabChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabChip.swift; sourceTree = "<group>"; };
+		A2000013 /* OutputScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputScrollView.swift; sourceTree = "<group>"; };
+		A2000014 /* ConversationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +67,15 @@
 				A2000002 /* PopoutView.swift */,
 				A2000003 /* AgentRunner.swift */,
 				A2000004 /* SettingsView.swift */,
+				A2000006 /* ConversationModels.swift */,
+				A2000007 /* CursorTheme.swift */,
+				A2000008 /* WorkspaceHelpers.swift */,
+				A2000009 /* AgentTabState.swift */,
+				A2000010 /* SubmittableTextEditor.swift */,
+				A2000011 /* BrandMark.swift */,
+				A2000012 /* TabChip.swift */,
+				A2000013 /* OutputScrollView.swift */,
+				A2000014 /* ConversationViews.swift */,
 				A2000005 /* Assets.xcassets */,
 			);
 			path = CursorMenuBar;
@@ -130,6 +157,15 @@
 				A1000002 /* PopoutView.swift in Sources */,
 				A1000003 /* AgentRunner.swift in Sources */,
 				A1000004 /* SettingsView.swift in Sources */,
+				A1000006 /* ConversationModels.swift in Sources */,
+				A1000007 /* CursorTheme.swift in Sources */,
+				A1000008 /* WorkspaceHelpers.swift in Sources */,
+				A1000009 /* AgentTabState.swift in Sources */,
+				A1000010 /* SubmittableTextEditor.swift in Sources */,
+				A1000011 /* BrandMark.swift in Sources */,
+				A1000012 /* TabChip.swift in Sources */,
+				A1000013 /* OutputScrollView.swift in Sources */,
+				A1000014 /* ConversationViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

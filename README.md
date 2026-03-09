@@ -81,6 +81,12 @@ Attach a screenshot from the clipboard by clicking **Attach**, pasting into the 
 - Each tab keeps its own prompt/response history
 - Closing a tab stops any active stream in that tab first
 
+## Limitations
+
+- **No plan mode** — Plan mode is not supported.
+- **Agent output formatting** — Formatting of agent output in the panel can be buggy.
+- **No follow-ups while streaming** — Follow-up prompts are not supported while the agent is still speaking; wait for the response to finish before sending another.
+
 ## How It Works
 
 The app runs the Cursor CLI in non-interactive mode with streaming output, so you see responses as they’re generated. It uses your chosen workspace and model for each run.

@@ -1,0 +1,141 @@
+import SwiftUI
+import AppKit
+
+// MARK: - Paste-aware text editor for composer
+
+final class PasteAwareTextView: NSTextView {
+    var onPasteImage: (() -> Void)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isCommandV = modifiers.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
+
+        if isCommandV {
+            let pasteboard = NSPasteboard.general
+            if onPasteImage != nil, SubmittableTextEditor.imageFromPasteboard(pasteboard) != nil {
+                onPasteImage?()
+                return true
+            }
+            if let string = pasteboard.string(forType: .string), !string.isEmpty {
+                insertText(string, replacementRange: selectedRange())
+                return true
+            }
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func paste(_ sender: Any?) {
+        if onPasteImage != nil, SubmittableTextEditor.imageFromPasteboard(.general) != nil {
+            onPasteImage?()
+            return
+        }
+        super.paste(sender)
+    }
+
+    override func pasteAsPlainText(_ sender: Any?) {
+        if onPasteImage != nil, SubmittableTextEditor.imageFromPasteboard(.general) != nil {
+            onPasteImage?()
+            return
+        }
+        super.pasteAsPlainText(sender)
+    }
+
+    override func pasteAsRichText(_ sender: Any?) {
+        if onPasteImage != nil, SubmittableTextEditor.imageFromPasteboard(.general) != nil {
+            onPasteImage?()
+            return
+        }
+        super.pasteAsRichText(sender)
+    }
+}
+
+struct SubmittableTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    var isDisabled: Bool
+    var onSubmit: () -> Void
+    var onPasteImage: (() -> Void)?
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        let textView = PasteAwareTextView()
+        textView.delegate = context.coordinator
+        textView.onPasteImage = onPasteImage
+        textView.isRichText = false
+        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.backgroundColor = .clear
+        textView.textColor = NSColor.white.withAlphaComponent(0.92)
+        textView.insertionPointColor = NSColor.white.withAlphaComponent(0.9)
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.textContainerInset = NSSize(width: 4, height: 4)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = false
+        scrollView.drawsBackground = false
+        context.coordinator.textView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        context.coordinator.parent = self
+        if textView.string != text {
+            textView.string = text
+        }
+        textView.isEditable = true
+        (textView as? PasteAwareTextView)?.onPasteImage = onPasteImage
+    }
+
+    /// Extracts an image from the pasteboard using multiple methods (NSImage, file URL, raw PNG/TIFF).
+    static func imageFromPasteboard(_ pasteboard: NSPasteboard) -> NSImage? {
+        if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil),
+           let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let image = images.first {
+            return image
+        }
+        if pasteboard.canReadObject(forClasses: [NSURL.self], options: nil),
+           let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+           let url = urls.first,
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
+        for type in imageTypes {
+            if let data = pasteboard.data(forType: type), let image = NSImage(data: data) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: SubmittableTextEditor
+        weak var textView: NSTextView?
+
+        init(_ parent: SubmittableTextEditor) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = textView else { return }
+            parent.text = tv.string
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if NSEvent.modifierFlags.contains(.shift) {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                } else if !parent.isDisabled {
+                    parent.onSubmit()
+                }
+                return true
+            }
+            return false
+        }
+    }
+}
