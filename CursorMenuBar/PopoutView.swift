@@ -509,6 +509,57 @@ private func loadDevFolders() -> [URL] {
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 }
 
+/// Returns (current branch name, sorted list of local branch names) for the workspace. Empty if not a git repo.
+private func loadGitBranches(workspacePath: String) -> (current: String, branches: [String]) {
+    let url = URL(fileURLWithPath: workspacePath)
+    guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return ("", []) }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["for-each-ref", "--format=%(refname:short)", "refs/heads/"]
+    process.currentDirectoryURL = url
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    guard (try? process.run()) != nil else { return ("", []) }
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { return ("", []) }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let list = (String(data: data, encoding: .utf8) ?? "")
+        .split(separator: "\n")
+        .map(String.init)
+        .filter { !$0.isEmpty }
+        .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    let currentProcess = Process()
+    currentProcess.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    currentProcess.arguments = ["rev-parse", "--abbrev-ref", "HEAD"]
+    currentProcess.currentDirectoryURL = url
+    let currentPipe = Pipe()
+    currentProcess.standardOutput = currentPipe
+    currentProcess.standardError = FileHandle.nullDevice
+    guard (try? currentProcess.run()) != nil else { return (list.first ?? "", list) }
+    currentProcess.waitUntilExit()
+    let currentData = currentPipe.fileHandleForReading.readDataToEndOfFile()
+    let current = (String(data: currentData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    return (current.isEmpty ? (list.first ?? "") : current, list)
+}
+
+/// Run `git checkout <branch>` in the workspace. Returns nil on success, error message otherwise.
+private func gitCheckout(branch: String, workspacePath: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["checkout", branch]
+    process.currentDirectoryURL = URL(fileURLWithPath: workspacePath)
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    let errPipe = Pipe()
+    process.standardError = errPipe
+    guard (try? process.run()) != nil else { return "Failed to run git" }
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return nil }
+    let err = (try? String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)) ?? "Unknown error"
+    return err.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// Included API requests per month (Cursor Pro typical). Used to compute usage %.
 private let includedAPIQuota = 500
 
@@ -528,6 +579,8 @@ struct PopoutView: View {
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @StateObject private var tabManager = TabManager()
     @State private var devFolders: [URL] = []
+    @State private var gitBranches: [String] = []
+    @State private var currentBranch: String = ""
     
     private var tab: AgentTab { tabManager.activeTab }
     
@@ -812,6 +865,60 @@ struct PopoutView: View {
                 .menuStyle(.borderlessButton)
                 .foregroundColor(.white)
                 .colorScheme(.dark)
+
+                Menu {
+                    ForEach(gitBranches, id: \.self) { branch in
+                        Button {
+                            if branch != currentBranch {
+                                if let err = gitCheckout(branch: branch, workspacePath: workspacePath) {
+                                    tab.errorMessage = err
+                                } else {
+                                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                                    currentBranch = cur
+                                    gitBranches = list
+                                    tab.errorMessage = nil
+                                }
+                            }
+                        } label: {
+                            if branch == currentBranch {
+                                Label(branch, systemImage: "checkmark")
+                            } else {
+                                Text(branch)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.branch")
+                        Text(currentBranch.isEmpty ? "No branch" : currentBranch)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(CursorTheme.border, lineWidth: 1)
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .foregroundColor(.white)
+                .colorScheme(.dark)
+                .disabled(gitBranches.isEmpty)
+                .onAppear {
+                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                    currentBranch = cur
+                    gitBranches = list
+                }
+                .onChange(of: workspacePath) { _, _ in
+                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                    currentBranch = cur
+                    gitBranches = list
+                }
             }
 
             HStack(spacing: 10) {
