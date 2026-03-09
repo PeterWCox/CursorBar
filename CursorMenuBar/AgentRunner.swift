@@ -6,6 +6,17 @@ private struct StreamEvent: Decodable {
     let subtype: String?
     let text: String?
     let message: StreamMessage?
+    let callID: String?
+    let toolCall: StreamToolCallPayload?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case subtype
+        case text
+        case message
+        case callID = "call_id"
+        case toolCall = "tool_call"
+    }
 }
 
 private struct StreamMessage: Decodable {
@@ -17,10 +28,112 @@ private struct StreamContent: Decodable {
     let text: String?
 }
 
+private struct StreamToolCallPayload: Decodable {
+    let toolName: String
+    let description: String?
+    let args: StreamToolCallArgs?
+    let result: StreamToolCallResult?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        guard let key = container.allKeys.first,
+              let invocation = try container.decodeIfPresent(StreamToolInvocation.self, forKey: key) else {
+            toolName = "Tool"
+            description = nil
+            args = nil
+            result = nil
+            return
+        }
+
+        toolName = Self.displayName(for: key.stringValue)
+        description = invocation.description
+        args = invocation.args
+        result = invocation.result
+    }
+
+    private static func displayName(for rawName: String) -> String {
+        let trimmed = rawName.replacingOccurrences(of: "ToolCall", with: "")
+        let separated = trimmed.replacingOccurrences(
+            of: "([a-z0-9])([A-Z])",
+            with: "$1 $2",
+            options: .regularExpression
+        )
+        return separated
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+}
+
+private struct StreamToolInvocation: Decodable {
+    let description: String?
+    let args: StreamToolCallArgs?
+    let result: StreamToolCallResult?
+}
+
+private struct StreamToolCallArgs: Decodable {
+    let command: String?
+    let path: String?
+    let globPattern: String?
+    let pattern: String?
+    let query: String?
+    let url: String?
+    let workingDirectory: String?
+    let description: String?
+}
+
+private struct StreamToolCallResult: Decodable {
+    let success: StreamToolCallSuccess?
+    let failure: StreamToolCallFailure?
+    let error: StreamToolCallFailure?
+}
+
+private struct StreamToolCallSuccess: Decodable {
+    let exitCode: Int?
+    let executionTime: Int?
+    let localExecutionTimeMs: Int?
+    let durationMs: Int?
+}
+
+private struct StreamToolCallFailure: Decodable {
+    let exitCode: Int?
+    let stderr: String?
+    let message: String?
+}
+
+private struct DynamicCodingKey: CodingKey {
+    let stringValue: String
+    let intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+        intValue = nil
+    }
+
+    init?(intValue: Int) {
+        self.stringValue = String(intValue)
+        self.intValue = intValue
+    }
+}
+
 enum AgentStreamChunk {
     case thinkingDelta(String)
     case thinkingCompleted
     case assistantText(String)
+    case toolCall(AgentToolCallUpdate)
+}
+
+enum AgentToolCallStatus {
+    case started
+    case completed
+    case failed
+}
+
+struct AgentToolCallUpdate {
+    let callID: String
+    let title: String
+    let detail: String
+    let status: AgentToolCallStatus
 }
 
 enum AgentRunnerError: Error {
@@ -133,6 +246,11 @@ final class AgentRunner {
                                 continue
                             }
 
+                            if let toolCallUpdate = toolCallUpdate(from: event) {
+                                continuation.yield(.toolCall(toolCallUpdate))
+                                continue
+                            }
+
                             if event.type == "assistant", let message = event.message, let content = message.content {
                                 for item in content {
                                     if item.type == "text", let text = item.text, !text.isEmpty {
@@ -185,5 +303,117 @@ final class AgentRunner {
         }
         
         return nil
+    }
+
+    nonisolated private static func toolCallUpdate(from event: StreamEvent) -> AgentToolCallUpdate? {
+        guard event.type == "tool_call",
+              let subtype = event.subtype,
+              let callID = event.callID,
+              let toolCall = event.toolCall else {
+            return nil
+        }
+
+        let title = nonEmpty(toolCall.description) ?? toolCall.toolName
+        let baseDetail = toolCallBaseDetail(for: toolCall)
+
+        switch subtype {
+        case "started":
+            return AgentToolCallUpdate(
+                callID: callID,
+                title: title,
+                detail: baseDetail,
+                status: .started
+            )
+        case "completed":
+            return AgentToolCallUpdate(
+                callID: callID,
+                title: title,
+                detail: toolCallCompletionDetail(base: baseDetail, result: toolCall.result),
+                status: toolCallStatus(for: toolCall.result)
+            )
+        default:
+            return nil
+        }
+    }
+
+    nonisolated private static func toolCallBaseDetail(for toolCall: StreamToolCallPayload) -> String {
+        guard let args = toolCall.args else { return "" }
+
+        let candidates = [
+            nonEmpty(singleLine(args.command)),
+            nonEmpty(args.path),
+            nonEmpty(args.globPattern),
+            nonEmpty(singleLine(args.pattern)),
+            nonEmpty(singleLine(args.query)),
+            nonEmpty(singleLine(args.url)),
+            nonEmpty(args.workingDirectory),
+            nonEmpty(singleLine(args.description))
+        ]
+
+        return candidates.compactMap { $0 }.first ?? ""
+    }
+
+    nonisolated private static func toolCallCompletionDetail(base: String, result: StreamToolCallResult?) -> String {
+        var parts: [String] = []
+        if let detail = nonEmpty(base) {
+            parts.append(detail)
+        }
+
+        if let failure = result?.failure ?? result?.error {
+            if let exitCode = failure.exitCode {
+                parts.append("exit \(exitCode)")
+            }
+            if let message = nonEmpty(singleLine(failure.message ?? failure.stderr)) {
+                parts.append(message)
+            }
+            return parts.joined(separator: " | ")
+        }
+
+        if let success = result?.success {
+            if let exitCode = success.exitCode, exitCode != 0 {
+                parts.append("exit \(exitCode)")
+            }
+            if let duration = toolCallDuration(from: success) {
+                parts.append(duration)
+            }
+        }
+
+        return parts.joined(separator: " | ")
+    }
+
+    nonisolated private static func toolCallStatus(for result: StreamToolCallResult?) -> AgentToolCallStatus {
+        if result?.failure != nil || result?.error != nil {
+            return .failed
+        }
+
+        if let exitCode = result?.success?.exitCode, exitCode != 0 {
+            return .failed
+        }
+
+        return .completed
+    }
+
+    nonisolated private static func toolCallDuration(from success: StreamToolCallSuccess) -> String? {
+        let durationMs = success.localExecutionTimeMs ?? success.executionTime ?? success.durationMs
+        guard let durationMs else { return nil }
+
+        if durationMs >= 1000 {
+            return String(format: "%.1fs", Double(durationMs) / 1000)
+        }
+
+        return "\(durationMs)ms"
+    }
+
+    nonisolated private static func singleLine(_ text: String?) -> String? {
+        text?
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    nonisolated private static func nonEmpty(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return nil
+        }
+        return text
     }
 }

@@ -1,8 +1,42 @@
 import SwiftUI
 import AppKit
 
+enum CursorAppIcon {
+    private static let cursorAppPaths = [
+        "/Applications/Cursor.app",
+        FileManager.default.homeDirectoryForCurrentUser.path + "/Applications/Cursor.app",
+    ]
+
+    static func load() -> NSImage? {
+        for path in cursorAppPaths where FileManager.default.fileExists(atPath: path) {
+            let icnsPath = (path as NSString).appendingPathComponent("Contents/Resources/Cursor.icns")
+            if let image = NSImage(contentsOfFile: icnsPath) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    static func makeStatusBarImage(size: CGFloat = 18) -> NSImage {
+        if let cursorIcon = load() {
+            let img = NSImage(size: NSSize(width: size, height: size))
+            img.lockFocus()
+            NSGraphicsContext.current?.imageInterpolation = .high
+            cursorIcon.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
+            img.unlockFocus()
+            img.isTemplate = false
+            return img
+        }
+        return BrandStatusIcon.makeFallbackImage()
+    }
+}
+
 enum BrandStatusIcon {
     static func makeImage() -> NSImage {
+        CursorAppIcon.makeStatusBarImage()
+    }
+
+    static func makeFallbackImage() -> NSImage {
         let size = NSSize(width: 18, height: 18)
         let image = NSImage(size: size, flipped: false) { rect in
             let ringRect = rect.insetBy(dx: 3.5, dy: 3.5)
@@ -62,7 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = BrandStatusIcon.makeImage()
-            button.image?.accessibilityDescription = "CursorBar"
+            button.image?.accessibilityDescription = "Cursor+"
             button.action = #selector(togglePanel)
             button.target = self
         }
