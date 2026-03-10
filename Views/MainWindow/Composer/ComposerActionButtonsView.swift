@@ -1,6 +1,8 @@
 import SwiftUI
 
-// MARK: - Composer action buttons (context indicator, Summarize) — same row as pickers
+// MARK: - Composer action buttons (context indicator) — same row as pickers
+// Processing blue matches Agent tab spinner for consistency.
+private let contextWheelBlue = Color(red: 0.45, green: 0.68, blue: 1.0)
 
 struct ComposerActionButtonsView: View {
     var hasContext: Bool
@@ -8,7 +10,6 @@ struct ComposerActionButtonsView: View {
     /// Context token usage for the small progress indicator; (used, limit). Pass (0, 0) to hide.
     var contextUsed: Int = 0
     var contextLimit: Int = 0
-    var onSummarize: () -> Void
 
     private var contextFraction: Double {
         guard contextLimit > 0 else { return 0 }
@@ -22,27 +23,6 @@ struct ComposerActionButtonsView: View {
             if contextLimit > 0 {
                 contextProgressCircle
             }
-
-            Button(action: onSummarize) {
-                HStack(spacing: 6) {
-                    Image(systemName: "rectangle.compress.vertical")
-                    Text("Summarize")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.brandAmber)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    CursorTheme.brandAmber.opacity(0.18),
-                    in: Capsule()
-                )
-                .overlay(
-                    Capsule()
-                        .stroke(CursorTheme.brandAmber.opacity(0.4), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(isRunning)
         }
     }
 
@@ -52,13 +32,15 @@ struct ComposerActionButtonsView: View {
         let pct = contextLimit > 0 ? Int(round(contextFraction * 100)) : 0
         let tooltip = "~\(usedK)k / \(limitK)k tokens (\(pct)% used)"
         return ZStack {
+            // Track: obvious outline
             Circle()
-                .stroke(CursorTheme.surfaceMuted, lineWidth: 2.5)
+                .stroke(CursorTheme.borderStrong, lineWidth: 3)
+            // Filled arc: same blue as Agent tab processing
             Circle()
                 .trim(from: 0, to: contextFraction)
                 .stroke(
-                    contextFraction > 0.85 ? CursorTheme.brandAmber : CursorTheme.brandBlue,
-                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                    contextWheelBlue,
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
         }

@@ -541,8 +541,7 @@ struct PopoutView: View {
                     hasContext: !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     isRunning: tab.isRunning,
                     contextUsed: estimatedContextTokens(prompt: tab.prompt, turns: tab.turns).used,
-                    contextLimit: AppLimits.contextTokenLimit,
-                    onSummarize: compressContext
+                    contextLimit: AppLimits.contextTokenLimit
                 )
             }
         }

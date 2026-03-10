@@ -8,10 +8,10 @@ struct PinnedQuestionsStackView: View {
     let tab: AgentTab
     let onDismiss: (UUID) -> Void
 
-    /// Turns to show: not dismissed, newest first, capped.
+    /// Turns to show: not dismissed, first-at-top order (chronological), last N capped.
     private var visibleTurns: [ConversationTurn] {
         let undismissed = tab.turns.filter { !tab.dismissedPinnedTurnIDs.contains($0.id) }
-        return Array(undismissed.suffix(maxPinnedQuestions).reversed())
+        return Array(undismissed.suffix(maxPinnedQuestions))
     }
 
     var body: some View {

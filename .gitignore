@@ -1,4 +1,5 @@
 # Xcode
+CursorMenuBar.xcodeproj/
 build/
 DerivedData/
 *.xcuserstate

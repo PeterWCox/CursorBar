@@ -88,9 +88,7 @@
 			isa = PBXGroup;
 			children = (
 				A5000010 /* App */,
-				A5000011 /* MainWindow */,
-				A5000016 /* Settings */,
-				A5000017 /* QuickActions */,
+				A5000022 /* Views */,
 				A5000018 /* Models */,
 				A5000019 /* Services */,
 				A5000020 /* Theme */,
@@ -98,6 +96,15 @@
 				A2000005 /* Assets.xcassets */,
 			);
 			path = ".";
+			sourceTree = "<group>";
+		};
+		A5000022 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				A5000011 /* MainWindow */,
+				A5000016 /* Settings */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 		A5000010 /* App */ = {
@@ -116,6 +123,7 @@
 				A5000013 /* TopBar */,
 				A5000014 /* Composer */,
 				A5000015 /* Output */,
+				A5000017 /* QuickActions */,
 			);
 			path = MainWindow;
 			sourceTree = "<group>";
