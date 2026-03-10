@@ -130,49 +130,106 @@ struct ConversationSegmentView: View, Equatable {
     }
 }
 
+// MARK: - User message content (text + inline screenshots, no "[Screenshot attached: ...]" text)
+
+private struct UserMessageContentView: View {
+    let prompt: String
+    let workspacePath: String
+
+    private var displayText: String { userPromptDisplayText(from: prompt) }
+    private var paths: [String] { screenshotPaths(from: prompt) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !displayText.isEmpty {
+                Text(displayText)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            ForEach(Array(paths.enumerated()), id: \.offset) { _, path in
+                UserMessageScreenshotView(path: path, workspacePath: workspacePath)
+            }
+        }
+    }
+}
+
+private struct UserMessageScreenshotView: View {
+    let path: String
+    let workspacePath: String
+
+    private var imageURL: URL {
+        URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
+    }
+
+    var body: some View {
+        if let nsImage = NSImage(contentsOf: imageURL) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: 200, maxHeight: 200)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(CursorTheme.border, lineWidth: 1)
+                )
+        }
+    }
+}
+
 // MARK: - Turn view
 
 struct ConversationTurnView: View, Equatable {
     let turn: ConversationTurn
+    var workspacePath: String = ""
 
     private var segments: [ConversationSegment] { visibleSegments(for: turn) }
     private var hasAssistantContent: Bool { segments.contains { $0.kind == .assistant } }
 
     static func == (lhs: ConversationTurnView, rhs: ConversationTurnView) -> Bool {
-        lhs.turn == rhs.turn
+        lhs.turn == rhs.turn && lhs.workspacePath == rhs.workspacePath
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(turn.userPrompt)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .padding(.trailing, 36)
-                .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(CursorTheme.border, lineWidth: 1)
-                )
-                .overlay(alignment: .topTrailing) {
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(turn.userPrompt, forType: .string)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                            .contentShape(Rectangle())
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Copy message")
-                    .padding(6)
+            Group {
+                if !workspacePath.isEmpty {
+                    UserMessageContentView(prompt: turn.userPrompt, workspacePath: workspacePath)
+                } else {
+                    Text(turn.userPrompt)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(CursorTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .padding(.trailing, 36)
+            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(CursorTheme.border, lineWidth: 1)
+            )
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(turn.userPrompt, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                        .contentShape(Rectangle())
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Copy message")
+                .padding(6)
+            }
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(segments) { segment in

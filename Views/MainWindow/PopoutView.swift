@@ -389,7 +389,7 @@ struct PopoutView: View {
                         emptyStateContent
                     } else {
                         ForEach(tab.turns) { turn in
-                            ConversationTurnView(turn: turn)
+                            ConversationTurnView(turn: turn, workspacePath: tab.workspacePath)
                                 .id(turn.id)
                         }
                     }
