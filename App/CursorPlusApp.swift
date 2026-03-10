@@ -53,15 +53,40 @@ enum MenuBarIcon {
     }
 }
 
-// MARK: - Legacy (Dock icon is in AppIcon.appiconset; popout uses BrandMark)
+// MARK: - Legacy (Dock icon is in AppIcon.appiconset; popout uses AppIconImage)
 
 enum CursorAppIcon {
-    static func load() -> NSImage? { nil }
+    static func load() -> NSImage {
+        if let image = NSApplication.shared.applicationIconImage {
+            return image
+        }
+        if let image = NSImage(named: NSImage.applicationIconName) {
+            return image
+        }
+        return MenuBarIcon.makeImage(size: 128)
+    }
+}
+
+struct BrandAppIconView: View {
+    let size: CGFloat
+
+    var body: some View {
+        Image(nsImage: CursorAppIcon.load())
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+    }
 }
 
 enum BrandStatusIcon {
-    static func makeImage() -> NSImage {
-        MenuBarIcon.makeImage()
+    /// Menubar icon: reuses the actual application icon so dock and UI stay in sync.
+    static func makeImage(size: CGFloat = 22) -> NSImage {
+        let source = CursorAppIcon.load()
+        let target = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            source.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
+            return true
+        }
+        return target
     }
 }
 
@@ -126,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        let image = BrandStatusIcon.makeImage()
+        let image = BrandStatusIcon.makeImage(size: 22)
         image.accessibilityDescription = "Cursor+"
 
         let menu = NSMenu()

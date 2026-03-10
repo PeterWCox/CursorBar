@@ -98,13 +98,16 @@ private struct AboutPaneView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Cursor+")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textPrimary)
-                    Text("A menu bar companion for Cursor.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(CursorTheme.textSecondary)
+                HStack(alignment: .center, spacing: 12) {
+                    BrandAppIconView(size: 44)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Cursor+")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textPrimary)
+                        Text("A menu bar companion for Cursor.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                    }
                 }
 
                 Text("About this app")
