@@ -56,10 +56,11 @@ func nextScreenshotPath(currentPaths: [String]) -> String? {
     return nil
 }
 
-// MARK: - Dev folders and Git
+// MARK: - Project folders and Git
 
-func loadDevFolders() -> [URL] {
-    let url = URL(fileURLWithPath: devFolderPath)
+func loadDevFolders(rootPath: String) -> [URL] {
+    let resolvedRootPath = AppPreferences.resolvedProjectsRootPath(rootPath)
+    let url = URL(fileURLWithPath: resolvedRootPath)
     guard let contents = try? FileManager.default.contentsOfDirectory(
         at: url,
         includingPropertiesForKeys: [.isDirectoryKey],

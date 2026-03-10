@@ -15,6 +15,7 @@ struct PopoutView: View {
     @EnvironmentObject var appState: AppState
     var dismiss: () -> Void = {}
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
+    @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
@@ -31,7 +32,6 @@ struct PopoutView: View {
         min(100, (messagesSentForUsage * 100) / AppLimits.includedAPIQuota)
     }
 
-    @State private var sidebarCollapsed: Bool = false
     private let sidebarWidth: CGFloat = 200
 
     /// Tab focuses the prompt input; these are set by SubmittableTextEditor via onFocusRequested.
@@ -62,38 +62,48 @@ struct PopoutView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            tabSidebar
-
-            VStack(spacing: 12) {
-                topBar
-
-                if let error = tab.errorMessage {
-                    Text(error)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.red.opacity(0.25), lineWidth: 1)
-                        )
+        VStack(spacing: 0) {
+            topBar
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(CursorTheme.border.opacity(0.9))
+                        .frame(height: 1)
                 }
 
-            outputCard
-                .frame(maxHeight: .infinity)
-                .id(tab.id)
+            HStack(alignment: .top, spacing: 0) {
+                tabSidebar
 
-            composerDock
-            }
-            .frame(maxWidth: .infinity)
-            .overlay(alignment: .topLeading) {
-                if showPinnedQuestionsPanel {
-                    PinnedQuestionsStackView(tab: tab)
-                        .padding(.top, 8)
-                        .padding(.leading, 4)
+                VStack(spacing: 12) {
+                    if let error = tab.errorMessage {
+                        Text(error)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+
+                    outputCard
+                        .frame(maxHeight: .infinity)
+                        .id(tab.id)
+
+                    composerDock
+                }
+                .frame(maxWidth: .infinity)
+                .overlay(alignment: .topLeading) {
+                    if showPinnedQuestionsPanel {
+                        PinnedQuestionsStackView(tab: tab)
+                            .padding(.top, 8)
+                            .padding(.leading, 4)
+                    }
                 }
             }
         }
@@ -109,6 +119,7 @@ struct PopoutView: View {
         }
         .onAppear {
             sanitizeSelectedModel()
+            devFolders = loadDevFolders(rootPath: projectsRootPath)
             for t in tabManager.tabs where t.workspacePath.isEmpty {
                 t.workspacePath = workspacePath
             }
@@ -120,6 +131,9 @@ struct PopoutView: View {
         }
         .onChange(of: workspacePath) { _, _ in
             quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath)
+        }
+        .onChange(of: projectsRootPath) { _, _ in
+            devFolders = loadDevFolders(rootPath: projectsRootPath)
         }
         .onChange(of: selectedModel) { _, _ in
             sanitizeSelectedModel()
@@ -134,8 +148,8 @@ struct PopoutView: View {
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .shadow(color: Color.black.opacity(0.36), radius: 28, y: 16)
         .sheet(isPresented: Binding(
-            get: { appState.showKeyboardShortcutsSheet },
-            set: { appState.showKeyboardShortcutsSheet = $0 }
+            get: { appState.showSettingsSheet },
+            set: { appState.showSettingsSheet = $0 }
         )) {
             SettingsModalView()
         }
@@ -165,13 +179,6 @@ struct PopoutView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
-                Button("Toggle Sidebar") {
-                    sidebarCollapsed.toggle()
-                }
-                .keyboardShortcut("s", modifiers: .command)
-                .opacity(0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
                 Button("Stop Agent") {
                     if tab.isRunning {
                         stopStreaming()
@@ -184,43 +191,27 @@ struct PopoutView: View {
         )
     }
 
-    // MARK: - Top bar & tab bar
+    // MARK: - Unified header
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            BrandAppIconView(size: 22)
+        HStack(spacing: 14) {
+            HStack(spacing: 12) {
+                BrandAppIconView(size: 30)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Cursor+")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary)
-
-                HStack(spacing: 6) {
-                    Group {
-                        if tab.isRunning {
-                            Circle()
-                                .fill(CursorTheme.brandBlue)
-                                .frame(width: 6, height: 6)
-                        } else if tab.turns.last?.displayState == .stopped {
-                            Rectangle()
-                                .fill(Color.red)
-                                .frame(width: 6, height: 6)
-                        } else {
-                            Circle()
-                                .fill(CursorTheme.textTertiary)
-                                .frame(width: 6, height: 6)
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Cursor+")
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textPrimary)
 
                     Text(tab.isRunning ? "Streaming response" : (tab.turns.last?.displayState == .stopped ? "Stopped" : "Ready"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                    }
                 }
-            }
 
             Spacer()
 
-            Button(action: { appState.showKeyboardShortcutsSheet = true }) {
+            Button(action: { appState.showSettingsSheet = true }) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(CursorTheme.textSecondary)
@@ -228,7 +219,7 @@ struct PopoutView: View {
                     .background(CursorTheme.surfaceMuted, in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Keyboard shortcuts")
+            .help("Settings")
 
             Button(action: dismiss) {
                 Image(systemName: "xmark")
@@ -239,112 +230,88 @@ struct PopoutView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(.horizontal, 4)
     }
 
     private static let sidebarContentPadding: CGFloat = 10
 
     private var tabSidebar: some View {
         VStack(spacing: 6) {
-            VStack(spacing: 6) {
-                HStack(spacing: 4) {
-                    if !sidebarCollapsed {
-                        Text("Tabs")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(CursorTheme.textTertiary)
-                        Spacer(minLength: 0)
-                    }
-                    Button(action: { sidebarCollapsed.toggle() }) {
-                        Image(systemName: sidebarCollapsed ? "chevron.right" : "chevron.left")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                            .frame(width: sidebarCollapsed ? 28 : 24, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, sidebarCollapsed ? 6 : 0)
-                .frame(height: 28)
-
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(tabGroups, id: \.path) { group in
-                            VStack(alignment: .leading, spacing: 6) {
-                                if !sidebarCollapsed {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack(spacing: 4) {
-                                            if !group.path.isEmpty {
-                                                ProjectIconView(path: group.path)
-                                                    .frame(width: 10, height: 10)
-                                            }
-                                            Text(group.displayName)
-                                                .font(.system(size: 10, weight: .semibold))
-                                                .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
-                                                .lineLimit(1)
-                                                .truncationMode(.middle)
-                                        }
-                                        let groupBranch = group.path == tab.workspacePath ? currentBranch : (group.tabs.first?.currentBranch ?? "")
-                                        if !groupBranch.isEmpty {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "arrow.triangle.branch")
-                                                    .font(.system(size: 8, weight: .medium))
-                                                Text(groupBranch)
-                                                    .font(.system(size: 9, weight: .regular))
-                                                    .italic()
-                                            }
-                                            .foregroundStyle(CursorTheme.textTertiary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                        }
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(tabGroups, id: \.path) { group in
+                        VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    if !group.path.isEmpty {
+                                        ProjectIconView(path: group.path)
+                                            .frame(width: 10, height: 10)
                                     }
+                                    Text(group.displayName)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
                                 }
-                                ForEach(group.tabs) { t in
-                                    let isSelected = t.id == tabManager.selectedTabID
-                                    TabChip(
-                                        title: t.title,
-                                        subtitle: nil,
-                                        workspacePath: nil,
-                                        branchName: nil,
-                                        isSelected: isSelected,
-                                        isRunning: t.isRunning,
-                                        latestTurnState: t.turns.last?.displayState,
-                                        hasPrompted: !t.turns.isEmpty,
-                                        showClose: tabManager.tabs.count > 1 && !sidebarCollapsed,
-                                        compact: sidebarCollapsed,
-                                        onSelect: { tabManager.selectedTabID = t.id },
-                                        onClose: {
-                                            stopStreaming(for: t)
-                                            tabManager.closeTab(t.id)
-                                        }
-                                    )
-                                    .frame(maxWidth: sidebarCollapsed ? 36 : .infinity, alignment: .leading)
+                                let groupBranch = group.path == tab.workspacePath ? currentBranch : (group.tabs.first?.currentBranch ?? "")
+                                if !groupBranch.isEmpty {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "arrow.triangle.branch")
+                                            .font(.system(size: 8, weight: .medium))
+                                        Text(groupBranch)
+                                            .font(.system(size: 9, weight: .regular))
+                                            .italic()
+                                    }
+                                    .foregroundStyle(CursorTheme.textTertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
                                 }
+                            }
+                            ForEach(group.tabs) { t in
+                                let isSelected = t.id == tabManager.selectedTabID
+                                TabChip(
+                                    title: t.title,
+                                    subtitle: nil,
+                                    workspacePath: nil,
+                                    branchName: nil,
+                                    isSelected: isSelected,
+                                    isRunning: t.isRunning,
+                                    latestTurnState: t.turns.last?.displayState,
+                                    hasPrompted: !t.turns.isEmpty,
+                                    showClose: tabManager.tabs.count > 1,
+                                    compact: false,
+                                    onSelect: { tabManager.selectedTabID = t.id },
+                                    onClose: {
+                                        stopStreaming(for: t)
+                                        tabManager.closeTab(t.id)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
-                    .padding(.vertical, 4)
                 }
-                .frame(maxHeight: .infinity)
-
-                Button(action: { tabManager.addTab(lastWorkspacePath: tab.workspacePath) }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textSecondary)
-                        .frame(width: sidebarCollapsed ? 28 : 32, height: sidebarCollapsed ? 28 : 32)
-                        .frame(maxWidth: .infinity)
-                        .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(CursorTheme.border, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 10)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, sidebarCollapsed ? 6 : Self.sidebarContentPadding)
+            .frame(maxHeight: .infinity)
+
+            Button(action: { tabManager.addTab(lastWorkspacePath: tab.workspacePath) }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textSecondary)
+                    .frame(width: 32, height: 32)
+                    .frame(maxWidth: .infinity)
+                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(CursorTheme.border, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 10)
         }
-        .frame(width: sidebarCollapsed ? 44 : sidebarWidth)
-        .padding(.trailing, sidebarCollapsed ? 12 : 0)
+        .padding(.horizontal, Self.sidebarContentPadding)
+        .frame(width: sidebarWidth)
+        .padding(.trailing, 12)
     }
 
     // MARK: - Empty state (new tab)
@@ -518,7 +485,7 @@ struct PopoutView: View {
                             appState.workspacePath = path
                         }
                     },
-                    onAppear: { devFolders = loadDevFolders() }
+                    onAppear: { devFolders = loadDevFolders(rootPath: projectsRootPath) }
                 )
 
                 ModelPickerView(

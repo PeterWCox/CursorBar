@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
+    @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
 
     @State private var globalCommands: [QuickActionCommand] = []
     @State private var projectCommands: [QuickActionCommand] = []
@@ -11,6 +12,21 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    Text("Projects root:")
+                    TextField("~/dev", text: $projectsRootPath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse...") {
+                        selectProjectsRootFolder()
+                    }
+                }
+            } header: {
+                Text("Workspace Picker")
+            } footer: {
+                Text("Direct subfolders from this directory are shown in the project picker.")
+            }
+
             Section {
                 HStack {
                     Text("Workspace path:")
@@ -141,6 +157,23 @@ struct SettingsView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             workspacePath = url.path
+        }
+    }
+
+    private func selectProjectsRootFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        let currentRootPath = AppPreferences.resolvedProjectsRootPath(projectsRootPath)
+        if FileManager.default.fileExists(atPath: currentRootPath) {
+            panel.directoryURL = URL(fileURLWithPath: currentRootPath)
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            projectsRootPath = url.path
         }
     }
 }

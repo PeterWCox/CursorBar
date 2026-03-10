@@ -32,6 +32,7 @@
 		A1000023 /* KeyboardShortcutsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* KeyboardShortcutsView.swift */; };
 		A1000026 /* SettingsModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* SettingsModalView.swift */; };
 		A1000025 /* PinnedQuestionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025 /* PinnedQuestionsView.swift */; };
+		A1000027 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027 /* AppPreferences.swift */; };
 		A1000024 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = A8000003 /* Textual */; };
 /* End PBXBuildFile section */
 
@@ -62,6 +63,7 @@
 		A2000023 /* KeyboardShortcutsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardShortcutsView.swift; sourceTree = "<group>"; };
 		A2000026 /* SettingsModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModalView.swift; sourceTree = "<group>"; };
 		A2000025 /* PinnedQuestionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedQuestionsView.swift; sourceTree = "<group>"; };
+		A2000027 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -215,6 +217,7 @@
 		A5000021 /* Helpers */ = {
 			isa = PBXGroup;
 			children = (
+				A2000027 /* AppPreferences.swift */,
 				A2000008 /* WorkspaceHelpers.swift */,
 			);
 			path = Helpers;
@@ -238,6 +241,7 @@
 				A6000002 /* Sources */,
 				A4000001 /* Frameworks */,
 				A6000003 /* Resources */,
+				A6000004 /* Ad-hoc Code Sign */,
 			);
 			buildRules = (
 			);
@@ -293,6 +297,28 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		A6000004 /* Ad-hoc Code Sign */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Ad-hoc Code Sign";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "codesign -s - --force --deep \"${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		A6000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -305,6 +331,7 @@
 				A1000006 /* ConversationModels.swift in Sources */,
 				A1000007 /* CursorTheme.swift in Sources */,
 				A1000008 /* WorkspaceHelpers.swift in Sources */,
+				A1000027 /* AppPreferences.swift in Sources */,
 				A1000009 /* AgentTabState.swift in Sources */,
 				A1000010 /* SubmittableTextEditor.swift in Sources */,
 				A1000011 /* BrandMark.swift in Sources */,

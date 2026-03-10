@@ -155,9 +155,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         image.accessibilityDescription = "Cursor+"
 
         let menu = NSMenu()
-        let shortcutsItem = NSMenuItem(title: "Keyboard Shortcuts…", action: #selector(showKeyboardShortcuts), keyEquivalent: "")
-        shortcutsItem.target = self
-        menu.addItem(shortcutsItem)
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit Cursor+", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -193,11 +193,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc func showKeyboardShortcuts() {
+    @objc func showSettings() {
         if !panel.isVisible {
             togglePanel()
         }
-        appState.showKeyboardShortcutsSheet = true
+        appState.showSettingsSheet = true
     }
 
     @objc func quitApp() {
@@ -252,7 +252,8 @@ class FloatingPanel: NSPanel {
 
 class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
-    @Published var showKeyboardShortcutsSheet: Bool = false
+    @AppStorage(AppPreferences.projectsRootPathKey) var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+    @Published var showSettingsSheet: Bool = false
     let tabManager = TabManager(loadedState: TabManagerPersistence.load())
 
     func saveTabState() {
@@ -287,7 +288,7 @@ class AppState: ObservableObject {
             if !self.workspacePath.isEmpty && FileManager.default.fileExists(atPath: self.workspacePath) {
                 panel.directoryURL = URL(fileURLWithPath: self.workspacePath)
             } else {
-                panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+                panel.directoryURL = URL(fileURLWithPath: AppPreferences.resolvedProjectsRootPath(self.projectsRootPath))
             }
 
             if panel.runModal() == .OK, let url = panel.url {

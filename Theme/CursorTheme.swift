@@ -109,5 +109,3 @@ enum AppLimits {
     static let includedAPIQuota = 500
 }
 
-/// Dev folder path for workspace picker.
-let devFolderPath = "/Users/petercox/dev"

@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
-// MARK: - Settings modal with sidebar (Keyboard Shortcuts, About)
+// MARK: - Settings modal with sidebar panes
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
+    case general = "General"
     case keyboardShortcuts = "Keyboard Shortcuts"
     case about = "About"
 
@@ -10,6 +12,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .general: return "slider.horizontal.3"
         case .keyboardShortcuts: return "keyboard"
         case .about: return "info.circle"
         }
@@ -18,7 +21,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 
 struct SettingsModalView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPane: SettingsPane = .keyboardShortcuts
+    @State private var selectedPane: SettingsPane = .general
 
     private let sidebarWidth: CGFloat = 200
 
@@ -80,6 +83,8 @@ struct SettingsModalView: View {
     private var contentArea: some View {
         Group {
             switch selectedPane {
+            case .general:
+                GeneralSettingsPaneView()
             case .keyboardShortcuts:
                 KeyboardShortcutsContentView()
             case .about:
@@ -87,6 +92,81 @@ struct SettingsModalView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - General pane
+
+private struct GeneralSettingsPaneView: View {
+    @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+
+    private var resolvedProjectsRootPath: String {
+        AppPreferences.resolvedProjectsRootPath(projectsRootPath)
+    }
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Project picker root")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textTertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+
+                    Text("Direct subfolders from this directory appear in the workspace picker.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        TextField("~/dev", text: $projectsRootPath)
+                            .textFieldStyle(.roundedBorder)
+
+                        HStack(spacing: 10) {
+                            Button("Browse...") {
+                                selectProjectsRootFolder()
+                            }
+
+                            if projectsRootPath != AppPreferences.defaultProjectsRootPath {
+                                Button("Reset") {
+                                    projectsRootPath = AppPreferences.defaultProjectsRootPath
+                                }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(16)
+                    .background(CursorTheme.surfaceMuted.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(CursorTheme.border.opacity(0.6), lineWidth: 1)
+                    )
+
+                    Text("Current root: \(resolvedProjectsRootPath)")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CursorTheme.textTertiary)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+    }
+
+    private func selectProjectsRootFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = "Select Projects Root"
+        panel.message = "Choose the directory whose subfolders should be shown in the workspace picker."
+        panel.directoryURL = URL(fileURLWithPath: resolvedProjectsRootPath)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            projectsRootPath = url.path
+        }
     }
 }
 
