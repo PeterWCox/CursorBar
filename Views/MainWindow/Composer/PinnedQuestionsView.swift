@@ -6,12 +6,10 @@ private let maxPinnedQuestions = 8
 
 struct PinnedQuestionsStackView: View {
     let tab: AgentTab
-    let onDismiss: (UUID) -> Void
 
-    /// Turns to show: not dismissed, first-at-top order (chronological), last N capped.
+    /// Turns to show: chronological order, capped to the latest N.
     private var visibleTurns: [ConversationTurn] {
-        let undismissed = tab.turns.filter { !tab.dismissedPinnedTurnIDs.contains($0.id) }
-        return Array(undismissed.suffix(maxPinnedQuestions))
+        Array(tab.turns.suffix(maxPinnedQuestions))
     }
 
     var body: some View {
@@ -21,8 +19,7 @@ struct PinnedQuestionsStackView: View {
                     ForEach(visibleTurns) { turn in
                         PinnedQuestionChip(
                             question: turn.userPrompt,
-                            isProcessing: turn.isStreaming,
-                            onDismiss: { onDismiss(turn.id) }
+                            state: turn.displayState
                         )
                     }
                 }
@@ -46,8 +43,7 @@ struct PinnedQuestionsStackView: View {
 
 struct PinnedQuestionChip: View {
     let question: String
-    let isProcessing: Bool
-    let onDismiss: () -> Void
+    let state: ConversationTurnDisplayState
 
     private var displayText: String {
         var text = question
@@ -61,9 +57,14 @@ struct PinnedQuestionChip: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            if isProcessing {
+            if state == .processing {
                 LightBlueSpinner(size: 14)
                     .padding(.top, 2)
+            } else if state == .stopped {
+                Image(systemName: "square.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.red)
+                    .padding(.top, 3)
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14))
@@ -78,16 +79,6 @@ struct PinnedQuestionChip: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .multilineTextAlignment(.leading)
-
-            Button(action: onDismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(CursorTheme.textTertiary)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Dismiss")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)

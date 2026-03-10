@@ -75,6 +75,8 @@ class AgentTab: ObservableObject, Identifiable {
     var streamTask: Task<Void, Never>?
     var activeRunID: UUID?
     var activeTurnID: UUID?
+    var cachedConversationCharacterCount: Int
+    var lastAutoScrollAt: TimeInterval = 0
     /// Cursor CLI chat ID for this tab; set after first message so follow-ups use the same conversation.
     var cursorChatId: String?
 
@@ -90,6 +92,7 @@ class AgentTab: ObservableObject, Identifiable {
         self.id = UUID()
         self.title = title
         self.workspacePath = workspacePath
+        self.cachedConversationCharacterCount = 0
     }
 
     init(from saved: SavedAgentTab) {
@@ -101,6 +104,7 @@ class AgentTab: ObservableObject, Identifiable {
         self.turns = saved.turns
         self.hasAttachedScreenshot = saved.hasAttachedScreenshot
         self.followUpQueue = saved.followUpQueue
+        self.cachedConversationCharacterCount = Self.conversationCharacterCount(for: saved.turns)
     }
 
     func toSaved() -> SavedAgentTab {
@@ -114,6 +118,15 @@ class AgentTab: ObservableObject, Identifiable {
             hasAttachedScreenshot: hasAttachedScreenshot,
             followUpQueue: followUpQueue
         )
+    }
+
+    static func conversationCharacterCount(for turns: [ConversationTurn]) -> Int {
+        turns.reduce(into: 0) { total, turn in
+            total += turn.userPrompt.count
+            total += turn.segments.reduce(into: 0) { subtotal, segment in
+                subtotal += segment.text.count
+            }
+        }
     }
 }
 

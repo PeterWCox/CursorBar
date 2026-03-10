@@ -31,6 +31,7 @@ struct TabChip: View {
     var branchName: String? = nil
     let isSelected: Bool
     let isRunning: Bool
+    var latestTurnState: ConversationTurnDisplayState? = nil
     /// True if the user has sent at least one message in this tab (so we can show completion icon).
     var hasPrompted: Bool = true
     let showClose: Bool
@@ -53,6 +54,10 @@ struct TabChip: View {
         Group {
             if isRunning {
                 LightBlueSpinner(size: 14)
+            } else if latestTurnState == .stopped {
+                Image(systemName: "square.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color.red)
             } else if hasPrompted {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 14))
@@ -80,6 +85,10 @@ struct TabChip: View {
         HStack(spacing: 6) {
             if isRunning {
                 LightBlueSpinner(size: 10)
+            } else if latestTurnState == .stopped {
+                Image(systemName: "square.fill")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Color.red)
             } else if hasPrompted {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 12))

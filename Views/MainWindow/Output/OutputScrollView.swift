@@ -45,9 +45,7 @@ struct OutputScrollView<Content: View>: View {
                 }
             }
             .onChange(of: scrollToken) { _, _ in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    proxy.scrollTo("outputEnd", anchor: .bottom)
-                }
+                proxy.scrollTo("outputEnd", anchor: .bottom)
             }
         }
     }

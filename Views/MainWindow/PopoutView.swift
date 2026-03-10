@@ -17,6 +17,7 @@ struct PopoutView: View {
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
+    @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
     @EnvironmentObject var tabManager: TabManager
     @State private var devFolders: [URL] = []
     @State private var gitBranches: [String] = []
@@ -39,16 +40,24 @@ struct PopoutView: View {
 
     /// Tabs grouped by workspace path, order preserved by first occurrence.
     private var tabGroups: [TabSidebarGroup] {
-        var seen: Set<String> = []
-        return tabManager.tabs.reduce(into: [TabSidebarGroup]()) { acc, t in
-            let path = t.workspacePath
-            if seen.insert(path).inserted {
-                acc.append(TabSidebarGroup(
-                    path: path,
-                    displayName: appState.workspaceDisplayName(for: path).isEmpty ? "Project" : appState.workspaceDisplayName(for: path),
-                    tabs: tabManager.tabs.filter { $0.workspacePath == path }
-                ))
+        var groupedTabs: [String: [AgentTab]] = [:]
+        var orderedPaths: [String] = []
+
+        for currentTab in tabManager.tabs {
+            let path = currentTab.workspacePath
+            if groupedTabs[path] == nil {
+                orderedPaths.append(path)
             }
+            groupedTabs[path, default: []].append(currentTab)
+        }
+
+        return orderedPaths.map { path in
+            let displayName = appState.workspaceDisplayName(for: path)
+            return TabSidebarGroup(
+                path: path,
+                displayName: displayName.isEmpty ? "Project" : displayName,
+                tabs: groupedTabs[path] ?? []
+            )
         }
     }
 
@@ -81,13 +90,11 @@ struct PopoutView: View {
             }
             .frame(maxWidth: .infinity)
             .overlay(alignment: .topLeading) {
-                PinnedQuestionsStackView(tab: tab) { turnId in
-                    var next = tab.dismissedPinnedTurnIDs
-                    next.insert(turnId)
-                    tab.dismissedPinnedTurnIDs = next
+                if showPinnedQuestionsPanel {
+                    PinnedQuestionsStackView(tab: tab)
+                        .padding(.top, 8)
+                        .padding(.leading, 4)
                 }
-                .padding(.top, 8)
-                .padding(.leading, 4)
             }
         }
         .padding(16)
@@ -189,11 +196,23 @@ struct PopoutView: View {
                     .foregroundStyle(CursorTheme.textPrimary)
 
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(tab.isRunning ? CursorTheme.brandBlue : CursorTheme.textTertiary)
-                        .frame(width: 6, height: 6)
+                    Group {
+                        if tab.isRunning {
+                            Circle()
+                                .fill(CursorTheme.brandBlue)
+                                .frame(width: 6, height: 6)
+                        } else if tab.turns.last?.displayState == .stopped {
+                            Rectangle()
+                                .fill(Color.red)
+                                .frame(width: 6, height: 6)
+                        } else {
+                            Circle()
+                                .fill(CursorTheme.textTertiary)
+                                .frame(width: 6, height: 6)
+                        }
+                    }
 
-                    Text(tab.isRunning ? "Streaming response" : "Ready")
+                    Text(tab.isRunning ? "Streaming response" : (tab.turns.last?.displayState == .stopped ? "Stopped" : "Ready"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(CursorTheme.textSecondary)
                 }
@@ -288,6 +307,7 @@ struct PopoutView: View {
                                         branchName: nil,
                                         isSelected: isSelected,
                                         isRunning: t.isRunning,
+                                        latestTurnState: t.turns.last?.displayState,
                                         hasPrompted: !t.turns.isEmpty,
                                         showClose: tabManager.tabs.count > 1 && !sidebarCollapsed,
                                         compact: sidebarCollapsed,
@@ -391,12 +411,13 @@ struct PopoutView: View {
             tab: tab,
             scrollToken: tab.scrollToken,
             content: {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if tab.turns.isEmpty {
                         emptyStateContent
                     } else {
                         ForEach(tab.turns) { turn in
                             ConversationTurnView(turn: turn)
+                                .equatable()
                                 .id(turn.id)
                         }
                     }
@@ -538,9 +559,13 @@ struct PopoutView: View {
                 }
 
                 ComposerActionButtonsView(
+                    showPinnedQuestionsPanel: $showPinnedQuestionsPanel,
                     hasContext: !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                     isRunning: tab.isRunning,
-                    contextUsed: estimatedContextTokens(prompt: tab.prompt, turns: tab.turns).used,
+                    contextUsed: estimatedContextTokens(
+                        prompt: tab.prompt,
+                        conversationCharacterCount: tab.cachedConversationCharacterCount
+                    ).used,
                     contextLimit: AppLimits.contextTokenLimit
                 )
             }
@@ -680,6 +705,7 @@ struct PopoutView: View {
     private func clearContext() {
         guard !tab.isRunning else { return }
         tab.turns = []
+        tab.cachedConversationCharacterCount = 0
         tab.prompt = ""
         tab.hasAttachedScreenshot = false
         tab.errorMessage = nil
@@ -766,10 +792,11 @@ struct PopoutView: View {
         currentTab.isRunning = true
         currentTab.activeRunID = runID
         currentTab.activeTurnID = turnID
-        currentTab.turns.append(ConversationTurn(id: turnID, userPrompt: trimmed, isStreaming: true))
+        currentTab.turns.append(ConversationTurn(id: turnID, userPrompt: trimmed, isStreaming: true, wasStopped: false))
+        currentTab.cachedConversationCharacterCount += trimmed.count
         currentTab.prompt = ""
         currentTab.hasAttachedScreenshot = false
-        currentTab.scrollToken = UUID()
+        requestAutoScroll(for: currentTab, force: true)
         messagesSentForUsage += 1
 
         let task = Task {
@@ -793,7 +820,7 @@ struct PopoutView: View {
                     case .toolCall(let update):
                         mergeToolCall(update, into: currentTab, turnID: turnID)
                     }
-                    currentTab.scrollToken = UUID()
+                    requestAutoScroll(for: currentTab)
                 }
                 finishStreaming(for: currentTab, runID: runID, turnID: turnID)
             } catch is CancellationError {
@@ -818,6 +845,7 @@ struct PopoutView: View {
                         let newId = try AgentRunner.createChat()
                         currentTab.cursorChatId = newId
                         currentTab.turns = []
+                        currentTab.cachedConversationCharacterCount = 0
                         currentTab.prompt = summary
                         currentTab.hasAttachedScreenshot = false
                         currentTab.errorMessage = nil
@@ -845,13 +873,19 @@ struct PopoutView: View {
            let index = tabToStop.turns.firstIndex(where: { $0.id == turnID }) {
             tabToStop.turns[index].isStreaming = false
             tabToStop.turns[index].lastStreamPhase = nil
+            tabToStop.turns[index].wasStopped = true
+            for segmentIndex in tabToStop.turns[index].segments.indices {
+                if tabToStop.turns[index].segments[segmentIndex].toolCall?.status == .running {
+                    tabToStop.turns[index].segments[segmentIndex].toolCall?.status = .stopped
+                }
+            }
         }
         tabToStop.activeRunID = nil
         tabToStop.activeTurnID = nil
         tabToStop.isRunning = false
         tabToStop.streamTask?.cancel()
         tabToStop.streamTask = nil
-        tabToStop.scrollToken = UUID()
+        requestAutoScroll(for: tabToStop, force: true)
     }
 
     private func finishStreaming(for currentTab: AgentTab, runID: UUID, turnID: UUID, errorMessage: String? = nil) {
@@ -859,13 +893,14 @@ struct PopoutView: View {
         if let index = currentTab.turns.firstIndex(where: { $0.id == turnID }) {
             currentTab.turns[index].isStreaming = false
             currentTab.turns[index].lastStreamPhase = nil
+            currentTab.turns[index].wasStopped = false
         }
         currentTab.errorMessage = errorMessage
         currentTab.isRunning = false
         currentTab.streamTask = nil
         currentTab.activeRunID = nil
         currentTab.activeTurnID = nil
-        currentTab.scrollToken = UUID()
+        requestAutoScroll(for: currentTab, force: true)
     }
 
     private func appendThinkingText(_ incoming: String, to turnID: UUID, in tab: AgentTab) {
@@ -880,6 +915,7 @@ struct PopoutView: View {
         } else {
             tab.turns[index].segments[tab.turns[index].segments.count - 1].text += incoming
         }
+        tab.cachedConversationCharacterCount += incoming.count
         tab.turns[index].lastStreamPhase = .thinking
     }
 
@@ -898,6 +934,7 @@ struct PopoutView: View {
 
         if tab.turns[index].segments.last?.kind != .assistant {
             tab.turns[index].segments.append(ConversationSegment(kind: .assistant, text: incoming))
+            tab.cachedConversationCharacterCount += incoming.count
             return
         }
 
@@ -910,10 +947,12 @@ struct PopoutView: View {
 
         if incoming.hasPrefix(existing) {
             tab.turns[index].segments[lastIndex].text = incoming
+            tab.cachedConversationCharacterCount += incoming.count - existing.count
             return
         }
 
         tab.turns[index].segments[lastIndex].text += incoming
+        tab.cachedConversationCharacterCount += incoming.count
     }
 
     private func mergeToolCall(_ update: AgentToolCallUpdate, into tab: AgentTab, turnID: UUID) {
@@ -950,5 +989,12 @@ struct PopoutView: View {
                 )
             )
         )
+    }
+
+    private func requestAutoScroll(for tab: AgentTab, force: Bool = false) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard force || now - tab.lastAutoScrollAt >= 0.12 else { return }
+        tab.lastAutoScrollAt = now
+        tab.scrollToken = UUID()
     }
 }

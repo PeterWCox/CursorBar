@@ -21,14 +21,8 @@ func screenshotPaths(from prompt: String) -> [String] {
     return Array(paths.prefix(AppLimits.maxScreenshots))
 }
 
-func estimatedContextTokens(prompt: String, turns: [ConversationTurn]) -> (used: Int, limit: Int) {
-    var chars = prompt.count
-    for turn in turns {
-        chars += turn.userPrompt.count
-        for seg in turn.segments {
-            chars += seg.text.count
-        }
-    }
+func estimatedContextTokens(prompt: String, conversationCharacterCount: Int) -> (used: Int, limit: Int) {
+    let chars = prompt.count + conversationCharacterCount
     let used = max(0, chars / 4)
     return (used, AppLimits.contextTokenLimit)
 }

@@ -5,6 +5,7 @@ import SwiftUI
 private let contextWheelBlue = Color(red: 0.45, green: 0.68, blue: 1.0)
 
 struct ComposerActionButtonsView: View {
+    @Binding var showPinnedQuestionsPanel: Bool
     var hasContext: Bool
     var isRunning: Bool
     /// Context token usage for the small progress indicator; (used, limit). Pass (0, 0) to hide.
@@ -20,10 +21,31 @@ struct ComposerActionButtonsView: View {
         HStack(spacing: 10) {
             Spacer()
 
+            questionsPanelToggle
+
             if contextLimit > 0 {
                 contextProgressCircle
             }
         }
+    }
+
+    private var questionsPanelToggle: some View {
+        Button(action: { showPinnedQuestionsPanel.toggle() }) {
+            Image(systemName: showPinnedQuestionsPanel ? "rectangle.on.rectangle" : "rectangle.slash")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(showPinnedQuestionsPanel ? CursorTheme.textPrimary : CursorTheme.textTertiary)
+                .frame(width: 20, height: 20)
+                .background(
+                    Circle()
+                        .fill(CursorTheme.surfaceMuted.opacity(showPinnedQuestionsPanel ? 1 : 0.7))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(showPinnedQuestionsPanel ? CursorTheme.borderStrong : CursorTheme.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(showPinnedQuestionsPanel ? "Hide floating questions panel" : "Show floating questions panel")
     }
 
     private var contextProgressCircle: some View {

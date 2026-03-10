@@ -25,6 +25,7 @@ private func toolCallIcon(for status: ToolCallSegmentStatus) -> String {
     case .running: return "hammer"
     case .completed: return "checkmark.circle"
     case .failed: return "exclamationmark.triangle"
+    case .stopped: return "square.fill"
     }
 }
 
@@ -33,6 +34,7 @@ private func toolCallStatusLabel(for status: ToolCallSegmentStatus) -> String {
     case .running: return "Running"
     case .completed: return "Done"
     case .failed: return "Failed"
+    case .stopped: return "Stopped"
     }
 }
 
@@ -41,13 +43,18 @@ private func toolCallTint(for status: ToolCallSegmentStatus) -> Color {
     case .running: return CursorTheme.brandBlue
     case .completed: return CursorTheme.textSecondary
     case .failed: return Color(red: 1.0, green: 0.64, blue: 0.67)
+    case .stopped: return Color.red
     }
 }
 
 // MARK: - Segment view
 
-struct ConversationSegmentView: View {
+struct ConversationSegmentView: View, Equatable {
     let segment: ConversationSegment
+
+    static func == (lhs: ConversationSegmentView, rhs: ConversationSegmentView) -> Bool {
+        lhs.segment == rhs.segment
+    }
 
     var body: some View {
         switch segment.kind {
@@ -125,11 +132,15 @@ struct ConversationSegmentView: View {
 
 // MARK: - Turn view
 
-struct ConversationTurnView: View {
+struct ConversationTurnView: View, Equatable {
     let turn: ConversationTurn
 
     private var segments: [ConversationSegment] { visibleSegments(for: turn) }
     private var hasAssistantContent: Bool { segments.contains { $0.kind == .assistant } }
+
+    static func == (lhs: ConversationTurnView, rhs: ConversationTurnView) -> Bool {
+        lhs.turn == rhs.turn
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -167,6 +178,8 @@ struct ConversationTurnView: View {
                 }
                 if !hasAssistantContent && turn.isStreaming {
                     ProcessingPlaceholderView()
+                } else if !hasAssistantContent && turn.displayState == .stopped {
+                    StoppedPlaceholderView()
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,6 +200,19 @@ struct ProcessingPlaceholderView: View {
                     .foregroundStyle(CursorTheme.textSecondary)
                     .animation(.easeInOut(duration: 0.2), value: dotCount)
             }
+        }
+    }
+}
+
+struct StoppedPlaceholderView: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "square.fill")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(Color.red)
+            Text("Stopped")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary)
         }
     }
 }
