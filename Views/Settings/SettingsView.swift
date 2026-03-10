@@ -9,9 +9,22 @@ struct SettingsView: View {
     @State private var projectCommands: [QuickActionCommand] = []
     @State private var editingCommand: QuickActionCommand?
     @State private var showAddSheet = false
+    @State private var debugURL: String = ""
 
     var body: some View {
         Form {
+            Section {
+                HStack {
+                    Text("View in Browser URL:")
+                    TextField("http://localhost:3000", text: $debugURL)
+                        .textFieldStyle(.roundedBorder)
+                }
+            } header: {
+                Text("Project settings")
+            } footer: {
+                Text("URL opened when you use \"View in Browser\". Applies to the workspace below. Saved in .cursor/project-settings.json.")
+            }
+
             Section {
                 HStack {
                     Text("Projects root:")
@@ -59,9 +72,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480, height: 380)
-        .onAppear { reloadCommands() }
-        .onChange(of: workspacePath) { _, _ in reloadCommands() }
+        .frame(width: 480, height: 420)
+        .onAppear {
+            reloadCommands()
+            debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
+        }
+        .onChange(of: workspacePath) { _, _ in
+            reloadCommands()
+            debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
+        }
+        .onDisappear {
+            let trimmed = debugURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            ProjectSettingsStorage.setDebugURL(workspacePath: workspacePath, trimmed.isEmpty ? nil : trimmed)
+        }
         .sheet(isPresented: $showAddSheet) {
             QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
                 addCommand(newCommand)
