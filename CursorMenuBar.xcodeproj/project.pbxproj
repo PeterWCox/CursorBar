@@ -27,6 +27,9 @@
 		A1000018 /* GitBranchPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000018 /* GitBranchPickerView.swift */; };
 		A1000019 /* ComposerActionButtonsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000019 /* ComposerActionButtonsView.swift */; };
 		A1000020 /* ScreenshotCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000020 /* ScreenshotCardView.swift */; };
+		A1000021 /* QuickActionCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000021 /* QuickActionCommand.swift */; };
+		A1000022 /* QuickActionEditSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000022 /* QuickActionEditSheet.swift */; };
+		A1000023 /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000023 /* MarkdownContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -51,6 +54,9 @@
 		A2000018 /* GitBranchPickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitBranchPickerView.swift; sourceTree = "<group>"; };
 		A2000019 /* ComposerActionButtonsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerActionButtonsView.swift; sourceTree = "<group>"; };
 		A2000020 /* ScreenshotCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotCardView.swift; sourceTree = "<group>"; };
+		A2000021 /* QuickActionCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionCommand.swift; sourceTree = "<group>"; };
+		A2000022 /* QuickActionEditSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionEditSheet.swift; sourceTree = "<group>"; };
+		A2000023 /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -94,6 +100,9 @@
 				A2000018 /* GitBranchPickerView.swift */,
 				A2000019 /* ComposerActionButtonsView.swift */,
 				A2000020 /* ScreenshotCardView.swift */,
+				A2000021 /* QuickActionCommand.swift */,
+				A2000022 /* QuickActionEditSheet.swift */,
+				A2000023 /* MarkdownContentView.swift */,
 				A2000005 /* Assets.xcassets */,
 			);
 			path = CursorMenuBar;
@@ -190,6 +199,9 @@
 				A1000018 /* GitBranchPickerView.swift in Sources */,
 				A1000019 /* ComposerActionButtonsView.swift in Sources */,
 				A1000020 /* ScreenshotCardView.swift in Sources */,
+				A1000021 /* QuickActionCommand.swift in Sources */,
+				A1000022 /* QuickActionEditSheet.swift in Sources */,
+				A1000023 /* MarkdownContentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

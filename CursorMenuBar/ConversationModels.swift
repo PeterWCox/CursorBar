@@ -2,26 +2,26 @@ import Foundation
 
 // MARK: - Conversation domain models
 
-enum ConversationSegmentKind {
+enum ConversationSegmentKind: String, Codable {
     case thinking
     case assistant
     case toolCall
 }
 
-enum ToolCallSegmentStatus {
+enum ToolCallSegmentStatus: String, Codable {
     case running
     case completed
     case failed
 }
 
-struct ToolCallSegmentData {
+struct ToolCallSegmentData: Codable {
     let callID: String
     var title: String
     var detail: String
     var status: ToolCallSegmentStatus
 }
 
-struct ConversationSegment: Identifiable {
+struct ConversationSegment: Identifiable, Codable {
     let id: UUID
     let kind: ConversationSegmentKind
     var text: String
@@ -42,7 +42,7 @@ struct ConversationSegment: Identifiable {
     }
 }
 
-struct ConversationTurn: Identifiable {
+struct ConversationTurn: Identifiable, Codable {
     let id: UUID
     let userPrompt: String
     var segments: [ConversationSegment]
@@ -64,7 +64,7 @@ struct ConversationTurn: Identifiable {
     }
 }
 
-enum StreamPhase {
+enum StreamPhase: String, Codable {
     case thinking
     case assistant
     case toolCall

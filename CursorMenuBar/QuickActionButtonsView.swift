@@ -1,43 +1,71 @@
 import SwiftUI
 
-// MARK: - Quick action buttons (Fix Build, Commit & Push)
+// MARK: - Quick action buttons (configurable commands + Add)
 
 struct QuickActionButtonsView: View {
+    var commands: [QuickActionCommand] = []
     var isDisabled: Bool = false
-    var onFixBuild: () -> Void = {}
-    var onCommitAndPush: () -> Void = {}
+    var workspacePath: String = ""
+    var onCommand: (QuickActionCommand) -> Void = { _ in }
+    var onAdd: (() -> Void)? = nil
+    /// Called after adding a new command so the parent can refresh the list.
+    var onCommandsChanged: (() -> Void)? = nil
+
+    @State private var showAddSheet = false
 
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: onFixBuild) {
-                HStack(spacing: 6) {
-                    Image(systemName: "wrench.and.screwdriver")
-                    Text("Fix build")
+            ForEach(commands) { cmd in
+                Button(action: { onCommand(cmd) }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: cmd.icon)
+                        Text(cmd.title)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(CursorTheme.surfaceMuted, in: Capsule())
+                    .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
                 }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(CursorTheme.surfaceMuted, in: Capsule())
-                .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
             }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
 
-            Button(action: onCommitAndPush) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.circle")
-                    Text("Commit & push")
+            if onAdd != nil {
+                Button(action: { showAddSheet = true }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                        Text("Add")
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CursorTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(CursorTheme.surfaceMuted.opacity(0.7), in: Capsule())
+                    .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
                 }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(CursorTheme.surfaceMuted, in: Capsule())
-                .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+                .sheet(isPresented: $showAddSheet) {
+                    QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
+                        saveNewCommand(newCommand)
+                        onCommandsChanged?()
+                    }
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(isDisabled)
+        }
+    }
+
+    private func saveNewCommand(_ cmd: QuickActionCommand) {
+        if cmd.scope == .project, !workspacePath.isEmpty {
+            var project = QuickActionStorage.loadProjectCommands(workspacePath: workspacePath)
+            project.append(cmd)
+            QuickActionStorage.saveProjectCommands(workspacePath: workspacePath, project)
+        } else {
+            var global = QuickActionStorage.loadGlobalCommands()
+            global.append(cmd)
+            QuickActionStorage.saveGlobalCommands(global)
         }
     }
 }

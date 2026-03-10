@@ -1,18 +1,27 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Sidebar tab group (by project)
+
+private struct TabSidebarGroup {
+    let path: String
+    let displayName: String
+    let tabs: [AgentTab]
+}
+
 // MARK: - Main popout panel view
 
 struct PopoutView: View {
     @EnvironmentObject var appState: AppState
     var dismiss: () -> Void = {}
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
-    @AppStorage("selectedModel") private var selectedModel: String = "composer-1.5"
+    @AppStorage("selectedModel") private var selectedModel: String = "auto"
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
-    @StateObject private var tabManager = TabManager()
+    @EnvironmentObject var tabManager: TabManager
     @State private var devFolders: [URL] = []
     @State private var gitBranches: [String] = []
     @State private var currentBranch: String = ""
+    @State private var quickActionCommands: [QuickActionCommand] = []
 
     private var tab: AgentTab { tabManager.activeTab }
 
@@ -20,44 +29,82 @@ struct PopoutView: View {
         min(100, (messagesSentForUsage * 100) / AppLimits.includedAPIQuota)
     }
 
-    var body: some View {
-        VStack(spacing: 12) {
-            topBar
-            tabBar
+    @State private var sidebarCollapsed: Bool = false
+    private let sidebarWidth: CGFloat = 200
 
-            if let error = tab.errorMessage {
-                Text(error)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.red.opacity(0.25), lineWidth: 1)
-                    )
+    /// Tabs grouped by workspace path, order preserved by first occurrence.
+    private var tabGroups: [TabSidebarGroup] {
+        var seen: Set<String> = []
+        return tabManager.tabs.reduce(into: [TabSidebarGroup]()) { acc, t in
+            let path = t.workspacePath
+            if seen.insert(path).inserted {
+                acc.append(TabSidebarGroup(
+                    path: path,
+                    displayName: appState.workspaceDisplayName(for: path).isEmpty ? "Project" : appState.workspaceDisplayName(for: path),
+                    tabs: tabManager.tabs.filter { $0.workspacePath == path }
+                ))
             }
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            tabSidebar
+
+            VStack(spacing: 12) {
+                topBar
+
+                if let error = tab.errorMessage {
+                    Text(error)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                        )
+                }
 
             outputCard
                 .frame(maxHeight: .infinity)
                 .id(tab.id)
 
             composerDock
+            }
+            .frame(maxWidth: .infinity)
         }
         .padding(16)
         .frame(minWidth: 360, maxWidth: .infinity, minHeight: 400, maxHeight: .infinity)
         .background(CursorTheme.panelGradient)
+        .onAppear {
+            for t in tabManager.tabs where t.workspacePath.isEmpty {
+                t.workspacePath = workspacePath
+            }
+            quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath)
+            let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
+            currentBranch = cur
+            gitBranches = list
+            tab.currentBranch = cur
+        }
+        .onChange(of: workspacePath) { _, _ in
+            quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath)
+        }
+        .onChange(of: tabManager.selectedTabID) { _, _ in
+            let active = tabManager.activeTab
+            let (cur, list) = loadGitBranches(workspacePath: active.workspacePath)
+            currentBranch = cur
+            gitBranches = list
+            active.currentBranch = cur
+        }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .stroke(CursorTheme.borderStrong, lineWidth: 1)
-        )
         .shadow(color: Color.black.opacity(0.36), radius: 28, y: 16)
         .overlay(
             Group {
                 Button("New Tab") {
-                    tabManager.addTab()
+                    tabManager.addTab(lastWorkspacePath: tab.workspacePath)
                 }
                 .keyboardShortcut("t", modifiers: .command)
                 .opacity(0)
@@ -72,6 +119,22 @@ struct PopoutView: View {
                     .opacity(0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+
+                Button("Toggle Sidebar") {
+                    sidebarCollapsed.toggle()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .opacity(0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Button("Stop Agent") {
+                    if tab.isRunning {
+                        stopStreaming()
+                    }
+                }
+                .keyboardShortcut("c", modifiers: .control)
+                .opacity(0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         )
     }
@@ -112,39 +175,108 @@ struct PopoutView: View {
         .padding(.horizontal, 4)
     }
 
-    private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                ForEach(tabManager.tabs) { t in
-                    let isSelected = t.id == tabManager.selectedTabID
-                    TabChip(
-                        title: t.title,
-                        isSelected: isSelected,
-                        isRunning: t.isRunning,
-                        showClose: tabManager.tabs.count > 1,
-                        onSelect: { tabManager.selectedTabID = t.id },
-                        onClose: {
-                            stopStreaming(for: t)
-                            tabManager.closeTab(t.id)
-                        }
-                    )
-                }
+    private static let sidebarContentPadding: CGFloat = 10
 
-                Button(action: { tabManager.addTab() }) {
+    private var tabSidebar: some View {
+        VStack(spacing: 6) {
+            VStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    if !sidebarCollapsed {
+                        Text("Tabs")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textTertiary)
+                        Spacer(minLength: 0)
+                    }
+                    Button(action: { sidebarCollapsed.toggle() }) {
+                        Image(systemName: sidebarCollapsed ? "chevron.right" : "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                            .frame(width: sidebarCollapsed ? 28 : 24, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, sidebarCollapsed ? 6 : 0)
+                .frame(height: 28)
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(tabGroups, id: \.path) { group in
+                            VStack(alignment: .leading, spacing: 6) {
+                                if !sidebarCollapsed {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        HStack(spacing: 4) {
+                                            if !group.path.isEmpty {
+                                                ProjectIconView(path: group.path)
+                                                    .frame(width: 10, height: 10)
+                                            }
+                                            Text(group.displayName)
+                                                .font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                        }
+                                        let groupBranch = group.path == tab.workspacePath ? currentBranch : (group.tabs.first?.currentBranch ?? "")
+                                        if !groupBranch.isEmpty {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "arrow.triangle.branch")
+                                                    .font(.system(size: 8, weight: .medium))
+                                                Text(groupBranch)
+                                                    .font(.system(size: 9, weight: .regular))
+                                                    .italic()
+                                            }
+                                            .foregroundStyle(CursorTheme.textTertiary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        }
+                                    }
+                                }
+                                ForEach(group.tabs) { t in
+                                    let isSelected = t.id == tabManager.selectedTabID
+                                    TabChip(
+                                        title: t.title,
+                                        subtitle: nil,
+                                        workspacePath: nil,
+                                        branchName: nil,
+                                        isSelected: isSelected,
+                                        isRunning: t.isRunning,
+                                        hasPrompted: !t.turns.isEmpty,
+                                        showClose: tabManager.tabs.count > 1 && !sidebarCollapsed,
+                                        compact: sidebarCollapsed,
+                                        onSelect: { tabManager.selectedTabID = t.id },
+                                        onClose: {
+                                            stopStreaming(for: t)
+                                            tabManager.closeTab(t.id)
+                                        }
+                                    )
+                                    .frame(maxWidth: sidebarCollapsed ? 36 : .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(maxHeight: .infinity)
+
+                Button(action: { tabManager.addTab(lastWorkspacePath: tab.workspacePath) }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(CursorTheme.textSecondary)
-                        .frame(width: 26, height: 26)
-                        .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .frame(width: sidebarCollapsed ? 28 : 32, height: sidebarCollapsed ? 28 : 32)
+                        .frame(maxWidth: .infinity)
+                        .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .stroke(CursorTheme.border, lineWidth: 1)
                         )
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 10)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, sidebarCollapsed ? 6 : Self.sidebarContentPadding)
         }
+        .frame(width: sidebarCollapsed ? 44 : sidebarWidth)
+        .padding(.trailing, sidebarCollapsed ? 12 : 0)
     }
 
     // MARK: - Output card
@@ -191,9 +323,12 @@ struct PopoutView: View {
         let attachedPaths = screenshotPaths(from: tab.prompt)
         return VStack(alignment: .leading, spacing: 12) {
             QuickActionButtonsView(
+                commands: quickActionCommands,
                 isDisabled: tab.isRunning,
-                onFixBuild: { sendInCurrentTab(prompt: QuickActionPrompts.fixBuild) },
-                onCommitAndPush: { sendInCurrentTab(prompt: QuickActionPrompts.commitAndPush) }
+                workspacePath: workspacePath,
+                onCommand: { sendInCurrentTab(prompt: $0.prompt) },
+                onAdd: {},
+                onCommandsChanged: { quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath) }
             )
 
             queuedFollowUpsView
@@ -201,7 +336,7 @@ struct PopoutView: View {
             ForEach(Array(attachedPaths.enumerated()), id: \.offset) { _, path in
                 ScreenshotCardView(
                     path: path,
-                    workspacePath: workspacePath,
+                    workspacePath: tab.workspacePath,
                     onDelete: { deleteScreenshot(path: path) }
                 )
             }
@@ -238,16 +373,21 @@ struct PopoutView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
                 WorkspacePickerView(
-                    displayName: appState.workspaceDisplayName,
+                    displayName: appState.workspaceDisplayName(for: tab.workspacePath),
                     folders: devFolders,
-                    selectedPath: workspacePath,
+                    selectedPath: tab.workspacePath,
                     onSelectFolder: { path in
+                        tab.workspacePath = path
                         workspacePath = path
                         appState.workspacePath = path
                     },
-                    onBrowse: { appState.changeWorkspace() },
+                    onBrowse: {
+                        appState.changeWorkspace { path in
+                            tab.workspacePath = path
+                        }
+                    },
                     onAppear: { devFolders = loadDevFolders() }
                 )
 
@@ -262,26 +402,29 @@ struct PopoutView: View {
                     currentBranch: currentBranch,
                     onSelectBranch: { branch in
                         if branch != currentBranch {
-                            if let err = gitCheckout(branch: branch, workspacePath: workspacePath) {
+                            if let err = gitCheckout(branch: branch, workspacePath: tab.workspacePath) {
                                 tab.errorMessage = err
                             } else {
-                                let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                                let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
                                 currentBranch = cur
                                 gitBranches = list
+                                tab.currentBranch = cur
                                 tab.errorMessage = nil
                             }
                         }
                     },
                     onAppear: {
-                        let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                        let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
                         currentBranch = cur
                         gitBranches = list
+                        tab.currentBranch = cur
                     }
                 )
-                .onChange(of: workspacePath) { _, _ in
-                    let (cur, list) = loadGitBranches(workspacePath: workspacePath)
+                .onChange(of: tab.workspacePath) { _, _ in
+                    let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
                     currentBranch = cur
                     gitBranches = list
+                    tab.currentBranch = cur
                 }
             }
 
@@ -289,12 +432,12 @@ struct PopoutView: View {
                 hasContext: !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                 isRunning: tab.isRunning,
                 canSend: canSend,
-                onSummarize: clearContext,
+                contextUsed: estimatedContextTokens(prompt: tab.prompt, turns: tab.turns).used,
+                contextLimit: AppLimits.contextTokenLimit,
+                onSummarize: compressContext,
                 onSend: submitOrQueuePrompt,
                 onStop: { stopStreaming() }
             )
-
-            contextUsageView
         }
         .padding(14)
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -302,28 +445,6 @@ struct PopoutView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(cardBorder, lineWidth: 1)
         )
-    }
-
-    private var contextUsageView: some View {
-        let (used, limit) = estimatedContextTokens(prompt: tab.prompt, turns: tab.turns)
-        let fraction = limit > 0 ? Double(used) / Double(limit) : 0
-        let usedK = used / 1000
-        let limitK = limit / 1000
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text("Context")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textTertiary)
-                Spacer()
-                Text("~\(usedK)k / \(limitK)k tokens")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(CursorTheme.textSecondary)
-            }
-            ProgressView(value: min(1, fraction))
-                .tint(fraction > 0.85 ? CursorTheme.brandAmber : CursorTheme.brandBlue)
-                .background(CursorTheme.surfaceMuted)
-                .scaleEffect(y: 1.2, anchor: .center)
-        }
     }
 
     // MARK: - Helpers
@@ -389,6 +510,21 @@ struct PopoutView: View {
         sendPrompt()
     }
 
+    private static let compressPrompt = "Summarize our entire conversation so far into a single concise summary that preserves key context, decisions, and next steps. Reply with only that summary, no other text."
+
+    /// Compress context: ask the agent to summarize the conversation, then replace context with that summary (new chat). If no context, clears instead.
+    private func compressContext() {
+        guard !tab.isRunning else { return }
+        let hasContext = !tab.turns.isEmpty || !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if !hasContext {
+            clearContext()
+            return
+        }
+        tab.prompt = Self.compressPrompt
+        tab.isCompressRequest = true
+        sendPrompt()
+    }
+
     private func clearContext() {
         guard !tab.isRunning else { return }
         tab.turns = []
@@ -397,13 +533,20 @@ struct PopoutView: View {
         tab.errorMessage = nil
     }
 
+    private static func fullAssistantText(for turn: ConversationTurn) -> String {
+        turn.segments
+            .filter { $0.kind == .assistant }
+            .map(\.text)
+            .joined()
+    }
+
     private func deleteScreenshot(path: String) {
         let reference = "\n\n[Screenshot attached: \(path)]"
         tab.prompt = tab.prompt.replacingOccurrences(of: reference, with: "")
         if !tab.prompt.contains("[Screenshot attached:") {
             tab.hasAttachedScreenshot = false
         }
-        let imageURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
+        let imageURL = URL(fileURLWithPath: tab.workspacePath).appendingPathComponent(path)
         try? FileManager.default.removeItem(at: imageURL)
     }
 
@@ -419,7 +562,7 @@ struct PopoutView: View {
             return
         }
 
-        let destURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(relPath)
+        let destURL = URL(fileURLWithPath: tab.workspacePath).appendingPathComponent(relPath)
         let cursorDir = destURL.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: cursorDir, withIntermediateDirectories: true)
@@ -462,6 +605,10 @@ struct PopoutView: View {
 
         let runID = UUID()
         let turnID = UUID()
+        if currentTab.isCompressRequest {
+            currentTab.pendingCompressRunID = runID
+            currentTab.isCompressRequest = false
+        }
         currentTab.streamTask?.cancel()
         currentTab.errorMessage = nil
         currentTab.isRunning = true
@@ -480,7 +627,7 @@ struct PopoutView: View {
                     guard currentTab.activeRunID == runID else { return }
                     currentTab.cursorChatId = chatId
                 }
-                let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: workspacePath, model: selectedModel, conversationId: currentTab.cursorChatId)
+                let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: currentTab.workspacePath, model: selectedModel, conversationId: currentTab.cursorChatId)
                 guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID else { return }
                 for try await chunk in stream {
                     guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID, !Task.isCancelled else { return }
@@ -503,6 +650,29 @@ struct PopoutView: View {
                 finishStreaming(for: currentTab, runID: runID, turnID: turnID, errorMessage: error.userMessage)
             } catch {
                 finishStreaming(for: currentTab, runID: runID, turnID: turnID, errorMessage: error.localizedDescription)
+            }
+
+            if currentTab.pendingCompressRunID == runID {
+                Task { @MainActor in
+                    let summary: String
+                    if let idx = currentTab.turns.firstIndex(where: { $0.id == turnID }) {
+                        summary = Self.fullAssistantText(for: currentTab.turns[idx])
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        summary = ""
+                    }
+                    currentTab.pendingCompressRunID = nil
+                    do {
+                        let newId = try AgentRunner.createChat()
+                        currentTab.cursorChatId = newId
+                        currentTab.turns = []
+                        currentTab.prompt = summary
+                        currentTab.hasAttachedScreenshot = false
+                        currentTab.errorMessage = nil
+                    } catch {
+                        currentTab.errorMessage = (error as? AgentRunnerError)?.userMessage ?? error.localizedDescription
+                    }
+                }
             }
 
             Task { @MainActor in

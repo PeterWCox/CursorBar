@@ -1,77 +1,67 @@
 import SwiftUI
 import AppKit
 
-enum CursorAppIcon {
-    private static let cursorAppPaths = [
-        "/Applications/Cursor.app",
-        FileManager.default.homeDirectoryForCurrentUser.path + "/Applications/Cursor.app",
-    ]
+// MARK: - Menu bar icon (template, adapts to light/dark menu bar)
 
-    static func load() -> NSImage? {
-        for path in cursorAppPaths where FileManager.default.fileExists(atPath: path) {
-            let icnsPath = (path as NSString).appendingPathComponent("Contents/Resources/Cursor.icns")
-            if let image = NSImage(contentsOfFile: icnsPath) {
-                return image
-            }
-        }
-        return nil
-    }
+enum MenuBarIcon {
+    static func makeImage(size: CGFloat = 18) -> NSImage {
+        let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            let s = rect.width
+            let pad: CGFloat = s * 0.18
+            let inner = rect.insetBy(dx: pad, dy: pad)
 
-    static func makeStatusBarImage(size: CGFloat = 18) -> NSImage {
-        if let cursorIcon = load() {
-            let img = NSImage(size: NSSize(width: size, height: size))
-            img.lockFocus()
-            NSGraphicsContext.current?.imageInterpolation = .high
-            cursorIcon.draw(in: NSRect(x: 0, y: 0, width: size, height: size))
-            img.unlockFocus()
-            img.isTemplate = false
-            return img
-        }
-        return BrandStatusIcon.makeFallbackImage()
-    }
-}
-
-enum BrandStatusIcon {
-    static func makeImage() -> NSImage {
-        CursorAppIcon.makeStatusBarImage()
-    }
-
-    static func makeFallbackImage() -> NSImage {
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size, flipped: false) { rect in
-            let ringRect = rect.insetBy(dx: 3.5, dy: 3.5)
+            // Ring
+            let ringRect = inner.insetBy(dx: inner.width * 0.08, dy: inner.height * 0.08)
             let ring = NSBezierPath(ovalIn: ringRect)
-            ring.lineWidth = 1.7
+            ring.lineWidth = max(1, s * 0.09)
             NSColor.labelColor.setStroke()
             ring.stroke()
 
-            let dotRect = NSRect(x: rect.midX - 1.8, y: rect.midY - 1.8, width: 3.6, height: 3.6)
+            // Center dot
+            let dotR = s * 0.055
+            let dotRect = NSRect(x: rect.midX - dotR, y: rect.midY - dotR, width: dotR * 2, height: dotR * 2)
+            NSColor.labelColor.setFill()
             NSBezierPath(ovalIn: dotRect).fill()
 
+            // Spark (X) top-right
+            let sparkCx = rect.maxX - pad - s * 0.08
+            let sparkCy = rect.minY + pad + s * 0.22
+            let d = s * 0.08
             let spark = NSBezierPath()
-            spark.lineWidth = 1.5
+            spark.lineWidth = max(1, s * 0.08)
             spark.lineCapStyle = .round
-            spark.move(to: NSPoint(x: rect.maxX - 5.7, y: rect.maxY - 3.9))
-            spark.line(to: NSPoint(x: rect.maxX - 2.9, y: rect.maxY - 1.1))
-            spark.move(to: NSPoint(x: rect.maxX - 5.7, y: rect.maxY - 1.1))
-            spark.line(to: NSPoint(x: rect.maxX - 2.9, y: rect.maxY - 3.9))
+            spark.move(to: NSPoint(x: sparkCx - d, y: sparkCy - d))
+            spark.line(to: NSPoint(x: sparkCx + d, y: sparkCy + d))
+            spark.move(to: NSPoint(x: sparkCx - d, y: sparkCy + d))
+            spark.line(to: NSPoint(x: sparkCx + d, y: sparkCy - d))
+            NSColor.labelColor.setStroke()
             spark.stroke()
 
-            let orbit = NSBezierPath()
-            orbit.lineWidth = 1.3
-            orbit.lineCapStyle = .round
-            orbit.move(to: NSPoint(x: rect.minX + 2.8, y: rect.midY - 1.2))
-            orbit.curve(
-                to: NSPoint(x: rect.midX + 5.2, y: rect.minY + 3.1),
-                controlPoint1: NSPoint(x: rect.minX + 5.0, y: rect.minY + 1.8),
-                controlPoint2: NSPoint(x: rect.midX + 1.8, y: rect.minY + 2.2)
-            )
-            orbit.stroke()
+            // Plus (bottom-right)
+            let plusCx = rect.maxX - pad - s * 0.2
+            let plusCy = rect.minY + pad + s * 0.2
+            let hw = s * 0.12
+            let thick = max(1, s * 0.08)
+            NSColor.labelColor.setFill()
+            NSBezierPath(rect: NSRect(x: plusCx - hw, y: plusCy - thick/2, width: hw * 2, height: thick)).fill()
+            NSBezierPath(rect: NSRect(x: plusCx - thick/2, y: plusCy - hw, width: thick, height: hw * 2)).fill()
 
             return true
         }
         image.isTemplate = true
         return image
+    }
+}
+
+// MARK: - Legacy (Dock icon is in AppIcon.appiconset; popout uses BrandMark)
+
+enum CursorAppIcon {
+    static func load() -> NSImage? { nil }
+}
+
+enum BrandStatusIcon {
+    static func makeImage() -> NSImage {
+        MenuBarIcon.makeImage()
     }
 }
 
@@ -129,6 +119,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel!
     let appState = AppState()
 
+    func applicationWillTerminate(_ notification: Notification) {
+        appState.saveTabState()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -155,6 +149,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.panel.orderOut(nil)
             })
             .environmentObject(appState)
+            .environmentObject(appState.tabManager)
         )
         panel.contentView = hostingView
     }
@@ -195,7 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 class FloatingPanel: NSPanel {
     init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 780),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 960),
             styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
@@ -213,7 +208,7 @@ class FloatingPanel: NSPanel {
         standardWindowButton(.miniaturizeButton)?.isHidden = true
         standardWindowButton(.zoomButton)?.isHidden = true
         contentMinSize = NSSize(width: 360, height: 400)
-        contentMaxSize = NSSize(width: 900, height: 1200)
+        contentMaxSize = NSSize(width: 1400, height: 1600)
     }
 
     override var canBecomeKey: Bool { true }
@@ -221,17 +216,27 @@ class FloatingPanel: NSPanel {
 
 class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
+    let tabManager = TabManager(loadedState: TabManagerPersistence.load())
+
+    func saveTabState() {
+        tabManager.saveState()
+    }
 
     var workspaceDisplayName: String {
-        guard !workspacePath.isEmpty else { return "" }
-        let url = URL(fileURLWithPath: workspacePath)
-        if workspacePath == FileManager.default.homeDirectoryForCurrentUser.path {
+        workspaceDisplayName(for: workspacePath)
+    }
+
+    func workspaceDisplayName(for path: String) -> String {
+        guard !path.isEmpty else { return "" }
+        let url = URL(fileURLWithPath: path)
+        if path == FileManager.default.homeDirectoryForCurrentUser.path {
             return "~/"
         }
         return url.lastPathComponent.isEmpty ? url.deletingLastPathComponent().lastPathComponent : url.lastPathComponent
     }
 
-    func changeWorkspace() {
+    /// Presents the folder picker. If user selects a folder, updates `workspacePath` and calls `completion` with the path (so the caller can set the current tab’s workspace).
+    func changeWorkspace(completion: ((String) -> Void)? = nil) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             let panel = NSOpenPanel()
@@ -250,6 +255,7 @@ class AppState: ObservableObject {
 
             if panel.runModal() == .OK, let url = panel.url {
                 self.workspacePath = url.path
+                completion?(url.path)
             }
         }
     }

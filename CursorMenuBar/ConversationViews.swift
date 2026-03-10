@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Conversation segment and turn presentation
 
@@ -18,34 +19,9 @@ func visibleSegments(for turn: ConversationTurn) -> [ConversationSegment] {
     }
 }
 
-/// Inserts line breaks at natural boundaries so run-on summary text is readable.
-func normalizedAssistantText(_ raw: String) -> String {
-    var result = raw
-    result = result.replacingOccurrences(of: "). ", with: ").\n\n")
-    if let regex = try? NSRegularExpression(pattern: "\\)\\.([A-Z])", options: []) {
-        let range = NSRange(result.startIndex..., in: result)
-        result = regex.stringByReplacingMatches(
-            in: result,
-            options: [],
-            range: range,
-            withTemplate: ").\n\n$1"
-        )
-    }
-    if let regex = try? NSRegularExpression(pattern: "([a-z])\\. ([A-Z])", options: []) {
-        let range = NSRange(result.startIndex..., in: result)
-        result = regex.stringByReplacingMatches(
-            in: result,
-            options: [],
-            range: range,
-            withTemplate: "$1.\n\n$2"
-        )
-    }
-    return result
-}
-
-private func assistantAttributedText(_ raw: String) -> AttributedString {
-    let normalized = normalizedAssistantText(raw)
-    return (try? AttributedString(markdown: normalized, options: .init(interpretedSyntax: .full))) ?? AttributedString(normalized)
+private func inlineAttributedText(_ raw: String) -> AttributedString {
+    let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: raw, options: opts)) ?? AttributedString(raw)
 }
 
 private func toolCallIcon(for status: ToolCallSegmentStatus) -> String {
@@ -103,12 +79,8 @@ struct ConversationSegmentView: View {
                     .stroke(CursorTheme.border, lineWidth: 1)
             )
         case .assistant:
-            Text(assistantAttributedText(segment.text))
-                .font(.system(size: 14, weight: .regular))
-                .foregroundStyle(CursorTheme.textPrimary)
+            MarkdownContentView(segment.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(4)
                 .textSelection(.enabled)
         case .toolCall:
             if let toolCall = segment.toolCall {
@@ -130,7 +102,7 @@ struct ConversationSegmentView: View {
                             .background(toolCallTint(for: toolCall.status).opacity(0.14), in: Capsule())
                     }
                     if !toolCall.detail.isEmpty {
-                        Text(assistantAttributedText(toolCall.detail))
+                        Text(inlineAttributedText(toolCall.detail))
                             .font(.system(size: 11, weight: .regular, design: .monospaced))
                             .foregroundStyle(CursorTheme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -160,19 +132,33 @@ struct ConversationTurnView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(turn.userPrompt)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(CursorTheme.border, lineWidth: 1)
-                )
+            HStack(alignment: .top, spacing: 8) {
+                Text(turn.userPrompt)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(CursorTheme.border, lineWidth: 1)
+                    )
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(turn.userPrompt, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                        .contentShape(Rectangle())
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Copy message")
+            }
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(segments) { segment in
@@ -192,9 +178,7 @@ struct ConversationTurnView: View {
 struct ProcessingPlaceholderView: View {
     var body: some View {
         HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(CursorTheme.textSecondary)
+            LightBlueSpinner(size: 16)
             TimelineView(.periodic(from: .now, by: 0.4)) { timeline in
                 let dotCount = (Int(timeline.date.timeIntervalSince1970 * 2.5) % 3) + 1
                 Text("Processing request" + String(repeating: ".", count: dotCount))

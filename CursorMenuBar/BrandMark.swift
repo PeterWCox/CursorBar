@@ -1,37 +1,17 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Brand logo / header mark
+// MARK: - Popout header icon (top-left of panel): Cursor+ mark with teal accent
 
 struct BrandMark: View {
     var size: CGFloat = 52
 
     var body: some View {
         ZStack {
-            if let nsImage = CursorAppIcon.load() {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                            .stroke(CursorTheme.cursorPlusTeal.opacity(0.8), lineWidth: max(1, size * 0.025))
-                    )
-            } else {
-                fallbackIcon
-            }
-        }
-        .frame(width: size, height: size)
-        .shadow(color: CursorTheme.cursorPlusTeal.opacity(0.25), radius: 12, y: 6)
-    }
-
-    private var fallbackIcon: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                 .fill(CursorTheme.surfaceMuted)
                 .overlay(
-                    RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+                    RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
                         .stroke(
                             LinearGradient(
                                 colors: [
@@ -45,6 +25,7 @@ struct BrandMark: View {
                         )
                 )
 
+            // Cursor mark: ring
             Circle()
                 .stroke(CursorTheme.textPrimary, lineWidth: size * 0.07)
                 .frame(width: size * 0.48, height: size * 0.48)
@@ -53,6 +34,7 @@ struct BrandMark: View {
                 .fill(CursorTheme.textPrimary)
                 .frame(width: size * 0.11, height: size * 0.11)
 
+            // Orbit
             Path { path in
                 path.move(to: CGPoint(x: size * 0.18, y: size * 0.6))
                 path.addCurve(
@@ -63,10 +45,23 @@ struct BrandMark: View {
             }
             .stroke(CursorTheme.textPrimary.opacity(0.75), style: StrokeStyle(lineWidth: size * 0.055, lineCap: .round))
 
+            // Spark
             Image(systemName: "sparkle")
                 .font(.system(size: size * 0.18, weight: .bold))
                 .foregroundStyle(CursorTheme.textPrimary)
                 .offset(x: size * 0.22, y: -size * 0.22)
+
+            // Teal plus (Cursor+)
+            RoundedRectangle(cornerRadius: size * 0.02, style: .continuous)
+                .fill(CursorTheme.cursorPlusTeal)
+                .frame(width: size * 0.24, height: max(2, size * 0.06))
+                .offset(x: size * 0.28, y: size * 0.26)
+            RoundedRectangle(cornerRadius: size * 0.02, style: .continuous)
+                .fill(CursorTheme.cursorPlusTeal)
+                .frame(width: max(2, size * 0.06), height: size * 0.24)
+                .offset(x: size * 0.28, y: size * 0.26)
         }
+        .frame(width: size, height: size)
+        .shadow(color: CursorTheme.cursorPlusTeal.opacity(size > 30 ? 0.25 : 0.15), radius: size > 30 ? 12 : 4, y: size > 30 ? 6 : 2)
     }
 }

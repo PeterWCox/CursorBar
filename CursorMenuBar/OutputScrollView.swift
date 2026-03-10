@@ -31,13 +31,13 @@ struct OutputScrollView<Content: View>: View {
                     } label: {
                         Image(systemName: "arrow.down")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(CursorTheme.textSecondary)
+                            .foregroundStyle(CursorTheme.textPrimary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(CursorTheme.surfaceMuted, in: Capsule())
+                            .background(CursorTheme.surfaceRaised, in: Capsule())
                             .overlay(
                                 Capsule()
-                                    .stroke(CursorTheme.border, lineWidth: 1)
+                                    .stroke(CursorTheme.borderStrong, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)

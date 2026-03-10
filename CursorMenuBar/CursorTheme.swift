@@ -34,6 +34,17 @@ enum CursorTheme {
             endPoint: .bottom
         )
     }
+
+    /// Stable color for a workspace path so the same project always gets the same colour (avoids confusion across tabs).
+    static func colorForWorkspace(path: String) -> Color {
+        guard !path.isEmpty else { return textTertiary }
+        var hash = 0
+        for byte in path.utf8 {
+            hash = (hash &* 31 &+ Int(byte)) % 360
+        }
+        let hue = Double((hash + 360) % 360) / 360.0
+        return Color(hue: hue, saturation: 0.58, brightness: 0.88)
+    }
 }
 
 /// Model options for the Cursor agent (id for CLI, label for UI).
