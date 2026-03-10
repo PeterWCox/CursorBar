@@ -234,6 +234,7 @@ struct ConversationTurnView: View, Equatable {
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(segments) { segment in
                     ConversationSegmentView(segment: segment)
+                        .equatable()
                 }
                 if !hasAssistantContent && turn.isStreaming {
                     ProcessingPlaceholderView()

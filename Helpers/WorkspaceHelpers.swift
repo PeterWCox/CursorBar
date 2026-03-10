@@ -144,3 +144,160 @@ func gitCheckout(branch: String, workspacePath: String) -> String? {
     let err = (try? String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)) ?? "Unknown error"
     return err.trimmingCharacters(in: .whitespacesAndNewlines)
 }
+
+// MARK: - Debug script helpers
+
+enum PreferredTerminalApp: String, CaseIterable, Identifiable {
+    case automatic
+    case terminal
+    case iTerm
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .automatic:
+            return "Automatic"
+        case .terminal:
+            return "Terminal"
+        case .iTerm:
+            return "iTerm"
+        }
+    }
+
+    var bundleIdentifier: String? {
+        switch self {
+        case .automatic:
+            return nil
+        case .terminal:
+            return "com.apple.Terminal"
+        case .iTerm:
+            return "com.googlecode.iterm2"
+        }
+    }
+}
+
+func debugScriptURL(workspacePath: String) -> URL {
+    URL(fileURLWithPath: workspacePath).appendingPathComponent("debug.sh")
+}
+
+func debugScriptExists(workspacePath: String) -> Bool {
+    FileManager.default.fileExists(atPath: debugScriptURL(workspacePath: workspacePath).path)
+}
+
+func createDebugScript(workspacePath: String, contents: String) throws {
+    let url = debugScriptURL(workspacePath: workspacePath)
+    try contents.write(to: url, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+}
+
+func launchDebugScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
+    guard !workspacePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return "Select a workspace before running Debug."
+    }
+
+    let scriptURL = debugScriptURL(workspacePath: workspacePath)
+    guard FileManager.default.fileExists(atPath: scriptURL.path) else {
+        return "`debug.sh` was not found in the project root."
+    }
+
+    guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {
+        return "No supported terminal app is available. Install Terminal or iTerm."
+    }
+
+    let command = debugShellCommand(workspacePath: workspacePath)
+    switch terminal {
+    case .automatic:
+        return "No supported terminal app is available. Install Terminal or iTerm."
+    case .terminal:
+        return runAppleScript("""
+        tell application id "com.apple.Terminal"
+            activate
+            if (count of windows) = 0 then
+                do script "\(appleScriptEscaped(command))"
+            else
+                do script "\(appleScriptEscaped(command))" in front window
+            end if
+        end tell
+        """)
+    case .iTerm:
+        return runAppleScript("""
+        tell application id "com.googlecode.iterm2"
+            activate
+            if (count of windows) = 0 then
+                create window with default profile
+            end if
+            tell current window
+                create tab with default profile
+                tell current session of current tab
+                    write text "\(appleScriptEscaped(command))"
+                end tell
+            end tell
+        end tell
+        """)
+    }
+}
+
+private func resolvedTerminalApp(for preference: PreferredTerminalApp) -> PreferredTerminalApp? {
+    switch preference {
+    case .automatic:
+        if isApplicationInstalled(bundleIdentifier: PreferredTerminalApp.iTerm.bundleIdentifier) {
+            return .iTerm
+        }
+        if isApplicationInstalled(bundleIdentifier: PreferredTerminalApp.terminal.bundleIdentifier) {
+            return .terminal
+        }
+        return nil
+    case .terminal, .iTerm:
+        guard isApplicationInstalled(bundleIdentifier: preference.bundleIdentifier) else { return nil }
+        return preference
+    }
+}
+
+private func isApplicationInstalled(bundleIdentifier: String?) -> Bool {
+    guard let bundleIdentifier else { return false }
+    return NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) != nil
+}
+
+private func debugShellCommand(workspacePath: String) -> String {
+    let quotedPath = singleQuotedShellValue(workspacePath)
+    return "cd \(quotedPath) && if [ -x ./debug.sh ]; then ./debug.sh; else bash ./debug.sh; fi"
+}
+
+private func singleQuotedShellValue(_ value: String) -> String {
+    let escaped = value.replacingOccurrences(of: "'", with: "'\\''")
+    return "'\(escaped)'"
+}
+
+private func appleScriptEscaped(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+private func runAppleScript(_ script: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", script]
+
+    let outputPipe = Pipe()
+    let errorPipe = Pipe()
+    process.standardOutput = outputPipe
+    process.standardError = errorPipe
+
+    do {
+        try process.run()
+    } catch {
+        return error.localizedDescription
+    }
+
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let message = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return message?.isEmpty == false ? message : "Failed to launch the terminal."
+    }
+
+    return nil
+}

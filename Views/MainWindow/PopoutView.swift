@@ -16,6 +16,7 @@ struct PopoutView: View {
     var dismiss: () -> Void = {}
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+    @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
@@ -26,8 +27,17 @@ struct PopoutView: View {
     @State private var quickActionCommands: [QuickActionCommand] = []
     @State private var composerTextHeight: CGFloat = 24
     @State private var showSetDebugURLSheet: Bool = false
+    @State private var showCreateDebugScriptSheet: Bool = false
 
     private var tab: AgentTab { tabManager.activeTab }
+    /// Adds a new agent tab and resets model to Auto so each new window starts with the default.
+    private func addNewAgentTab(initialPrompt: String? = nil, lastWorkspacePath: String? = nil) {
+        tabManager.addTab(initialPrompt: initialPrompt, lastWorkspacePath: lastWorkspacePath)
+        selectedModel = AvailableModels.autoID
+    }
+    private var preferredTerminalApp: PreferredTerminalApp {
+        PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
+    }
 
     private var apiUsagePercent: Int {
         min(100, (messagesSentForUsage * 100) / AppLimits.includedAPIQuota)
@@ -162,17 +172,28 @@ struct PopoutView: View {
                 onOpenAfterSave: nil
             )
         }
+        .sheet(isPresented: $showCreateDebugScriptSheet) {
+            CreateDebugScriptSheet(
+                workspacePath: tab.workspacePath,
+                onSave: {
+                    tab.errorMessage = nil
+                },
+                onRunAfterSave: {
+                    runDebugScript()
+                }
+            )
+        }
         .overlay(
             Group {
                 Button("New Tab") {
-                    tabManager.addTab(lastWorkspacePath: tab.workspacePath)
+                    addNewAgentTab(lastWorkspacePath: tab.workspacePath)
                 }
                 .keyboardShortcut("t", modifiers: .command)
                 .opacity(0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 Button("New Tab") {
-                    tabManager.addTab(lastWorkspacePath: tab.workspacePath)
+                    addNewAgentTab(lastWorkspacePath: tab.workspacePath)
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .opacity(0)
@@ -300,7 +321,7 @@ struct PopoutView: View {
             }
             .frame(maxHeight: .infinity)
 
-            Button(action: { tabManager.addTab(lastWorkspacePath: tab.workspacePath) }) {
+            Button(action: { addNewAgentTab(lastWorkspacePath: tab.workspacePath) }) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(CursorTheme.textSecondary)
@@ -384,12 +405,13 @@ struct PopoutView: View {
             tab: tab,
             scrollToken: tab.scrollToken,
             content: {
-                VStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: 18) {
                     if tab.turns.isEmpty {
                         emptyStateContent
                     } else {
                         ForEach(tab.turns) { turn in
                             ConversationTurnView(turn: turn, workspacePath: tab.workspacePath)
+                                .equatable()
                                 .id(turn.id)
                         }
                     }
@@ -398,6 +420,7 @@ struct PopoutView: View {
                         .frame(height: 1)
                         .id("outputEnd")
                 }
+                .scrollTargetLayout()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
             }
@@ -412,10 +435,11 @@ struct PopoutView: View {
             QuickActionButtonsView(
                 commands: quickActionCommands,
                 isDisabled: tab.isRunning,
-                workspacePath: workspacePath,
+                workspacePath: tab.workspacePath,
                 onCommand: { sendInCurrentTab(prompt: $0.prompt) },
+                onDebug: { handleDebugAction() },
                 onAdd: {},
-                onCommandsChanged: { quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath) }
+                onCommandsChanged: { quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: tab.workspacePath) }
             )
 
             queuedFollowUpsView
@@ -482,13 +506,13 @@ struct PopoutView: View {
                     folders: devFolders,
                     selectedPath: tab.workspacePath,
                     onSelectFolder: { path in
-                        tabManager.addTab(lastWorkspacePath: path)
+                        addNewAgentTab(lastWorkspacePath: path)
                         workspacePath = path
                         appState.workspacePath = path
                     },
                     onBrowse: {
                         appState.changeWorkspace { path in
-                            tabManager.addTab(lastWorkspacePath: path)
+                            addNewAgentTab(lastWorkspacePath: path)
                             workspacePath = path
                             appState.workspacePath = path
                         }
@@ -531,6 +555,32 @@ struct PopoutView: View {
                     gitBranches = list
                     tab.currentBranch = cur
                 }
+
+                Button {
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                    process.arguments = ["-a", "Cursor", tab.workspacePath]
+                    try? process.run()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up.right.square")
+                        Text("Open in Cursor")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(CursorTheme.border, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Open this workspace in Cursor")
 
                 ComposerActionButtonsView(
                     showPinnedQuestionsPanel: $showPinnedQuestionsPanel,
@@ -793,11 +843,31 @@ struct PopoutView: View {
         sendPrompt()
     }
 
+    private func handleDebugAction() {
+        if debugScriptExists(workspacePath: tab.workspacePath) {
+            runDebugScript()
+        } else {
+            showCreateDebugScriptSheet = true
+        }
+    }
+
+    private func runDebugScript() {
+        if let error = launchDebugScript(
+            workspacePath: tab.workspacePath,
+            preferredTerminal: preferredTerminalApp
+        ) {
+            tab.errorMessage = error
+            return
+        }
+
+        tab.errorMessage = nil
+    }
+
     private func sendQueuedFollowUpToNewTab(_ item: QueuedFollowUp) {
         let prompt = item.text
         let workspacePath = tab.workspacePath
         tab.followUpQueue.removeAll { $0.id == item.id }
-        tabManager.addTab(initialPrompt: prompt, lastWorkspacePath: workspacePath)
+        addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: workspacePath)
         sendPrompt()
     }
 

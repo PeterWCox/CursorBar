@@ -2,6 +2,7 @@ import Foundation
 
 enum AppPreferences {
     static let projectsRootPathKey = "projectsRootPath"
+    static let preferredTerminalAppKey = "preferredTerminalApp"
 
     static var defaultProjectsRootPath: String {
         FileManager.default.homeDirectoryForCurrentUser

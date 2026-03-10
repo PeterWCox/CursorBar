@@ -115,3 +115,93 @@ struct SetDebugURLSheet: View {
         onOpenAfterSave?()
     }
 }
+
+struct CreateDebugScriptSheet: View {
+    var workspacePath: String
+    var onSave: (() -> Void)? = nil
+    var onRunAfterSave: (() -> Void)? = nil
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var scriptContents: String = """
+#!/bin/bash
+
+"""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "ladybug.fill")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(CursorTheme.brandBlue)
+                Text("Create debug.sh")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                Spacer()
+                HStack(spacing: 8) {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                        .buttonStyle(.bordered)
+                    Button("Create") { saveAndMaybeRun(false) }
+                        .buttonStyle(.bordered)
+                    Button("Create & Run") { saveAndMaybeRun(true) }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(.bottom, 14)
+
+            Divider()
+                .opacity(0.5)
+                .padding(.bottom, 16)
+
+            Text("`debug.sh` was not found in the project root. Paste the script below and it will be saved to `\(workspacePath)/debug.sh`.")
+                .font(.system(size: 13))
+                .foregroundStyle(CursorTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 14)
+
+            TextEditor(text: $scriptContents)
+                .font(.system(.body, design: .monospaced))
+                .padding(10)
+                .frame(minHeight: 260)
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color(NSColor.separatorColor), lineWidth: 1)
+                )
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.red)
+                    .padding(.top, 12)
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 560, minHeight: 420)
+        .background(CursorTheme.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CursorTheme.border, lineWidth: 1))
+    }
+
+    private func saveAndMaybeRun(_ shouldRun: Bool) {
+        let trimmed = scriptContents.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            errorMessage = "Paste a script before creating `debug.sh`."
+            return
+        }
+
+        do {
+            try createDebugScript(workspacePath: workspacePath, contents: scriptContents)
+            onSave?()
+            dismiss()
+            if shouldRun {
+                onRunAfterSave?()
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}

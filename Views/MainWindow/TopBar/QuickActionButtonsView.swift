@@ -7,6 +7,7 @@ struct QuickActionButtonsView: View {
     var isDisabled: Bool = false
     var workspacePath: String = ""
     var onCommand: (QuickActionCommand) -> Void = { _ in }
+    var onDebug: (() -> Void)? = nil
     var onAdd: (() -> Void)? = nil
     /// Called after adding a new command so the parent can refresh the list.
     var onCommandsChanged: (() -> Void)? = nil
@@ -20,6 +21,23 @@ struct QuickActionButtonsView: View {
                     HStack(spacing: 6) {
                         Image(systemName: cmd.icon)
                         Text(cmd.title)
+                    }
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(CursorTheme.surfaceMuted, in: Capsule())
+                    .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+            }
+
+            if let onDebug {
+                Button(action: onDebug) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "ladybug.fill")
+                        Text("Debug")
                     }
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(CursorTheme.textPrimary)

@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var appState: AppState
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+    @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
 
     @State private var globalCommands: [QuickActionCommand] = []
     @State private var projectCommands: [QuickActionCommand] = []
@@ -23,6 +24,18 @@ struct SettingsView: View {
                 Text("Project settings")
             } footer: {
                 Text("URL opened when you use \"View in Browser\". Applies to the workspace below. Saved in .cursor/project-settings.json.")
+            }
+
+            Section {
+                Picker("Preferred terminal:", selection: $preferredTerminalAppRawValue) {
+                    ForEach(PreferredTerminalApp.allCases) { terminal in
+                        Text(terminal.displayName).tag(terminal.rawValue)
+                    }
+                }
+            } header: {
+                Text("Debug")
+            } footer: {
+                Text("Used by the Debug button to launch `debug.sh` from the selected workspace.")
             }
 
             Section {
