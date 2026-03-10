@@ -33,6 +33,8 @@
 		A1000026 /* SettingsModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000026 /* SettingsModalView.swift */; };
 		A1000025 /* PinnedQuestionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000025 /* PinnedQuestionsView.swift */; };
 		A1000027 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027 /* AppPreferences.swift */; };
+		A1000028 /* ProjectSettingsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028 /* ProjectSettingsStorage.swift */; };
+		A1000029 /* SetDebugURLSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029 /* SetDebugURLSheet.swift */; };
 		A1000024 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = A8000003 /* Textual */; };
 /* End PBXBuildFile section */
 
@@ -64,6 +66,8 @@
 		A2000026 /* SettingsModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsModalView.swift; sourceTree = "<group>"; };
 		A2000025 /* PinnedQuestionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedQuestionsView.swift; sourceTree = "<group>"; };
 		A2000027 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		A2000028 /* ProjectSettingsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSettingsStorage.swift; sourceTree = "<group>"; };
+		A2000029 /* SetDebugURLSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDebugURLSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -155,6 +159,7 @@
 			children = (
 				A2000010 /* SubmittableTextEditor.swift */,
 				A2000019 /* ComposerActionButtonsView.swift */,
+				A2000029 /* SetDebugURLSheet.swift */,
 				A2000025 /* PinnedQuestionsView.swift */,
 			);
 			path = Composer;
@@ -218,6 +223,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000027 /* AppPreferences.swift */,
+				A2000028 /* ProjectSettingsStorage.swift */,
 				A2000008 /* WorkspaceHelpers.swift */,
 			);
 			path = Helpers;
@@ -349,6 +355,8 @@
 				A1000023 /* KeyboardShortcutsView.swift in Sources */,
 				A1000026 /* SettingsModalView.swift in Sources */,
 				A1000025 /* PinnedQuestionsView.swift in Sources */,
+				A1000028 /* ProjectSettingsStorage.swift in Sources */,
+				A1000029 /* SetDebugURLSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

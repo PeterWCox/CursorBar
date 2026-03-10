@@ -25,6 +25,7 @@ struct PopoutView: View {
     @State private var currentBranch: String = ""
     @State private var quickActionCommands: [QuickActionCommand] = []
     @State private var composerTextHeight: CGFloat = 24
+    @State private var showSetDebugURLSheet: Bool = false
 
     private var tab: AgentTab { tabManager.activeTab }
 
@@ -153,6 +154,14 @@ struct PopoutView: View {
         )) {
             SettingsModalView()
         }
+        .sheet(isPresented: $showSetDebugURLSheet) {
+            SetDebugURLSheet(
+                workspacePath: tab.workspacePath,
+                initialURL: ProjectSettingsStorage.getDebugURL(workspacePath: tab.workspacePath) ?? "",
+                onSave: { _ in },
+                onOpenAfterSave: nil
+            )
+        }
         .overlay(
             Group {
                 Button("New Tab") {
@@ -202,11 +211,7 @@ struct PopoutView: View {
                     Text("Cursor+")
                         .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(CursorTheme.textPrimary)
-
-                    Text(tab.isRunning ? "Streaming response" : (tab.turns.last?.displayState == .stopped ? "Stopped" : "Ready"))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary)
-                    }
+                }
                 }
 
             Spacer()
@@ -222,13 +227,14 @@ struct PopoutView: View {
             .help("Settings")
 
             Button(action: dismiss) {
-                Image(systemName: "xmark")
+                Image(systemName: "minus")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(CursorTheme.textSecondary)
                     .frame(width: 30, height: 30)
                     .background(CursorTheme.surfaceMuted, in: Circle())
             }
             .buttonStyle(.plain)
+            .help("Minimise")
         }
     }
 
@@ -469,6 +475,8 @@ struct PopoutView: View {
             )
 
             HStack(alignment: .center, spacing: 8) {
+                viewInBrowserMenu
+
                 WorkspacePickerView(
                     displayName: appState.workspaceDisplayName(for: tab.workspacePath),
                     folders: devFolders,
@@ -542,6 +550,44 @@ struct PopoutView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(cardBorder, lineWidth: 1)
         )
+    }
+
+    private var viewInBrowserMenu: some View {
+        Menu {
+            Button("View in Browser") {
+                if let urlString = ProjectSettingsStorage.getDebugURL(workspacePath: tab.workspacePath),
+                   let url = URL(string: urlString) {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    showSetDebugURLSheet = true
+                }
+            }
+            Button("Set debug URL…") {
+                showSetDebugURLSheet = true
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                Text("View in Browser")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(CursorTheme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(CursorTheme.border, lineWidth: 1)
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .foregroundColor(.white)
+        .colorScheme(.dark)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Open project debug URL in browser, or set it if not configured")
     }
 
     private var sendStopButton: some View {

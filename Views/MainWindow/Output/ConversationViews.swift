@@ -144,33 +144,35 @@ struct ConversationTurnView: View, Equatable {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 8) {
-                Text(turn.userPrompt)
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(turn.userPrompt, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary)
-                        .contentShape(Rectangle())
-                        .frame(width: 28, height: 28)
+            Text(turn.userPrompt)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(CursorTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .padding(.trailing, 36)
+                .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(CursorTheme.border, lineWidth: 1)
+                )
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(turn.userPrompt, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                            .contentShape(Rectangle())
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy message")
+                    .padding(6)
                 }
-                .buttonStyle(.plain)
-                .help("Copy message")
-            }
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(segments) { segment in
