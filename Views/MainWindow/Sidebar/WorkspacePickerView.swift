@@ -8,30 +8,49 @@ struct WorkspacePickerView: View {
     var selectedPath: String
     var onSelectFolder: (String) -> Void
     var onBrowse: () -> Void
-    var onAppear: () -> Void = {}
+    /// Called when the user opens the dropdown so the parent can reload the folder list.
+    var onOpenMenu: () -> Void = {}
+
+    @State private var isPopoverPresented = false
 
     var body: some View {
-        Menu {
-            ForEach(folders, id: \.path) { folder in
-                Button {
-                    onSelectFolder(folder.path)
-                } label: {
-                    if folder.path == selectedPath {
-                        Label(folder.lastPathComponent, systemImage: "checkmark")
-                    } else {
-                        Text(folder.lastPathComponent)
-                    }
-                }
-            }
-            Divider()
-            Button("Browse other folder...", action: onBrowse)
+        Button {
+            onOpenMenu()
+            isPopoverPresented = true
         } label: {
             pickerLabel(icon: "folder", title: displayName)
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
         .foregroundColor(.white)
         .colorScheme(.dark)
-        .onAppear(perform: onAppear)
+        .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(folders, id: \.path) { folder in
+                    Button {
+                        onSelectFolder(folder.path)
+                        isPopoverPresented = false
+                    } label: {
+                        if folder.path == selectedPath {
+                            Label(folder.lastPathComponent, systemImage: "checkmark")
+                        } else {
+                            Text(folder.lastPathComponent)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Divider()
+                Button("Browse other folder...") {
+                    isPopoverPresented = false
+                    onBrowse()
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(8)
+            .frame(minWidth: 220)
+            .background(CursorTheme.surfaceMuted)
+        }
     }
 
     private func pickerLabel(icon: String, title: String) -> some View {

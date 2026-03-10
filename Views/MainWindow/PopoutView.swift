@@ -28,8 +28,30 @@ struct PopoutView: View {
     @State private var composerTextHeight: CGFloat = 24
     @State private var showSetDebugURLSheet: Bool = false
     @State private var showCreateDebugScriptSheet: Bool = false
+    /// When set, show "Are you sure?" before closing this tab (agent still processing).
+    @State private var closeTabConfirmationTabID: UUID? = nil
 
     private var tab: AgentTab { tabManager.activeTab }
+
+    /// Request to close a tab. If the agent is still running, shows a confirmation alert; otherwise closes immediately.
+    private func requestCloseTab(_ tabToClose: AgentTab) {
+        guard tabManager.tabs.count > 1 else { return }
+        if tabToClose.isRunning {
+            closeTabConfirmationTabID = tabToClose.id
+        } else {
+            stopStreaming(for: tabToClose)
+            tabManager.closeTab(tabToClose.id)
+        }
+    }
+
+    private func confirmCloseTab() {
+        guard let id = closeTabConfirmationTabID else { return }
+        if let tabToClose = tabManager.tabs.first(where: { $0.id == id }) {
+            stopStreaming(for: tabToClose)
+            tabManager.closeTab(id)
+        }
+        closeTabConfirmationTabID = nil
+    }
     /// Adds a new agent tab and resets model to Auto so each new window starts with the default.
     private func addNewAgentTab(initialPrompt: String? = nil, lastWorkspacePath: String? = nil) {
         tabManager.addTab(initialPrompt: initialPrompt, lastWorkspacePath: lastWorkspacePath)
@@ -183,6 +205,19 @@ struct PopoutView: View {
                 }
             )
         }
+        .alert("Close tab while agent is running?", isPresented: Binding(
+            get: { closeTabConfirmationTabID != nil },
+            set: { if !$0 { closeTabConfirmationTabID = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                closeTabConfirmationTabID = nil
+            }
+            Button("Close Tab", role: .destructive) {
+                confirmCloseTab()
+            }
+        } message: {
+            Text("This agent is still processing. Closing will cancel the current run. Are you sure you want to close this tab?")
+        }
         .overlay(
             Group {
                 Button("New Tab") {
@@ -201,8 +236,7 @@ struct PopoutView: View {
 
                 if tabManager.tabs.count > 1 {
                     Button("Close Tab") {
-                        stopStreaming(for: tabManager.activeTab)
-                        tabManager.closeTab(tabManager.activeTab.id)
+                        requestCloseTab(tabManager.activeTab)
                     }
                     .keyboardShortcut("w", modifiers: .command)
                     .opacity(0)
@@ -307,10 +341,7 @@ struct PopoutView: View {
                                     showClose: tabManager.tabs.count > 1,
                                     compact: false,
                                     onSelect: { tabManager.selectedTabID = t.id },
-                                    onClose: {
-                                        stopStreaming(for: t)
-                                        tabManager.closeTab(t.id)
-                                    }
+                                    onClose: { requestCloseTab(t) }
                                 )
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
@@ -456,10 +487,12 @@ struct PopoutView: View {
                 ZStack(alignment: .topLeading) {
                     SubmittableTextEditor(
                         text: Binding(
-                            get: { tab.prompt },
+                            get: { userPromptDisplayText(from: tab.prompt) },
                             set: { newValue in
-                                tab.prompt = newValue
-                                tab.hasAttachedScreenshot = !screenshotPaths(from: newValue).isEmpty
+                                let paths = screenshotPaths(from: tab.prompt)
+                                let refs = paths.map { "\n\n[Screenshot attached: \($0)]" }.joined()
+                                tab.prompt = newValue.trimmingCharacters(in: .whitespacesAndNewlines) + refs
+                                tab.hasAttachedScreenshot = !paths.isEmpty
                             }
                         ),
                         isDisabled: false,
@@ -475,7 +508,7 @@ struct PopoutView: View {
                     )
                     .frame(height: composerHeight)
 
-                    if tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    if userPromptDisplayText(from: tab.prompt).isEmpty {
                         Text("Send message and/or ⌘V to paste one or more screenshots from clipboard")
                             .font(.system(size: 13, weight: .regular, design: .monospaced))
                             .foregroundStyle(CursorTheme.textTertiary)
@@ -517,7 +550,7 @@ struct PopoutView: View {
                             appState.workspacePath = path
                         }
                     },
-                    onAppear: { devFolders = loadDevFolders(rootPath: projectsRootPath) }
+                    onOpenMenu: { devFolders = loadDevFolders(rootPath: projectsRootPath) }
                 )
 
                 ModelPickerView(
@@ -542,11 +575,22 @@ struct PopoutView: View {
                             }
                         }
                     },
-                    onAppear: {
+                    onOpenMenu: {
                         let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
                         currentBranch = cur
                         gitBranches = list
                         tab.currentBranch = cur
+                    },
+                    onCreateBranch: { name in
+                        if let err = gitCreateBranch(name: name, workspacePath: tab.workspacePath) {
+                            return err
+                        }
+                        let (cur, list) = loadGitBranches(workspacePath: tab.workspacePath)
+                        currentBranch = cur
+                        gitBranches = list
+                        tab.currentBranch = cur
+                        tab.errorMessage = nil
+                        return nil
                     }
                 )
                 .onChange(of: tab.workspacePath) { _, _ in

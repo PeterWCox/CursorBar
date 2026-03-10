@@ -145,6 +145,23 @@ func gitCheckout(branch: String, workspacePath: String) -> String? {
     return err.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+/// Create a new branch from current HEAD and check it out (`git checkout -b <name>`). Returns nil on success, error message otherwise.
+func gitCreateBranch(name: String, workspacePath: String) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "Branch name cannot be empty." }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["checkout", "-b", trimmed]
+    process.currentDirectoryURL = URL(fileURLWithPath: workspacePath)
+    let errPipe = Pipe()
+    process.standardError = errPipe
+    guard (try? process.run()) != nil else { return "Failed to run git" }
+    process.waitUntilExit()
+    guard process.terminationStatus != 0 else { return nil }
+    let err = (try? String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)) ?? "Unknown error"
+    return err.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 // MARK: - Debug script helpers
 
 enum PreferredTerminalApp: String, CaseIterable, Identifiable {
