@@ -513,18 +513,16 @@ struct PopoutView: View {
                         Label("Minimise", systemImage: "minus")
                     }
                 } label: {
-                    VStack(spacing: 3) {
-                        ForEach(0..<3, id: \.self) { _ in
-                            Circle()
-                                .fill(Color.white)
-                                .frame(width: 4, height: 4)
-                        }
-                    }
-                    .frame(width: 30, height: 30)
-                    .background(CursorTheme.surfaceMuted, in: Circle())
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 12, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(Color.white)
+                        .frame(width: 30, height: 30)
+                        .background(CursorTheme.surfaceMuted, in: Circle())
                 }
                 .menuStyle(.borderlessButton)
                 .menuIndicator(.hidden)
+                .tint(Color.white)
                 .fixedSize()
                 .help("More options")
 
@@ -656,18 +654,16 @@ struct PopoutView: View {
                                         removeProject(workspacePath: group.path)
                                     }
                                 } label: {
-                                    VStack(spacing: 2) {
-                                        ForEach(0..<3, id: \.self) { _ in
-                                            Circle()
-                                                .fill(Color.white)
-                                                .frame(width: 3, height: 3)
-                                        }
-                                    }
-                                    .frame(width: 20, height: 20)
-                                    .contentShape(Rectangle())
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .symbolRenderingMode(.monochrome)
+                                        .foregroundStyle(Color.white)
+                                        .frame(width: 24, height: 24)
+                                        .contentShape(Rectangle())
                                 }
                                 .menuStyle(.borderlessButton)
                                 .menuIndicator(.hidden)
+                                .tint(Color.white)
                                 .help("Project options")
                             }
                             if !isCollapsed {

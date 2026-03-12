@@ -171,6 +171,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+        let centerPanelItem = NSMenuItem(title: "Center Popup", action: #selector(centerPanelFromMenu), keyEquivalent: "0")
+        centerPanelItem.target = self
+        menu.addItem(centerPanelItem)
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit Cursor Metro", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -250,6 +253,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.showSettingsSheet = true
     }
 
+    @objc func centerPanelFromMenu() {
+        NSApp.activate(ignoringOtherApps: true)
+        centerPanelOnPreferredScreen()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     @objc func quitApp() {
         NSApp.terminate(nil)
     }
@@ -272,10 +281,64 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
+    private func centerPanelOnPreferredScreen() {
+        guard let screen = preferredPanelScreen() else { return }
+        let visibleFrame = screen.visibleFrame
+        var frame = panel.frame
+        frame.origin.x = visibleFrame.midX - frame.width / 2
+        frame.origin.y = visibleFrame.midY - frame.height / 2
+        panel.setFrame(frame, display: true, animate: true)
+    }
+
+    private func ensurePanelIsVisibleOnScreen() {
+        guard let screen = bestScreenForPanelFrame() ?? preferredPanelScreen() else { return }
+        let visibleFrame = screen.visibleFrame
+        var frame = panel.frame
+
+        if frame.width > visibleFrame.width {
+            frame.size.width = visibleFrame.width
+        }
+        if frame.height > visibleFrame.height {
+            frame.size.height = visibleFrame.height
+        }
+
+        frame.origin.x = min(max(frame.origin.x, visibleFrame.minX), visibleFrame.maxX - frame.width)
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+
+        panel.setFrame(frame, display: false)
+    }
+
+    private func bestScreenForPanelFrame() -> NSScreen? {
+        let frame = panel.frame
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return nil }
+
+        return screens.max { lhs, rhs in
+            intersectionArea(frame, lhs.visibleFrame) < intersectionArea(frame, rhs.visibleFrame)
+        }
+    }
+
+    private func intersectionArea(_ lhs: NSRect, _ rhs: NSRect) -> CGFloat {
+        let intersection = lhs.intersection(rhs)
+        guard !intersection.isNull else { return 0 }
+        return intersection.width * intersection.height
+    }
+
+    private func preferredPanelScreen() -> NSScreen? {
+        if let screen = panel.screen {
+            return screen
+        }
+        if let screen = statusItem.button?.window?.screen {
+            return screen
+        }
+        return NSScreen.main ?? NSScreen.screens.first
+    }
+
     /// Only position near the menu bar when we have no saved frame (first launch).
     private func restoreOrPositionPanel() {
         if FloatingPanel.hasSavedFrame() {
             FloatingPanel.restoreSavedFrame(to: panel)
+            ensurePanelIsVisibleOnScreen()
             if panel.frame.width <= collapsedPanelWidth + 20 {
                 appState.isMainContentCollapsed = true
                 panel.contentMinSize = NSSize(width: collapsedPanelWidth, height: 400)
