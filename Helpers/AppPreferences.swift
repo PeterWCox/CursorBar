@@ -3,6 +3,8 @@ import Foundation
 enum AppPreferences {
     static let projectsRootPathKey = "projectsRootPath"
     static let preferredTerminalAppKey = "preferredTerminalApp"
+    /// Comma-separated model IDs to hide from the model picker. Empty = show all.
+    static let disabledModelIdsKey = "disabledModelIds"
 
     static var defaultProjectsRootPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -14,5 +16,17 @@ enum AppPreferences {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         let expanded = (trimmed as NSString).expandingTildeInPath
         return expanded.isEmpty ? defaultProjectsRootPath : expanded
+    }
+
+    /// Parses the stored disabled model IDs string (comma-separated) into a set.
+    static func disabledModelIds(from raw: String) -> Set<String> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return Set(trimmed.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+    }
+
+    /// Serializes a set of disabled model IDs to the stored string format.
+    static func rawFrom(disabledIds: Set<String>) -> String {
+        disabledIds.sorted().joined(separator: ",")
     }
 }

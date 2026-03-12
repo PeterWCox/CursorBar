@@ -9,6 +9,40 @@ private struct TabSidebarGroup {
     let tabs: [AgentTab]
 }
 
+/// Wrapper that observes a single tab so only this subtree re-renders when that tab streams.
+/// Use for the active-tab content area so background tabs don't invalidate the whole window.
+private struct ObservedTabView<Content: View>: View {
+    @ObservedObject var tab: AgentTab
+    @ViewBuilder let content: (AgentTab) -> Content
+    var body: some View { content(tab) }
+}
+
+/// Sidebar chip that observes its tab so only this chip re-renders when that tab's state changes (e.g. isRunning).
+private struct ObservedTabChip: View {
+    @ObservedObject var tab: AgentTab
+    let isSelected: Bool
+    let showClose: Bool
+    let onSelect: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        TabChip(
+            title: tab.title,
+            subtitle: nil,
+            workspacePath: nil,
+            branchName: nil,
+            isSelected: isSelected,
+            isRunning: tab.isRunning,
+            latestTurnState: tab.turns.last?.displayState,
+            hasPrompted: !tab.turns.isEmpty,
+            showClose: showClose,
+            compact: false,
+            onSelect: onSelect,
+            onClose: onClose
+        )
+    }
+}
+
 // MARK: - Main popout panel view
 
 struct PopoutView: View {
@@ -17,6 +51,7 @@ struct PopoutView: View {
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
+    @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = ""
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
@@ -30,6 +65,7 @@ struct PopoutView: View {
     @State private var showCreateDebugScriptSheet: Bool = false
     /// When set, show "Are you sure?" before closing this tab (agent still processing).
     @State private var closeTabConfirmationTabID: UUID? = nil
+    @State private var screenshotPreviewURL: URL? = nil
     /// Workspace paths for groups that are collapsed in the sidebar (accordion).
     @State private var collapsedGroupPaths: Set<String> = []
     /// When set, the queued follow-up with this ID is in edit mode; draft text is in editingFollowUpDraft.
@@ -66,9 +102,25 @@ struct PopoutView: View {
         }
         tabManager.addTab(initialPrompt: initialPrompt, lastWorkspacePath: lastWorkspacePath)
         selectedModel = AvailableModels.autoID
+        // Refresh branch for the new tab so empty state shows correct branch immediately (avoids "No branch" on first paint).
+        let active = tabManager.activeTab
+        let (cur, list) = loadGitBranches(workspacePath: active.workspacePath)
+        currentBranch = cur
+        gitBranches = list
+        active.currentBranch = cur
     }
     private var preferredTerminalApp: PreferredTerminalApp {
         PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
+    }
+
+    /// Models to show in the picker (respects "disabled" preference). Includes current selection if it was hidden so the UI stays consistent.
+    private var modelPickerModels: [ModelOption] {
+        let disabled = AppPreferences.disabledModelIds(from: disabledModelIdsRaw)
+        var visible = AvailableModels.visible(disabledIds: disabled)
+        if !visible.contains(where: { $0.id == selectedModel }), let current = AvailableModels.model(for: selectedModel) {
+            visible = visible + [current]
+        }
+        return visible
     }
 
     private var apiUsagePercent: Int {
@@ -120,40 +172,15 @@ struct PopoutView: View {
                 tabSidebar
 
                 // Agent area: when collapsed, use zero width so sidebar stays fixed and agent collapses left to nothing.
+                // ObservedTabView ensures only this content re-renders when the active tab streams (not the whole window).
                 Group {
                     if isMainContentCollapsed {
                         Color.clear
                             .frame(width: 0)
                             .clipped()
                     } else {
-                        VStack(spacing: 12) {
-                            if let error = tab.errorMessage {
-                                Text(error)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                            .stroke(Color.red.opacity(0.25), lineWidth: 1)
-                                    )
-                            }
-
-                            outputCard
-                                .frame(maxHeight: .infinity)
-                                .id(tab.id)
-
-                            composerDock
-                        }
-                        .frame(maxWidth: .infinity)
-                        .overlay(alignment: .topLeading) {
-                            if showPinnedQuestionsPanel {
-                                PinnedQuestionsStackView(tab: tab, onClose: { showPinnedQuestionsPanel = false })
-                                    .padding(.top, 8)
-                                    .padding(.leading, 4)
-                            }
+                        ObservedTabView(tab: tabManager.activeTab) { tab in
+                            agentAreaContent(tab: tab)
                         }
                     }
                 }
@@ -238,6 +265,14 @@ struct PopoutView: View {
         } message: {
             Text("This agent is still processing. Closing will cancel the current run. Are you sure you want to close this tab?")
         }
+        .overlay {
+            if let url = screenshotPreviewURL {
+                ScreenshotPreviewModal(imageURL: url, isPresented: Binding(
+                    get: { true },
+                    set: { if !$0 { screenshotPreviewURL = nil } }
+                ))
+            }
+        }
         .overlay(
             Group {
                 Button("Settings") {
@@ -301,6 +336,17 @@ struct PopoutView: View {
 
     /// Light blue used for agent-tab progress spinner; reused for beta badge.
     private static let agentSpinnerBlue = Color(red: 0.45, green: 0.68, blue: 1.0)
+    /// Amber for debug build badge (only visible in Debug configuration).
+    private static let debugBadgeAmber = Color(red: 1.0, green: 0.6, blue: 0.2)
+
+    /// True when built with Debug configuration (SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG).
+    private static var isDebugBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
 
     private var topBar: some View {
         HStack(spacing: 14) {
@@ -315,6 +361,15 @@ struct PopoutView: View {
                 .padding(.horizontal, 6)
                 .padding(.vertical, 3)
                 .background(Self.agentSpinnerBlue.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            if Self.isDebugBuild && !isMainContentCollapsed {
+                Text("DEBUG")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Self.debugBadgeAmber)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Self.debugBadgeAmber.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
 
             Spacer()
 
@@ -404,18 +459,10 @@ struct PopoutView: View {
                             .buttonStyle(.plain)
                             if !isCollapsed {
                                 ForEach(group.tabs) { t in
-                                    let isSelected = t.id == tabManager.selectedTabID
-                                    TabChip(
-                                        title: t.title,
-                                        subtitle: nil,
-                                        workspacePath: nil,
-                                        branchName: nil,
-                                        isSelected: isSelected,
-                                        isRunning: t.isRunning,
-                                        latestTurnState: t.turns.last?.displayState,
-                                        hasPrompted: !t.turns.isEmpty,
+                                    ObservedTabChip(
+                                        tab: t,
+                                        isSelected: t.id == tabManager.selectedTabID,
                                         showClose: tabManager.tabs.count > 1,
-                                        compact: false,
                                         onSelect: {
                                             tabManager.selectedTabID = t.id
                                             if appState.isMainContentCollapsed {
@@ -464,13 +511,52 @@ struct PopoutView: View {
         .padding(.trailing, 12)
     }
 
+    // MARK: - Agent area content (observed by tab; only this subtree re-renders when active tab streams)
+
+    private func agentAreaContent(tab: AgentTab) -> some View {
+        VStack(spacing: 12) {
+            if let error = tab.errorMessage {
+                Text(error)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(red: 1.0, green: 0.64, blue: 0.67))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                    )
+            }
+
+            outputCard(tab: tab)
+                .frame(maxHeight: .infinity)
+                .id(tab.id)
+
+            composerDock(tab: tab)
+        }
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) {
+            if showPinnedQuestionsPanel {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PinnedQuestionsStackView(tab: tab, onClose: { showPinnedQuestionsPanel = false })
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 8)
+            }
+        }
+    }
+
     // MARK: - Empty state (new tab)
 
-    private var emptyStateContent: some View {
+    private func emptyStateContent(tab: AgentTab) -> some View {
         let projectName = appState.workspaceDisplayName(for: tab.workspacePath).isEmpty
             ? ((tab.workspacePath as NSString).lastPathComponent.isEmpty ? "Project" : (tab.workspacePath as NSString).lastPathComponent)
             : appState.workspaceDisplayName(for: tab.workspacePath)
         let modelLabel = AvailableModels.model(for: selectedModel)?.label ?? "Auto"
+        // Use view's currentBranch when tab's is empty (e.g. new tab before onChange runs) so we don't flash "No branch".
+        let branchDisplay = tab.currentBranch.isEmpty ? currentBranch : tab.currentBranch
         return VStack(spacing: 0) {
                 Spacer(minLength: 24)
                 VStack(spacing: 20) {
@@ -485,7 +571,7 @@ struct PopoutView: View {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(CursorTheme.textTertiary)
-                            Text(tab.currentBranch.isEmpty ? "No branch" : tab.currentBranch)
+                            Text(branchDisplay.isEmpty ? "No branch" : branchDisplay)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(CursorTheme.textSecondary)
                         }
@@ -523,17 +609,20 @@ struct PopoutView: View {
 
     // MARK: - Output card
 
-    private var outputCard: some View {
+    private func outputCard(tab: AgentTab) -> some View {
         OutputScrollView(
             tab: tab,
             scrollToken: tab.scrollToken,
             content: {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                // VStack (not LazyVStack): LazyVStack in ScrollView can fail to re-layout when appending
+                // a new turn, so nothing renders until e.g. switching tabs. Conversation length is
+                // typically small; equatable + throttling keep redraw cost low.
+                VStack(alignment: .leading, spacing: 18) {
                     if tab.turns.isEmpty {
-                        emptyStateContent
+                        emptyStateContent(tab: tab)
                     } else {
                         ForEach(tab.turns) { turn in
-                            ConversationTurnView(turn: turn, workspacePath: tab.workspacePath)
+                            ConversationTurnView(turn: turn, workspacePath: tab.workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
                                 .equatable()
                                 .id(turn.id)
                         }
@@ -552,7 +641,7 @@ struct PopoutView: View {
 
     // MARK: - Composer dock
 
-    private var composerDock: some View {
+    private func composerDock(tab: AgentTab) -> some View {
         let attachedPaths = screenshotPaths(from: tab.prompt)
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 8) {
@@ -580,7 +669,8 @@ struct PopoutView: View {
                 ScreenshotCardView(
                     path: path,
                     workspacePath: tab.workspacePath,
-                    onDelete: { deleteScreenshot(path: path) }
+                    onDelete: { deleteScreenshot(path: path) },
+                    onTapPreview: { screenshotPreviewURL = URL(fileURLWithPath: tab.workspacePath).appendingPathComponent(path) }
                 )
             }
 
@@ -647,7 +737,7 @@ struct PopoutView: View {
 
                 ModelPickerView(
                     selectedModelId: selectedModel,
-                    models: AvailableModels.all,
+                    models: modelPickerModels,
                     onSelect: { selectedModel = $0 }
                 )
 
@@ -721,7 +811,10 @@ struct PopoutView: View {
             try? process.run()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.up.right.square")
+                Image("OpenInCursorIcon")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 16, height: 16)
                 Text("Open in Cursor")
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -1108,20 +1201,52 @@ struct PopoutView: View {
                 }
                 let stream = try AgentRunner.stream(prompt: trimmed, workspacePath: currentTab.workspacePath, model: selectedModel, conversationId: currentTab.cursorChatId)
                 guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID else { return }
+                // Coalesce text chunks and flush at ~100ms to reduce main-actor and UI churn during long runs.
+                var thinkingBuffer = ""
+                var assistantBuffer = ""
+                var flushTask: Task<Void, Never>?
+                let flushIntervalNs: UInt64 = 100_000_000 // 100ms
+                func flushBatched() {
+                    if !thinkingBuffer.isEmpty {
+                        appendThinkingText(thinkingBuffer, to: turnID, in: currentTab)
+                        thinkingBuffer = ""
+                    }
+                    if !assistantBuffer.isEmpty {
+                        mergeAssistantText(assistantBuffer, into: currentTab, turnID: turnID)
+                        assistantBuffer = ""
+                    }
+                    requestAutoScroll(for: currentTab)
+                }
+                func scheduleFlush() {
+                    flushTask?.cancel()
+                    flushTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: flushIntervalNs)
+                        guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID else { return }
+                        flushBatched()
+                        flushTask = nil
+                    }
+                }
                 for try await chunk in stream {
                     guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID, !Task.isCancelled else { return }
                     switch chunk {
                     case .thinkingDelta(let text):
-                        appendThinkingText(text, to: turnID, in: currentTab)
+                        thinkingBuffer += text
+                        scheduleFlush()
                     case .thinkingCompleted:
+                        flushBatched()
                         completeThinking(for: turnID, in: currentTab)
+                        requestAutoScroll(for: currentTab)
                     case .assistantText(let text):
-                        mergeAssistantText(text, into: currentTab, turnID: turnID)
+                        assistantBuffer += text
+                        scheduleFlush()
                     case .toolCall(let update):
+                        flushBatched()
                         mergeToolCall(update, into: currentTab, turnID: turnID)
+                        requestAutoScroll(for: currentTab)
                     }
-                    requestAutoScroll(for: currentTab)
                 }
+                flushTask?.cancel()
+                flushBatched()
                 finishStreaming(for: currentTab, runID: runID, turnID: turnID)
             } catch is CancellationError {
                 finishStreaming(for: currentTab, runID: runID, turnID: turnID)
@@ -1219,7 +1344,7 @@ struct PopoutView: View {
         }
         tab.cachedConversationCharacterCount += incoming.count
         tab.turns[index].lastStreamPhase = .thinking
-        notifyTurnsChanged(tab)
+        notifyTurnsChangedIfThrottled(tab)
     }
 
     private func completeThinking(for turnID: UUID, in tab: AgentTab) {
@@ -1239,7 +1364,7 @@ struct PopoutView: View {
         if tab.turns[index].segments.last?.kind != .assistant {
             tab.turns[index].segments.append(ConversationSegment(kind: .assistant, text: incoming))
             tab.cachedConversationCharacterCount += incoming.count
-            notifyTurnsChanged(tab)
+            notifyTurnsChangedIfThrottled(tab)
             return
         }
 
@@ -1257,7 +1382,7 @@ struct PopoutView: View {
             tab.turns[index].segments[lastIndex].text += incoming
             tab.cachedConversationCharacterCount += incoming.count
         }
-        notifyTurnsChanged(tab)
+        notifyTurnsChangedIfThrottled(tab)
     }
 
     private func mergeToolCall(_ update: AgentToolCallUpdate, into tab: AgentTab, turnID: UUID) {
@@ -1306,9 +1431,20 @@ struct PopoutView: View {
         }
     }
 
-    private func requestAutoScroll(for tab: AgentTab, force: Bool = false) {
+    /// Throttled notification for streaming text updates (~100ms) to reduce CPU from per-token re-renders.
+    /// Call notifyTurnsChanged directly when streaming ends or for discrete events (e.g. tool calls).
+    private func notifyTurnsChangedIfThrottled(_ tab: AgentTab) {
         let now = CFAbsoluteTimeGetCurrent()
-        guard force || now - tab.lastAutoScrollAt >= 0.12 else { return }
+        guard now - tab.lastStreamUIUpdateAt >= 0.1 else { return }
+        tab.lastStreamUIUpdateAt = now
+        notifyTurnsChanged(tab)
+    }
+
+    /// Only update scroll token when this tab is the selected one (visible), so background streaming doesn't do scroll work.
+    private func requestAutoScroll(for tab: AgentTab, force: Bool = false) {
+        guard tab.id == tabManager.selectedTabID else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard force || now - tab.lastAutoScrollAt >= 0.15 else { return }
         tab.lastAutoScrollAt = now
         tab.scrollToken = UUID()
     }

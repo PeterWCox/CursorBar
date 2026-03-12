@@ -7,6 +7,7 @@ struct ScreenshotCardView: View {
     var path: String
     var workspacePath: String
     var onDelete: () -> Void
+    var onTapPreview: () -> Void
 
     private var imageURL: URL {
         URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
@@ -29,6 +30,8 @@ struct ScreenshotCardView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
                         )
+                        .onTapGesture { onTapPreview() }
+                        .contentShape(Rectangle())
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Attached screenshot")

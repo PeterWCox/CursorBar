@@ -77,6 +77,8 @@ class AgentTab: ObservableObject, Identifiable {
     var activeTurnID: UUID?
     var cachedConversationCharacterCount: Int
     var lastAutoScrollAt: TimeInterval = 0
+    /// Last time we pushed a streaming UI update; used to throttle to ~100ms.
+    var lastStreamUIUpdateAt: TimeInterval = 0
     /// Cursor CLI chat ID for this tab; set after first message so follow-ups use the same conversation.
     var cursorChatId: String?
 
@@ -133,6 +135,8 @@ class AgentTab: ObservableObject, Identifiable {
 class TabManager: ObservableObject {
     @Published var tabs: [AgentTab] = []
     @Published var selectedTabID: UUID
+    /// No longer forwarding each tab's objectWillChange — only structural changes (tabs, selectedTabID) publish.
+    /// Content and sidebar chips observe their specific AgentTab to avoid re-rendering the whole window when one tab streams.
     private var tabSubscriptions: [UUID: AnyCancellable] = [:]
 
     init(loadedState: SavedTabState? = nil) {
@@ -192,10 +196,12 @@ class TabManager: ObservableObject {
         tabs.forEach(observe)
     }
 
+    /// Subscriptions are kept for potential future use (e.g. persistence triggers). We intentionally do *not*
+    /// forward tab.objectWillChange to TabManager so that streaming in one tab doesn't invalidate the whole UI.
     private func observe(_ tab: AgentTab) {
         guard tabSubscriptions[tab.id] == nil else { return }
-        tabSubscriptions[tab.id] = tab.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
+        tabSubscriptions[tab.id] = tab.objectWillChange.sink { _ in
+            // No-op: do not call self?.objectWillChange.send(). Views that need tab updates observe the tab directly.
         }
     }
 }

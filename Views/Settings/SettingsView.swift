@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
+    @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = ""
 
     @State private var globalCommands: [QuickActionCommand] = []
     @State private var projectCommands: [QuickActionCommand] = []
@@ -66,6 +67,23 @@ struct SettingsView: View {
                 Text("Repository")
             } footer: {
                 Text("The directory (usually a git repo) where Cursor agent will work. Agent will use .cursor/rules and AGENTS.md from this path.")
+            }
+
+            Section {
+                ForEach(AvailableModels.all, id: \.id) { model in
+                    Toggle(model.label, isOn: Binding(
+                        get: { !AppPreferences.disabledModelIds(from: disabledModelIdsRaw).contains(model.id) },
+                        set: { enabled in
+                            var set = AppPreferences.disabledModelIds(from: disabledModelIdsRaw)
+                            if enabled { set.remove(model.id) } else { set.insert(model.id) }
+                            disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: set)
+                        }
+                    ))
+                }
+            } header: {
+                Text("Model Picker")
+            } footer: {
+                Text("Choose which models appear in the model picker. By default all are shown.")
             }
 
             Section {

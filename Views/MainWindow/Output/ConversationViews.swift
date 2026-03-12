@@ -47,47 +47,125 @@ private func toolCallTint(for status: ToolCallSegmentStatus) -> Color {
     }
 }
 
+// MARK: - Animated thinking dots
+
+private struct ThinkingDotsView: View {
+    @State private var phase = 0
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(0 ..< 3, id: \.self) { index in
+                Circle()
+                    .fill(CursorTheme.textSecondary)
+                    .frame(width: 4, height: 4)
+                    .scaleEffect(phase == index ? 1.2 : 0.85)
+                    .opacity(phase == index ? 1 : 0.5)
+                    .animation(.easeInOut(duration: 0.25), value: phase)
+            }
+        }
+        .onReceive(Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()) { _ in
+            phase = (phase + 1) % 3
+        }
+    }
+}
+
+// MARK: - Thinking block (collapsed by default for performance)
+
+private struct ThinkingBlockView: View {
+    let segment: ConversationSegment
+    var renderAsPlainText: Bool = false
+    /// When false, thinking has finished and we show a checkmark like other tools.
+    var isStreaming: Bool = false
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    if isStreaming {
+                        ThinkingDotsView()
+                    } else {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                    }
+                    Text("Thinking")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                    Spacer(minLength: 8)
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovered in
+                if isHovered { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+
+            if isExpanded {
+                Group {
+                    if renderAsPlainText {
+                        Text(segment.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                            .textSelection(.enabled)
+                    } else {
+                        StructuredText(markdown: segment.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                            .textual.textSelection(.enabled)
+                            .colorScheme(.dark)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(CursorTheme.border, lineWidth: 1)
+        )
+    }
+}
+
 // MARK: - Segment view
 
 struct ConversationSegmentView: View, Equatable {
     let segment: ConversationSegment
+    /// When true, render as plain text (no markdown parsing). Use during streaming to reduce CPU.
+    var renderAsPlainText: Bool = false
+    /// When true for a thinking segment, show animated dots; when false, show checkmark (finished).
+    var isStreaming: Bool = false
 
     static func == (lhs: ConversationSegmentView, rhs: ConversationSegmentView) -> Bool {
-        lhs.segment == rhs.segment
+        lhs.segment == rhs.segment && lhs.renderAsPlainText == rhs.renderAsPlainText && lhs.isStreaming == rhs.isStreaming
     }
 
     var body: some View {
         switch segment.kind {
         case .thinking:
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(CursorTheme.textSecondary)
-                    Text("Thinking")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textSecondary)
-                }
-                StructuredText(markdown: segment.text)
-                    .font(.system(size: 12))
-                    .foregroundStyle(CursorTheme.textSecondary)
-                    .textual.textSelection(.enabled)
-                    .colorScheme(.dark)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(CursorTheme.border, lineWidth: 1)
-            )
+            ThinkingBlockView(segment: segment, renderAsPlainText: renderAsPlainText, isStreaming: isStreaming)
         case .assistant:
-            StructuredText(markdown: segment.text)
-                .textual.structuredTextStyle(.gitHub)
-                .foregroundStyle(CursorTheme.textPrimary)
-                .textual.textSelection(.enabled)
-                .colorScheme(.dark)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                if renderAsPlainText {
+                    Text(segment.text)
+                        .foregroundStyle(CursorTheme.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    StructuredText(markdown: segment.text)
+                        .textual.structuredTextStyle(.gitHub)
+                        .foregroundStyle(CursorTheme.textPrimary)
+                        .textual.textSelection(.enabled)
+                        .colorScheme(.dark)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
         case .toolCall:
             if let toolCall = segment.toolCall {
                 VStack(alignment: .leading, spacing: 8) {
@@ -135,6 +213,7 @@ struct ConversationSegmentView: View, Equatable {
 private struct UserMessageContentView: View {
     let prompt: String
     let workspacePath: String
+    @Binding var screenshotPreviewURL: URL?
 
     private var displayText: String { userPromptDisplayText(from: prompt) }
     private var paths: [String] { screenshotPaths(from: prompt) }
@@ -150,7 +229,7 @@ private struct UserMessageContentView: View {
                     .textSelection(.enabled)
             }
             ForEach(Array(paths.enumerated()), id: \.offset) { _, path in
-                UserMessageScreenshotView(path: path, workspacePath: workspacePath)
+                UserMessageScreenshotView(path: path, workspacePath: workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
             }
         }
     }
@@ -159,6 +238,7 @@ private struct UserMessageContentView: View {
 private struct UserMessageScreenshotView: View {
     let path: String
     let workspacePath: String
+    @Binding var screenshotPreviewURL: URL?
 
     private var imageURL: URL {
         URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
@@ -175,6 +255,8 @@ private struct UserMessageScreenshotView: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .stroke(CursorTheme.border, lineWidth: 1)
                 )
+                .onTapGesture { screenshotPreviewURL = imageURL }
+                .contentShape(Rectangle())
         }
     }
 }
@@ -184,6 +266,7 @@ private struct UserMessageScreenshotView: View {
 struct ConversationTurnView: View, Equatable {
     let turn: ConversationTurn
     var workspacePath: String = ""
+    @Binding var screenshotPreviewURL: URL?
 
     @State private var showCopiedFeedback = false
 
@@ -198,7 +281,7 @@ struct ConversationTurnView: View, Equatable {
         VStack(alignment: .leading, spacing: 12) {
             Group {
                 if !workspacePath.isEmpty {
-                    UserMessageContentView(prompt: turn.userPrompt, workspacePath: workspacePath)
+                    UserMessageContentView(prompt: turn.userPrompt, workspacePath: workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
                 } else {
                     Text(turn.userPrompt)
                         .font(.system(size: 14, weight: .medium))
@@ -261,7 +344,8 @@ struct ConversationTurnView: View, Equatable {
 
             VStack(alignment: .leading, spacing: 14) {
                 ForEach(segments) { segment in
-                    ConversationSegmentView(segment: segment)
+                    let isStreamingSegment = turn.isStreaming && segment.id == segments.last?.id && (segment.kind == .assistant || segment.kind == .thinking)
+                    ConversationSegmentView(segment: segment, renderAsPlainText: isStreamingSegment, isStreaming: isStreamingSegment)
                         .equatable()
                 }
                 if !hasAssistantContent && turn.isStreaming {
@@ -286,7 +370,6 @@ struct ProcessingPlaceholderView: View {
                 Text("Processing request" + String(repeating: ".", count: dotCount))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary)
-                    .animation(.easeInOut(duration: 0.2), value: dotCount)
             }
         }
     }

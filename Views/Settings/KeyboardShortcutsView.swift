@@ -27,6 +27,9 @@ struct KeyboardShortcutsContentView: View {
         ("Agent", [
             ShortcutRow(keys: ["⌃C"], action: "Stop agent"),
         ]),
+        ("Window", [
+            ShortcutRow(keys: ["⌘B", "⌘S"], action: "Show/hide panel"),
+        ]),
     ]
 
     var body: some View {

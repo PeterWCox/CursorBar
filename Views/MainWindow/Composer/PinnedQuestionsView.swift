@@ -19,7 +19,7 @@ struct PinnedQuestionsStackView: View {
             if !visibleTurns.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text("Previous requests")
+                        Text("History")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(CursorTheme.textSecondary)
                         Spacer(minLength: 8)
@@ -52,7 +52,7 @@ struct PinnedQuestionsStackView: View {
                         .stroke(CursorTheme.border, lineWidth: 1)
                 )
                 .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
-                .frame(maxWidth: 320, alignment: .topLeading)
+                .frame(maxWidth: 320, alignment: .top)
             }
         }
     }

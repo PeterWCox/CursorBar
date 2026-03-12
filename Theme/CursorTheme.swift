@@ -93,6 +93,13 @@ enum AvailableModels {
     static func model(for id: String) -> ModelOption? {
         all.first { $0.id == id }
     }
+
+    /// Models to show in the picker; excludes any whose id is in `disabledIds`. By default (empty set) returns all.
+    static func visible(disabledIds: Set<String>) -> [ModelOption] {
+        guard !disabledIds.isEmpty else { return all }
+        let filtered = all.filter { !disabledIds.contains($0.id) }
+        return filtered.isEmpty ? all : filtered
+    }
 }
 
 /// Predefined quick-action prompts.
