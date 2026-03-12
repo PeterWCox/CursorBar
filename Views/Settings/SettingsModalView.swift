@@ -5,6 +5,7 @@ import AppKit
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case general = "General"
+    case models = "Models"
     case keyboardShortcuts = "Keyboard Shortcuts"
     case about = "About"
 
@@ -13,6 +14,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "slider.horizontal.3"
+        case .models: return "cpu"
         case .keyboardShortcuts: return "keyboard"
         case .about: return "info.circle"
         }
@@ -21,6 +23,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 
 struct SettingsModalView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject var appState: AppState
     @State private var selectedPane: SettingsPane = .general
 
     private let sidebarWidth: CGFloat = 200
@@ -64,10 +67,17 @@ struct SettingsModalView: View {
     }
 
     private var sidebar: some View {
-        List(SettingsPane.allCases, selection: $selectedPane) { pane in
-            Label(pane.rawValue, systemImage: pane.icon)
-                .foregroundStyle(selectedPane == pane ? CursorTheme.textPrimary : Color.white.opacity(0.82))
-                .tag(pane)
+        let unselectedForeground = Color.white.opacity(0.82)
+        return List(SettingsPane.allCases, selection: $selectedPane) { pane in
+            HStack(spacing: 8) {
+                Image(systemName: pane.icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(selectedPane == pane ? CursorTheme.textPrimary : unselectedForeground)
+                    .symbolRenderingMode(.monochrome)
+                Text(pane.rawValue)
+                    .foregroundStyle(selectedPane == pane ? CursorTheme.textPrimary : unselectedForeground)
+            }
+            .tag(pane)
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -81,6 +91,8 @@ struct SettingsModalView: View {
             switch selectedPane {
             case .general:
                 GeneralSettingsPaneView()
+            case .models:
+                ModelsSettingsPaneView()
             case .keyboardShortcuts:
                 KeyboardShortcutsContentView()
             case .about:
@@ -180,6 +192,87 @@ private struct GeneralSettingsPaneView: View {
     }
 }
 
+// MARK: - Models pane
+
+private struct ModelsSettingsPaneView: View {
+    @EnvironmentObject var appState: AppState
+    @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Model picker")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textTertiary)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+
+                    Text("Choose which models appear in the model picker. Uncheck to hide a model from the list.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(CursorTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack(spacing: 8) {
+                        Button("Select all") {
+                            disabledModelIdsRaw = AppPreferences.defaultDisabledModelIdsRaw
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Deselect all") {
+                            let allIds = Set(appState.availableModels.map(\.id))
+                            disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: allIds)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(appState.availableModels, id: \.id) { model in
+                            Toggle(isOn: Binding(
+                                get: { !AppPreferences.disabledModelIds(from: disabledModelIdsRaw).contains(model.id) },
+                                set: { enabled in
+                                    var set = AppPreferences.disabledModelIds(from: disabledModelIdsRaw)
+                                    if enabled { set.remove(model.id) } else { set.insert(model.id) }
+                                    disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: set)
+                                }
+                            )) {
+                                HStack(spacing: 8) {
+                                    Text(model.label)
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(CursorTheme.textPrimary)
+                                    if model.isPremium {
+                                        Text("Premium")
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(CursorTheme.textTertiary)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(CursorTheme.surfaceMuted, in: Capsule())
+                                    }
+                                }
+                            }
+                            .toggleStyle(.checkbox)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+
+                            if model.id != appState.availableModels.last?.id {
+                                Divider()
+                                    .background(CursorTheme.border)
+                                    .padding(.leading, 16)
+                            }
+                        }
+                    }
+                    .background(CursorTheme.surfaceMuted.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(CursorTheme.border.opacity(0.6), lineWidth: 1)
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(24)
+        }
+    }
+}
+
 // MARK: - About pane (placeholder + GitHub)
 
 private struct AboutPaneView: View {
@@ -189,7 +282,10 @@ private struct AboutPaneView: View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top, spacing: 12) {
-                    BrandMark(size: 44)
+                    Image("CursorMetroLogo")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 44)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Cursor+")
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))

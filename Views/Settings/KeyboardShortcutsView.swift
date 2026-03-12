@@ -13,7 +13,8 @@ private struct ShortcutRow: Identifiable {
 struct KeyboardShortcutsContentView: View {
     private static let sections: [(title: String, rows: [ShortcutRow])] = [
         ("Tabs", [
-            ShortcutRow(keys: ["⌘T", "⌘N"], action: "New tab"),
+            ShortcutRow(keys: ["⌘T", "⌘N"], action: "New agent (same project)"),
+            ShortcutRow(keys: ["⌘P", "⌘O"], action: "Add project"),
             ShortcutRow(keys: ["⌘W"], action: "Close tab"),
             ShortcutRow(keys: ["⌘⇧T"], action: "Reopen closed tab"),
         ]),

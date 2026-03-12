@@ -158,6 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         appState.saveTabState()
         PanelFrameStorage.save(panel.frame)
+        deleteScreenshotCacheOlderThan(days: 20)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -201,6 +202,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.applyCollapsedState(collapsed)
             }
             .store(in: &cancellables)
+
+        appState.loadModelsFromCLI()
     }
 
     private func applyCollapsedState(_ collapsed: Bool) {
@@ -277,6 +280,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 appState.isMainContentCollapsed = true
                 panel.contentMinSize = NSSize(width: collapsedPanelWidth, height: 400)
             } else {
+                appState.isMainContentCollapsed = false
                 // Keep agent tabs sidebar full width: never allow window narrower than sidebar + min agent area.
                 if panel.frame.width < minExpandedPanelWidth {
                     var frame = panel.frame
@@ -372,7 +376,40 @@ class AppState: ObservableObject {
     @Published var showSettingsSheet: Bool = false
     /// When true, main agent content is hidden and panel is resized to sidebar-only width.
     @Published var isMainContentCollapsed: Bool = false
-    let tabManager = TabManager(loadedState: TabManagerPersistence.load())
+    @Published private(set) var openProjectCount: Int = 0
+    /// Available agent models (from CLI when loaded; otherwise fallback). Refreshed on launch.
+    @Published var availableModels: [ModelOption] = AvailableModels.fallback
+    let tabManager: TabManager
+    private var cancellables = Set<AnyCancellable>()
+
+    func loadModelsFromCLI() {
+        Task { @MainActor in
+            guard let models = try? await AgentRunner.listModels(), !models.isEmpty else { return }
+            availableModels = models
+        }
+    }
+
+    func visibleModels(disabledIds: Set<String>) -> [ModelOption] {
+        AvailableModels.visible(from: availableModels, disabledIds: disabledIds)
+    }
+
+    func model(for id: String) -> ModelOption? {
+        AvailableModels.model(for: id, in: availableModels)
+    }
+
+    init() {
+        let manager = TabManager(loadedState: TabManagerPersistence.load())
+        tabManager = manager
+        openProjectCount = manager.openProjectCount
+
+        manager.$projects
+            .map(\.count)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.openProjectCount = $0
+            }
+            .store(in: &cancellables)
+    }
 
     func saveTabState() {
         tabManager.saveState()
@@ -410,8 +447,12 @@ class AppState: ObservableObject {
             }
 
             if panel.runModal() == .OK, let url = panel.url {
-                self.workspacePath = url.path
-                completion?(url.path)
+                let path = url.path
+                self.workspacePath = path
+                // Defer completion to next run loop so the modal is fully dismissed and UI updates reliably.
+                DispatchQueue.main.async {
+                    completion?(path)
+                }
             }
         }
     }

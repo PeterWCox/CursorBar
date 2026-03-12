@@ -3,6 +3,10 @@ import Combine
 
 // MARK: - Persisted tab state (for save/restore across launches)
 
+struct SavedProject: Codable, Equatable {
+    var path: String
+}
+
 struct SavedAgentTab: Codable {
     var id: UUID
     var title: String
@@ -16,7 +20,36 @@ struct SavedAgentTab: Codable {
 
 struct SavedTabState: Codable {
     var tabs: [SavedAgentTab]
-    var selectedTabID: UUID
+    var selectedTabID: UUID?
+    var projects: [SavedProject]
+    var selectedProjectPath: String?
+
+    init(
+        tabs: [SavedAgentTab],
+        selectedTabID: UUID?,
+        projects: [SavedProject],
+        selectedProjectPath: String?
+    ) {
+        self.tabs = tabs
+        self.selectedTabID = selectedTabID
+        self.projects = projects
+        self.selectedProjectPath = selectedProjectPath
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case tabs
+        case selectedTabID
+        case projects
+        case selectedProjectPath
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .tabs) ?? []
+        selectedTabID = try container.decodeIfPresent(UUID.self, forKey: .selectedTabID)
+        projects = try container.decodeIfPresent([SavedProject].self, forKey: .projects) ?? []
+        selectedProjectPath = try container.decodeIfPresent(String.self, forKey: .selectedProjectPath)
+    }
 }
 
 enum TabManagerPersistence {
@@ -132,9 +165,17 @@ class AgentTab: ObservableObject, Identifiable {
     }
 }
 
+struct ProjectState: Identifiable, Codable, Equatable {
+    var path: String
+
+    var id: String { path }
+}
+
 class TabManager: ObservableObject {
+    @Published private(set) var projects: [ProjectState] = []
     @Published var tabs: [AgentTab] = []
-    @Published var selectedTabID: UUID
+    @Published var selectedTabID: UUID?
+    @Published var selectedProjectPath: String?
     /// Stack of recently closed tabs (most recent last) for "Reopen closed tab" (Cmd+Shift+T). Capped at 20.
     @Published private(set) var recentlyClosedTabs: [SavedAgentTab] = []
     private static let maxRecentlyClosedTabs = 20
@@ -143,36 +184,95 @@ class TabManager: ObservableObject {
     private var tabSubscriptions: [UUID: AnyCancellable] = [:]
 
     init(loadedState: SavedTabState? = nil) {
-        if let saved = loadedState, !saved.tabs.isEmpty {
+        if let saved = loadedState {
             let restoredTabs = saved.tabs.map { AgentTab(from: $0) }
-            let validSelected = saved.tabs.contains(where: { $0.id == saved.selectedTabID })
-            tabs = restoredTabs
-            selectedTabID = validSelected ? saved.selectedTabID : (restoredTabs.first?.id ?? UUID())
-        } else {
-            let first = AgentTab(title: "Agent 1")
-            tabs = [first]
-            selectedTabID = first.id
+            let filteredTabs = restoredTabs.filter { TabManager.workspacePathExists($0.workspacePath) }
+            let restoredProjects = saved.projects
+                .map { ProjectState(path: $0.path) }
+                .filter { TabManager.workspacePathExists($0.path) }
+            let tabProjects = filteredTabs.map { ProjectState(path: $0.workspacePath) }
+
+            tabs = filteredTabs
+            projects = Self.mergeProjects(savedProjects: restoredProjects, tabProjects: tabProjects)
+            selectedTabID = saved.selectedTabID
+            selectedProjectPath = saved.selectedProjectPath
         }
+        reconcileSelection()
         bindTabChanges()
+    }
+
+    /// True if the path exists and is a directory (project can be opened).
+    private static func workspacePathExists(_ path: String) -> Bool {
+        guard !path.isEmpty else { return false }
+        let expanded = (path as NSString).expandingTildeInPath
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) && isDir.boolValue
     }
 
     /// Persist current tabs and selected tab to disk (call on quit or periodically).
     func saveState() {
         let state = SavedTabState(
             tabs: tabs.map { $0.toSaved() },
-            selectedTabID: selectedTabID
+            selectedTabID: selectedTabID,
+            projects: projects.map { SavedProject(path: $0.path) },
+            selectedProjectPath: selectedProjectPath
         )
         TabManagerPersistence.save(state)
     }
 
-    var activeTab: AgentTab {
-        tabs.first { $0.id == selectedTabID } ?? tabs[0]
+    /// Current tab, or nil when there are no tabs (splash state).
+    var activeTab: AgentTab? {
+        guard let selectedTabID else { return nil }
+        return tabs.first { $0.id == selectedTabID }
     }
 
-    /// Adds a new tab. Its workspace is set to `lastWorkspacePath` (e.g. the active tab’s workspace) so new tabs inherit the last-focused project.
-    func addTab(initialPrompt: String? = nil, lastWorkspacePath: String? = nil) {
-        let path = lastWorkspacePath ?? activeTab.workspacePath
-        let resolved = path.isEmpty ? FileManager.default.homeDirectoryForCurrentUser.path : path
+    var activeProjectPath: String? {
+        activeTab?.workspacePath ?? selectedProjectPath ?? projects.first?.path
+    }
+
+    var openProjectCount: Int {
+        projects.count
+    }
+
+    func addProject(path: String, select: Bool = true) {
+        let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.workspacePathExists(normalizedPath) else { return }
+        if !projects.contains(where: { $0.path == normalizedPath }) {
+            projects.append(ProjectState(path: normalizedPath))
+        }
+        if select {
+            selectedProjectPath = normalizedPath
+            if let existingTab = activeTab, existingTab.workspacePath == normalizedPath {
+                selectedTabID = existingTab.id
+            } else if !tabs.contains(where: { $0.id == selectedTabID && $0.workspacePath == normalizedPath }) {
+                selectedTabID = nil
+            }
+        }
+        reconcileSelection(preferredProjectPath: normalizedPath)
+    }
+
+    func selectProject(_ path: String) {
+        guard projects.contains(where: { $0.path == path }) else { return }
+        selectedProjectPath = path
+        if let selectedTab = activeTab, selectedTab.workspacePath == path {
+            return
+        }
+        if let firstTab = tabs.first(where: { $0.workspacePath == path }) {
+            selectedTabID = firstTab.id
+        } else {
+            selectedTabID = nil
+        }
+    }
+
+    /// Adds a new tab under the selected or supplied project.
+    @discardableResult
+    func addTab(initialPrompt: String? = nil, workspacePath: String? = nil) -> AgentTab? {
+        let path = workspacePath ?? activeProjectPath ?? activeTab?.workspacePath ?? ""
+        let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.workspacePathExists(resolved) else { return nil }
+
+        addProject(path: resolved, select: true)
+
         let tab = AgentTab(title: "Agent \(tabs.count + 1)", workspacePath: resolved)
         if let prompt = initialPrompt, !prompt.isEmpty {
             tab.prompt = prompt
@@ -180,10 +280,11 @@ class TabManager: ObservableObject {
         tabs.append(tab)
         observe(tab)
         selectedTabID = tab.id
+        selectedProjectPath = resolved
+        return tab
     }
 
     func closeTab(_ id: UUID) {
-        guard tabs.count > 1 else { return }
         if let index = tabs.firstIndex(where: { $0.id == id }) {
             let tabToClose = tabs[index]
             recentlyClosedTabs.append(tabToClose.toSaved())
@@ -191,22 +292,54 @@ class TabManager: ObservableObject {
                 recentlyClosedTabs.removeFirst()
             }
             let wasSelected = selectedTabID == id
+            let closedProjectPath = tabToClose.workspacePath
             tabs.remove(at: index)
             tabSubscriptions[id] = nil
             if wasSelected {
-                let newIndex = min(index, tabs.count - 1)
-                selectedTabID = tabs[newIndex].id
+                if let replacement = tabs.first(where: { $0.workspacePath == closedProjectPath }) {
+                    selectedTabID = replacement.id
+                    selectedProjectPath = replacement.workspacePath
+                } else {
+                    selectedTabID = nil
+                    selectedProjectPath = closedProjectPath
+                }
             }
+            reconcileSelection(preferredProjectPath: closedProjectPath)
         }
+    }
+
+    func removeProject(_ path: String) {
+        let toClose = tabs.filter { $0.workspacePath == path }
+        for tab in toClose {
+            recentlyClosedTabs.append(tab.toSaved())
+            if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
+                recentlyClosedTabs.removeFirst()
+            }
+            tabSubscriptions[tab.id] = nil
+        }
+        let selectedProjectWasRemoved = selectedProjectPath == path
+        tabs.removeAll { $0.workspacePath == path }
+        projects.removeAll { $0.path == path }
+
+        if selectedProjectWasRemoved {
+            selectedProjectPath = nil
+        }
+        if let activeTab, activeTab.workspacePath == path {
+            selectedTabID = nil
+        }
+        reconcileSelection()
     }
 
     /// Reopens the most recently closed tab. Returns true if a tab was restored.
     func reopenLastClosedTab() -> Bool {
         guard let saved = recentlyClosedTabs.popLast() else { return false }
+        guard Self.workspacePathExists(saved.workspacePath) else { return false }
+        addProject(path: saved.workspacePath, select: true)
         let tab = AgentTab(from: saved)
         tabs.append(tab)
         observe(tab)
         selectedTabID = tab.id
+        selectedProjectPath = tab.workspacePath
         return true
     }
 
@@ -221,5 +354,41 @@ class TabManager: ObservableObject {
         tabSubscriptions[tab.id] = tab.objectWillChange.sink { _ in
             // No-op: do not call self?.objectWillChange.send(). Views that need tab updates observe the tab directly.
         }
+    }
+
+    private func reconcileSelection(preferredProjectPath: String? = nil) {
+        let validProjectPaths = Set(projects.map(\.path))
+        let validTabIDs = Set(tabs.map(\.id))
+
+        if let selectedTabID, !validTabIDs.contains(selectedTabID) {
+            self.selectedTabID = nil
+        }
+        if let selectedProjectPath, !validProjectPaths.contains(selectedProjectPath) {
+            self.selectedProjectPath = nil
+        }
+
+        if let activeTab {
+            selectedProjectPath = activeTab.workspacePath
+            return
+        }
+
+        if let preferredProjectPath, validProjectPaths.contains(preferredProjectPath) {
+            selectedProjectPath = preferredProjectPath
+            return
+        }
+
+        if selectedProjectPath == nil {
+            selectedProjectPath = projects.first?.path
+        }
+    }
+
+    private static func mergeProjects(savedProjects: [ProjectState], tabProjects: [ProjectState]) -> [ProjectState] {
+        var merged: [ProjectState] = []
+        for project in savedProjects + tabProjects where !project.path.isEmpty {
+            if !merged.contains(where: { $0.path == project.path }) {
+                merged.append(project)
+            }
+        }
+        return merged
     }
 }

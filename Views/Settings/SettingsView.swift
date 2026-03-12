@@ -5,7 +5,7 @@ struct SettingsView: View {
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
-    @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = ""
+    @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
 
     @State private var globalCommands: [QuickActionCommand] = []
     @State private var projectCommands: [QuickActionCommand] = []
@@ -70,7 +70,18 @@ struct SettingsView: View {
             }
 
             Section {
-                ForEach(AvailableModels.all, id: \.id) { model in
+                HStack(spacing: 8) {
+                    Button("Select all") {
+                        disabledModelIdsRaw = AppPreferences.defaultDisabledModelIdsRaw
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Deselect all") {
+                        let allIds = Set(appState.availableModels.map(\.id))
+                        disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: allIds)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                ForEach(appState.availableModels, id: \.id) { model in
                     Toggle(model.label, isOn: Binding(
                         get: { !AppPreferences.disabledModelIds(from: disabledModelIdsRaw).contains(model.id) },
                         set: { enabled in

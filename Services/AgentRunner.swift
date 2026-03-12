@@ -195,6 +195,84 @@ final class AgentRunner {
         return id
     }
 
+    /// Fetches available models from the Cursor Agent CLI (`agent models`). Call from a background context.
+    static func listModels() async throws -> [ModelOption] {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let result = try runListModelsSync()
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    nonisolated private static func runListModelsSync() throws -> [ModelOption] {
+        guard let agentPath = findAgentPath() else {
+            throw AgentRunnerError.agentNotFound
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: agentPath)
+        process.arguments = ["models"]
+        let env = ProcessInfo.processInfo.environment
+        var fullEnv = env
+        if let path = env["PATH"], !path.contains(".local/bin") {
+            let home = env["HOME"] ?? NSHomeDirectory()
+            fullEnv["PATH"] = "\(home)/.local/bin:\(path)"
+        }
+        process.environment = fullEnv
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw AgentRunnerError.processFailed(exitCode: process.terminationStatus, stderr: "")
+        }
+        guard let output = String(data: data, encoding: .utf8) else {
+            throw AgentRunnerError.processFailed(exitCode: -1, stderr: "Could not decode agent models output")
+        }
+        return parseModelsOutput(output)
+    }
+
+    /// Parses `agent models` stdout: lines like "id - Label" or "id - Label  (current)".
+    nonisolated private static func parseModelsOutput(_ output: String) -> [ModelOption] {
+        let knownPremiumIds: Set<String> = [
+            "gpt-5.4-medium", "gpt-5.4-high", "gpt-5.4-xhigh", "gpt-5.4-medium-fast", "gpt-5.4-high-fast", "gpt-5.4-xhigh-fast",
+            "composer-1.5", "composer-1",
+            "opus-4.6", "opus-4.6-thinking", "opus-4.5", "opus-4.5-thinking",
+            "sonnet-4.6", "sonnet-4.6-thinking", "sonnet-4.5", "sonnet-4.5-thinking",
+        ]
+        func stripANSI(_ s: String) -> String {
+            let pattern = "\\x1B\\[[0-9;]*[a-zA-Z]"
+            return s.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+        var result: [ModelOption] = []
+        for line in output.components(separatedBy: .newlines) {
+            let cleaned = stripANSI(line).trimmingCharacters(in: .whitespaces)
+            guard cleaned.contains(" - ") else { continue }
+            if cleaned.hasPrefix("Available models") || cleaned.hasPrefix("Loading") || cleaned.hasPrefix("Tip:") {
+                continue
+            }
+            guard let dashRange = cleaned.range(of: " - ") else { continue }
+            let id = String(cleaned[..<dashRange.lowerBound]).trimmingCharacters(in: .whitespaces)
+            var label = String(cleaned[dashRange.upperBound...])
+                .replacingOccurrences(of: "  (current)", with: "")
+                .replacingOccurrences(of: "  (default)", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            guard !id.isEmpty, !label.isEmpty else { continue }
+            result.append(ModelOption(
+                id: id,
+                label: label,
+                isPremium: knownPremiumIds.contains(id)
+            ))
+        }
+        return result
+    }
+
     static func stream(prompt: String, workspacePath: String, model: String? = nil, conversationId: String? = nil) throws -> AsyncThrowingStream<AgentStreamChunk, Error> {
         guard let agentPath = findAgentPath() else {
             throw AgentRunnerError.agentNotFound
@@ -316,7 +394,7 @@ final class AgentRunner {
         }
     }
     
-    private static func findAgentPath() -> String? {
+    nonisolated private static func findAgentPath() -> String? {
         let pathsToCheck = [
             "\(NSHomeDirectory())/.local/bin/agent",
             "/usr/local/bin/agent",

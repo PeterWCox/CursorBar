@@ -54,7 +54,7 @@ struct ScreenshotCardView: View {
     var onTapPreview: () -> Void
 
     private var imageURL: URL {
-        URL(fileURLWithPath: workspacePath).appendingPathComponent(path)
+        screenshotFileURL(path: path, workspacePath: workspacePath)
     }
 
     private var expandPreviewIcon: some View {

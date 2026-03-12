@@ -84,21 +84,22 @@ struct ModelOption: Identifiable {
 enum AvailableModels {
     static let autoID = "auto"
 
-    static let all: [ModelOption] = [
+    /// Fallback when CLI is unavailable or fails; also used as initial value before load.
+    static let fallback: [ModelOption] = [
         ModelOption(id: autoID, label: "Auto", isPremium: false),
         ModelOption(id: "gpt-5.4-medium", label: "GPT-5.4", isPremium: true),
         ModelOption(id: "composer-1.5", label: "Composer 1.5", isPremium: true),
     ]
 
-    static func model(for id: String) -> ModelOption? {
-        all.first { $0.id == id }
+    static func model(for id: String, in list: [ModelOption]) -> ModelOption? {
+        list.first { $0.id == id }
     }
 
     /// Models to show in the picker; excludes any whose id is in `disabledIds`. By default (empty set) returns all.
-    static func visible(disabledIds: Set<String>) -> [ModelOption] {
-        guard !disabledIds.isEmpty else { return all }
-        let filtered = all.filter { !disabledIds.contains($0.id) }
-        return filtered.isEmpty ? all : filtered
+    static func visible(from list: [ModelOption], disabledIds: Set<String>) -> [ModelOption] {
+        guard !disabledIds.isEmpty else { return list }
+        let filtered = list.filter { !disabledIds.contains($0.id) }
+        return filtered.isEmpty ? list : filtered
     }
 }
 
