@@ -45,7 +45,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A3000001 /* Cursor+.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cursor+.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A3000001 /* CursorMetro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CursorMetro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* CursorPlusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorPlusApp.swift; sourceTree = "<group>"; };
 		A2000002 /* PopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoutView.swift; sourceTree = "<group>"; };
 		A2000003 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
@@ -97,12 +97,12 @@
 		A5000001 = {
 			isa = PBXGroup;
 			children = (
-				A5000002 /* Cursor+ */,
+				A5000002 /* CursorMetro */,
 				A5000003 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A5000002 /* Cursor+ */ = {
+		A5000002 /* CursorMetro */ = {
 			isa = PBXGroup;
 			children = (
 				A5000010 /* App */,
@@ -258,7 +258,7 @@
 		A5000003 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				A3000001 /* Cursor+.app */,
+				A3000001 /* CursorMetro.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -266,9 +266,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A6000001 /* Cursor+ */ = {
+		A6000001 /* CursorMetro */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A7000003 /* Build configuration list for PBXNativeTarget "Cursor+" */;
+			buildConfigurationList = A7000003 /* Build configuration list for PBXNativeTarget "CursorMetro" */;
 			buildPhases = (
 				A6000002 /* Sources */,
 				A4000001 /* Frameworks */,
@@ -279,12 +279,12 @@
 			);
 			dependencies = (
 			);
-			name = "Cursor+";
+			name = "CursorMetro";
 			packageProductDependencies = (
 				A8000003 /* Textual */,
 			);
-			productName = "Cursor+";
-			productReference = A3000001 /* Cursor+.app */;
+			productName = "CursorMetro";
+			productReference = A3000001 /* CursorMetro.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -297,7 +297,7 @@
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
 			};
-			buildConfigurationList = A7000001 /* Build configuration list for PBXProject "Cursor+" */;
+			buildConfigurationList = A7000001 /* Build configuration list for PBXProject "CursorMetro" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -313,7 +313,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A6000001 /* Cursor+ */,
+				A6000001 /* CursorMetro */,
 			);
 		};
 /* End PBXProject section */
@@ -497,7 +497,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A7000001 /* Build configuration list for PBXProject "Cursor+" */ = {
+		A7000001 /* Build configuration list for PBXProject "CursorMetro" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A9000001 /* Debug */,
@@ -506,7 +506,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A7000003 /* Build configuration list for PBXNativeTarget "Cursor+" */ = {
+		A7000003 /* Build configuration list for PBXNativeTarget "CursorMetro" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A9000003 /* Debug */,

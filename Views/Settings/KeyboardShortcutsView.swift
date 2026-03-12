@@ -15,6 +15,7 @@ struct KeyboardShortcutsContentView: View {
         ("Tabs", [
             ShortcutRow(keys: ["⌘T", "⌘N"], action: "New tab"),
             ShortcutRow(keys: ["⌘W"], action: "Close tab"),
+            ShortcutRow(keys: ["⌘⇧T"], action: "Reopen closed tab"),
         ]),
         ("Navigation", [
             ShortcutRow(keys: ["⇥ Tab"], action: "Focus prompt input"),

@@ -135,6 +135,9 @@ class AgentTab: ObservableObject, Identifiable {
 class TabManager: ObservableObject {
     @Published var tabs: [AgentTab] = []
     @Published var selectedTabID: UUID
+    /// Stack of recently closed tabs (most recent last) for "Reopen closed tab" (Cmd+Shift+T). Capped at 20.
+    @Published private(set) var recentlyClosedTabs: [SavedAgentTab] = []
+    private static let maxRecentlyClosedTabs = 20
     /// No longer forwarding each tab's objectWillChange — only structural changes (tabs, selectedTabID) publish.
     /// Content and sidebar chips observe their specific AgentTab to avoid re-rendering the whole window when one tab streams.
     private var tabSubscriptions: [UUID: AnyCancellable] = [:]
@@ -182,6 +185,11 @@ class TabManager: ObservableObject {
     func closeTab(_ id: UUID) {
         guard tabs.count > 1 else { return }
         if let index = tabs.firstIndex(where: { $0.id == id }) {
+            let tabToClose = tabs[index]
+            recentlyClosedTabs.append(tabToClose.toSaved())
+            if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
+                recentlyClosedTabs.removeFirst()
+            }
             let wasSelected = selectedTabID == id
             tabs.remove(at: index)
             tabSubscriptions[id] = nil
@@ -190,6 +198,16 @@ class TabManager: ObservableObject {
                 selectedTabID = tabs[newIndex].id
             }
         }
+    }
+
+    /// Reopens the most recently closed tab. Returns true if a tab was restored.
+    func reopenLastClosedTab() -> Bool {
+        guard let saved = recentlyClosedTabs.popLast() else { return false }
+        let tab = AgentTab(from: saved)
+        tabs.append(tab)
+        observe(tab)
+        selectedTabID = tab.id
+        return true
     }
 
     private func bindTabChanges() {

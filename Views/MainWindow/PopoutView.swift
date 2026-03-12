@@ -168,27 +168,36 @@ struct PopoutView: View {
                         .frame(height: 1)
                 }
 
-            HStack(alignment: .top, spacing: 0) {
-                tabSidebar
+            // Agent tabs (sidebar) never shrink or disappear. Only the agent window and user input area shrink when the window is narrowed.
+            GeometryReader { geometry in
+                let contentWidth = max(0, geometry.size.width)
+                let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - sidebarWidth)
+                HStack(alignment: .top, spacing: 0) {
+                    // Tab sidebar: fixed width; never reduced or clipped.
+                    tabSidebar
+                        .frame(width: sidebarWidth)
 
-                // Agent area: when collapsed, use zero width so sidebar stays fixed and agent collapses left to nothing.
-                // ObservedTabView ensures only this content re-renders when the active tab streams (not the whole window).
-                Group {
-                    if isMainContentCollapsed {
-                        Color.clear
-                            .frame(width: 0)
-                            .clipped()
-                    } else {
-                        ObservedTabView(tab: tabManager.activeTab) { tab in
-                            agentAreaContent(tab: tab)
+                    // Agent window + composer: take remaining width; this is the only area that shrinks horizontally.
+                    Group {
+                        if isMainContentCollapsed {
+                            Color.clear
+                                .frame(width: 0)
+                                .clipped()
+                        } else {
+                            ObservedTabView(tab: tabManager.activeTab) { tab in
+                                agentAreaContent(tab: tab)
+                            }
                         }
                     }
+                    .frame(width: agentWidth)
+                    .clipped()
                 }
-                .frame(maxWidth: .infinity)
+                .clipped()
             }
+            .frame(maxWidth: .infinity)
         }
         .padding(16)
-        .frame(minWidth: isMainContentCollapsed ? 260 : 360, maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
+        .frame(minWidth: isMainContentCollapsed ? 260 : (sidebarWidth + 110), maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
         .background(CursorTheme.panelGradient)
         .onKeyPress(.tab) {
             if isPromptFirstResponder?() == true {
@@ -286,6 +295,16 @@ struct PopoutView: View {
                     addNewAgentTab(lastWorkspacePath: tab.workspacePath)
                 }
                 .keyboardShortcut("t", modifiers: .command)
+                .opacity(0)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Button("Reopen Closed Tab") {
+                    if tabManager.reopenLastClosedTab(), appState.isMainContentCollapsed {
+                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+                    }
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
+                .disabled(tabManager.recentlyClosedTabs.isEmpty)
                 .opacity(0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -508,6 +527,7 @@ struct PopoutView: View {
         }
         .padding(.horizontal, Self.sidebarContentPadding)
         .frame(width: sidebarWidth)
+        .clipped()
         .padding(.trailing, 12)
     }
 

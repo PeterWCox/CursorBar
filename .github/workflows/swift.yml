@@ -1,4 +1,4 @@
-# Build Cursor+ macOS app (Xcode project)
+# Build Cursor Metro macOS app (Xcode project)
 # https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
 
 name: Swift
@@ -18,7 +18,7 @@ jobs:
 
       - name: Build
         run: |
-          xcodebuild -project "Cursor+.xcodeproj" -target "Cursor+" \
+          xcodebuild -project "CursorMetro.xcodeproj" -target "CursorMetro" \
             -configuration Release \
             -destination 'platform=macOS' \
             -derivedDataPath build \

@@ -274,6 +274,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if panel.frame.width <= collapsedPanelWidth + 20 {
                 appState.isMainContentCollapsed = true
                 panel.contentMinSize = NSSize(width: collapsedPanelWidth, height: 400)
+            } else {
+                // Keep agent tabs sidebar full width: never allow window narrower than sidebar + min agent area.
+                let minExpandedWidth: CGFloat = 360
+                if panel.frame.width < minExpandedWidth {
+                    var frame = panel.frame
+                    frame.size.width = minExpandedWidth
+                    panel.setFrame(frame, display: false)
+                }
+                panel.contentMinSize = NSSize(width: minExpandedWidth, height: 400)
             }
         } else {
             positionNearStatusItem()

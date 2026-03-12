@@ -1,17 +1,17 @@
 ---
 name: fb
-description: Fixes build errors for the Cursor+ macOS app. Runs the build, parses xcodebuild errors, applies fixes, and re-builds until the build succeeds. Use when the user says /fb, "fix the build", or wants to fix compile errors in the Cursor+ project.
+description: Fixes build errors for the Cursor Metro macOS app. Runs the build, parses xcodebuild errors, applies fixes, and re-builds until the build succeeds. Use when the user says /fb, "fix the build", or wants to fix compile errors in the Cursor Metro project.
 ---
 
 # Fix Build (/fb)
 
-Fix the Cursor+ app build by building, reading errors, and applying fixes until the build succeeds.
+Fix the Cursor Metro app build by building, reading errors, and applying fixes until the build succeeds.
 
 ## Workflow
 
 1. **Build** from the project root:
    ```bash
-   xcodebuild -project "Cursor+.xcodeproj" -scheme "Cursor+" -configuration Debug build 2>&1
+   xcodebuild -project "CursorMetro.xcodeproj" -scheme "CursorMetro" -configuration Debug build 2>&1
    ```
    Capture full stdout and stderr.
 

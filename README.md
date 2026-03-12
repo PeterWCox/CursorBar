@@ -40,11 +40,11 @@ agent login
 
 ### Option A: Using Xcode
 
-1. Open **`Cursor+.xcodeproj`** in Xcode.
-2. Choose the **Cursor+** scheme and your Mac as the run destination.
+1. Open **`CursorMetro.xcodeproj`** in Xcode.
+2. Choose the **CursorMetro** scheme and your Mac as the run destination.
 3. Press **⌘B** to build, then **⌘R** to run.
 
-The first run will create **Cursor+.app** in the project folder (or in the build products directory). You can drag **Cursor+.app** into **Applications** if you like.
+The first run will create **CursorMetro.app** in the project folder (or in the build products directory). You can drag **CursorMetro.app** into **Applications** if you like.
 
 ### Option B: Using the terminal
 
@@ -56,7 +56,7 @@ From the project folder:
 ./build-app.sh
 ```
 
-This produces **Cursor+.app** in the project directory. Copy it to Applications or run it from there.
+This produces **CursorMetro.app** in the project directory. Copy it to Applications or run it from there.
 
 **Debug build** (if you’re changing the code):
 
@@ -68,7 +68,7 @@ This produces **Cursor+.app** in the project directory. Copy it to Applications 
 
 ## 3. Run Cursor Metro
 
-- **First time:** Open **Cursor+.app** (from the project folder or from Applications). The Cursor Metro icon appears in the **menu bar** (top right).
+- **First time:** Open **CursorMetro.app** (from the project folder or from Applications). The Cursor Metro icon appears in the **menu bar** (top right).
 - **Open the panel:** Click the menu bar icon. A floating panel opens with the composer and conversation.
 - **Settings:** Click the **⚙️** icon or use **⌘,** to set your default workspace (project folder).
 - **Quit:** Right‑click the menu bar icon → **Quit Cursor Metro**, or use **⌘Q** when the panel is focused.

@@ -66,7 +66,7 @@ struct SettingsModalView: View {
     private var sidebar: some View {
         List(SettingsPane.allCases, selection: $selectedPane) { pane in
             Label(pane.rawValue, systemImage: pane.icon)
-                .foregroundStyle(selectedPane == pane ? CursorTheme.textPrimary : CursorTheme.textSecondary)
+                .foregroundStyle(selectedPane == pane ? CursorTheme.textPrimary : Color.white.opacity(0.82))
                 .tag(pane)
         }
         .listStyle(.sidebar)
@@ -183,18 +183,17 @@ private struct GeneralSettingsPaneView: View {
 // MARK: - About pane (placeholder + GitHub)
 
 private struct AboutPaneView: View {
-    private let githubURL = "https://github.com/PeterWCox/Cursor-"
+    private let githubURL = "https://github.com/PeterWCox/CursorMetro"
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .top, spacing: 12) {
-                    BrandAppIconView(size: 44)
+                    BrandMark(size: 44)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Cursor")
+                        Text("Cursor+")
                             .font(.system(size: 22, weight: .semibold, design: .monospaced))
                             .foregroundStyle(CursorTheme.textPrimary)
-                        MetroSpeechBubble(scale: 1.2)
                         Text("A menu bar companion for Cursor.")
                             .font(.system(size: 14))
                             .foregroundStyle(CursorTheme.textSecondary)
@@ -207,7 +206,7 @@ private struct AboutPaneView: View {
                     .textCase(.uppercase)
                     .tracking(0.6)
 
-                Text("Cursor Metro is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
+                Text("Cursor+ is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
                     .font(.system(size: 14))
                     .foregroundStyle(CursorTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
