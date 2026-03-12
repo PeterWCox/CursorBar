@@ -21,7 +21,10 @@ struct ComposerActionButtonsView: View {
         HStack(spacing: 10) {
             Spacer()
 
-            questionsPanelToggle
+            // Only show the "show questions" control when panel is hidden; when shown, close is on the floating container.
+            if !showPinnedQuestionsPanel {
+                questionsPanelToggle
+            }
 
             if contextLimit > 0 {
                 contextProgressCircle
@@ -30,22 +33,25 @@ struct ComposerActionButtonsView: View {
     }
 
     private var questionsPanelToggle: some View {
-        Button(action: { showPinnedQuestionsPanel.toggle() }) {
-            Image(systemName: showPinnedQuestionsPanel ? "rectangle.on.rectangle" : "rectangle.slash")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(showPinnedQuestionsPanel ? CursorTheme.textPrimary : CursorTheme.textTertiary)
-                .frame(width: 20, height: 20)
-                .background(
-                    Circle()
-                        .fill(CursorTheme.surfaceMuted.opacity(showPinnedQuestionsPanel ? 1 : 0.7))
-                )
-                .overlay(
-                    Circle()
-                        .stroke(showPinnedQuestionsPanel ? CursorTheme.borderStrong : CursorTheme.border, lineWidth: 1)
-                )
+        Button(action: { showPinnedQuestionsPanel = true }) {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.on.rectangle")
+                Text("Show history")
+                    .lineLimit(1)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(CursorTheme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(CursorTheme.border, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
-        .help(showPinnedQuestionsPanel ? "Hide floating questions panel" : "Show floating questions panel")
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Show questions you asked in this conversation")
     }
 
     private var contextProgressCircle: some View {
@@ -53,20 +59,25 @@ struct ComposerActionButtonsView: View {
         let limitK = contextLimit / 1000
         let pct = contextLimit > 0 ? Int(round(contextFraction * 100)) : 0
         let tooltip = "~\(usedK)k / \(limitK)k tokens (\(pct)% used)"
-        return ZStack {
-            // Track: obvious outline
-            Circle()
-                .stroke(CursorTheme.borderStrong, lineWidth: 3)
-            // Filled arc: same blue as Agent tab processing
-            Circle()
-                .trim(from: 0, to: contextFraction)
-                .stroke(
-                    contextWheelBlue,
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                )
-                .rotationEffect(.degrees(-90))
+        return HStack(spacing: 6) {
+            ZStack {
+                // Track: obvious outline
+                Circle()
+                    .stroke(CursorTheme.borderStrong, lineWidth: 3)
+                // Filled arc: same blue as Agent tab processing
+                Circle()
+                    .trim(from: 0, to: contextFraction)
+                    .stroke(
+                        contextWheelBlue,
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 20, height: 20)
+            Text("\(usedK)k / \(limitK)k")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary)
         }
-        .frame(width: 20, height: 20)
         .help(tooltip)
     }
 }

@@ -227,12 +227,10 @@ class FloatingPanel: NSPanel {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 960),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel, .resizable],
+            styleMask: [.borderless, .fullSizeContentView, .nonactivatingPanel, .resizable],
             backing: .buffered,
             defer: false
         )
-        titleVisibility = .hidden
-        titlebarAppearsTransparent = true
         isOpaque = false
         backgroundColor = .clear
         isMovableByWindowBackground = true
@@ -240,9 +238,6 @@ class FloatingPanel: NSPanel {
         level = .floating
         isReleasedWhenClosed = false
         animationBehavior = .utilityWindow
-        standardWindowButton(.closeButton)?.isHidden = true
-        standardWindowButton(.miniaturizeButton)?.isHidden = true
-        standardWindowButton(.zoomButton)?.isHidden = true
         contentMinSize = NSSize(width: 360, height: 400)
         contentMaxSize = NSSize(width: 1400, height: 1600)
     }

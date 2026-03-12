@@ -31,47 +31,49 @@ struct QuickActionButtonsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isDisabled)
+                .help(cmd.prompt)
             }
 
-            if let onDebug {
-                Button(action: onDebug) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "ladybug.fill")
-                        Text("Debug")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(CursorTheme.surfaceMuted, in: Capsule())
-                    .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(isDisabled)
-            }
+            // if let onDebug {
+            //     Button(action: onDebug) {
+            //         HStack(spacing: 6) {
+            //             Image(systemName: "ladybug.fill")
+            //             Text("Debug")
+            //         }
+            //         .font(.system(size: 12, weight: .medium))
+            //         .foregroundStyle(CursorTheme.textPrimary)
+            //         .padding(.horizontal, 12)
+            //         .padding(.vertical, 8)
+            //         .background(CursorTheme.surfaceMuted, in: Capsule())
+            //         .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
+            //     }
+            //     .buttonStyle(.plain)
+            //     .disabled(isDisabled)
+            // }
 
-            if onAdd != nil {
-                Button(action: { showAddSheet = true }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                        Text("Add")
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(CursorTheme.surfaceMuted.opacity(0.7), in: Capsule())
-                    .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(isDisabled)
-                .sheet(isPresented: $showAddSheet) {
-                    QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
-                        saveNewCommand(newCommand)
-                        onCommandsChanged?()
-                    }
-                }
-            }
+            // Add quick action – commented out
+            // if onAdd != nil {
+            //     Button(action: { showAddSheet = true }) {
+            //         HStack(spacing: 6) {
+            //             Image(systemName: "plus")
+            //             Text("Add")
+            //         }
+            //         .font(.system(size: 12, weight: .medium))
+            //         .foregroundStyle(CursorTheme.textSecondary)
+            //         .padding(.horizontal, 12)
+            //         .padding(.vertical, 8)
+            //         .background(CursorTheme.surfaceMuted.opacity(0.7), in: Capsule())
+            //         .overlay(Capsule().stroke(CursorTheme.border, lineWidth: 1))
+            //     }
+            //     .buttonStyle(.plain)
+            //     .disabled(isDisabled)
+            //     .sheet(isPresented: $showAddSheet) {
+            //         QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
+            //             saveNewCommand(newCommand)
+            //             onCommandsChanged?()
+            //         }
+            //     }
+            // }
         }
     }
 

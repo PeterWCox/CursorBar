@@ -133,7 +133,7 @@ struct PopoutView: View {
                 .frame(maxWidth: .infinity)
                 .overlay(alignment: .topLeading) {
                     if showPinnedQuestionsPanel {
-                        PinnedQuestionsStackView(tab: tab)
+                        PinnedQuestionsStackView(tab: tab, onClose: { showPinnedQuestionsPanel = false })
                             .padding(.top, 8)
                             .padding(.leading, 4)
                     }
@@ -279,7 +279,7 @@ struct PopoutView: View {
                     .background(CursorTheme.surfaceMuted, in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Settings")
+            .help("Open settings")
 
             Button(action: dismiss) {
                 Image(systemName: "minus")
@@ -289,7 +289,7 @@ struct PopoutView: View {
                     .background(CursorTheme.surfaceMuted, in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Minimise")
+            .help("Minimise to menubar")
         }
     }
 
@@ -463,15 +463,19 @@ struct PopoutView: View {
     private var composerDock: some View {
         let attachedPaths = screenshotPaths(from: tab.prompt)
         return VStack(alignment: .leading, spacing: 12) {
-            QuickActionButtonsView(
-                commands: quickActionCommands,
-                isDisabled: tab.isRunning,
-                workspacePath: tab.workspacePath,
-                onCommand: { sendInCurrentTab(prompt: $0.prompt) },
-                onDebug: { handleDebugAction() },
-                onAdd: {},
-                onCommandsChanged: { quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: tab.workspacePath) }
-            )
+            HStack(alignment: .center, spacing: 8) {
+                QuickActionButtonsView(
+                    commands: quickActionCommands,
+                    isDisabled: tab.isRunning,
+                    workspacePath: tab.workspacePath,
+                    onCommand: { sendInCurrentTab(prompt: $0.prompt) },
+                    // onDebug: { handleDebugAction() },
+                    onAdd: {},
+                    onCommandsChanged: { quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: tab.workspacePath) }
+                )
+                Spacer()
+                openInCursorButton
+            }
 
             queuedFollowUpsView
 
@@ -530,7 +534,7 @@ struct PopoutView: View {
             )
 
             HStack(alignment: .center, spacing: 8) {
-                viewInBrowserMenu
+                // viewInBrowserMenu
 
                 WorkspacePickerView(
                     displayName: appState.workspaceDisplayName(for: tab.workspacePath),
@@ -598,31 +602,7 @@ struct PopoutView: View {
                     tab.currentBranch = cur
                 }
 
-                Button {
-                    let process = Process()
-                    process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-                    process.arguments = ["-a", "Cursor", tab.workspacePath]
-                    try? process.run()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.up.right.square")
-                        Text("Open in Cursor")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .fixedSize(horizontal: true, vertical: false)
-                .help("Open this workspace in Cursor")
+                Spacer()
 
                 ComposerActionButtonsView(
                     showPinnedQuestionsPanel: $showPinnedQuestionsPanel,
@@ -642,6 +622,34 @@ struct PopoutView: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .stroke(cardBorder, lineWidth: 1)
         )
+    }
+
+    private var openInCursorButton: some View {
+        Button {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = ["-a", "Cursor", tab.workspacePath]
+            try? process.run()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.right.square")
+                Text("Open in Cursor")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(CursorTheme.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(CursorTheme.border, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("Open this workspace in Cursor")
     }
 
     private var viewInBrowserMenu: some View {
@@ -1020,6 +1028,7 @@ struct PopoutView: View {
                     tabToStop.turns[index].segments[segmentIndex].toolCall?.status = .stopped
                 }
             }
+            notifyTurnsChanged(tabToStop)
         }
         tabToStop.activeRunID = nil
         tabToStop.activeTurnID = nil
@@ -1035,6 +1044,7 @@ struct PopoutView: View {
             currentTab.turns[index].isStreaming = false
             currentTab.turns[index].lastStreamPhase = nil
             currentTab.turns[index].wasStopped = false
+            notifyTurnsChanged(currentTab)
         }
         currentTab.errorMessage = errorMessage
         currentTab.isRunning = false
@@ -1058,12 +1068,14 @@ struct PopoutView: View {
         }
         tab.cachedConversationCharacterCount += incoming.count
         tab.turns[index].lastStreamPhase = .thinking
+        notifyTurnsChanged(tab)
     }
 
     private func completeThinking(for turnID: UUID, in tab: AgentTab) {
         guard let index = tab.turns.firstIndex(where: { $0.id == turnID }) else { return }
         if tab.turns[index].lastStreamPhase == .thinking {
             tab.turns[index].lastStreamPhase = nil
+            notifyTurnsChanged(tab)
         }
     }
 
@@ -1076,6 +1088,7 @@ struct PopoutView: View {
         if tab.turns[index].segments.last?.kind != .assistant {
             tab.turns[index].segments.append(ConversationSegment(kind: .assistant, text: incoming))
             tab.cachedConversationCharacterCount += incoming.count
+            notifyTurnsChanged(tab)
             return
         }
 
@@ -1089,11 +1102,11 @@ struct PopoutView: View {
         if incoming.hasPrefix(existing) {
             tab.turns[index].segments[lastIndex].text = incoming
             tab.cachedConversationCharacterCount += incoming.count - existing.count
-            return
+        } else {
+            tab.turns[index].segments[lastIndex].text += incoming
+            tab.cachedConversationCharacterCount += incoming.count
         }
-
-        tab.turns[index].segments[lastIndex].text += incoming
-        tab.cachedConversationCharacterCount += incoming.count
+        notifyTurnsChanged(tab)
     }
 
     private func mergeToolCall(_ update: AgentToolCallUpdate, into tab: AgentTab, turnID: UUID) {
@@ -1117,6 +1130,7 @@ struct PopoutView: View {
                 tab.turns[index].segments[segmentIndex].toolCall?.detail = update.detail
             }
             tab.turns[index].segments[segmentIndex].toolCall?.status = mappedStatus
+            notifyTurnsChanged(tab)
             return
         }
 
@@ -1130,6 +1144,15 @@ struct PopoutView: View {
                 )
             )
         )
+        notifyTurnsChanged(tab)
+    }
+
+    /// Notify SwiftUI that turns (or nested segment state) changed so the view refreshes.
+    /// In-place mutations to turns/segments don't trigger @Published.
+    private func notifyTurnsChanged(_ tab: AgentTab) {
+        Task { @MainActor in
+            tab.objectWillChange.send()
+        }
     }
 
     private func requestAutoScroll(for tab: AgentTab, force: Bool = false) {

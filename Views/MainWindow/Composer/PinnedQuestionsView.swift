@@ -6,6 +6,8 @@ private let maxPinnedQuestions = 8
 
 struct PinnedQuestionsStackView: View {
     let tab: AgentTab
+    /// Called when the user taps the close (X) button on the floating container.
+    var onClose: (() -> Void)? = nil
 
     /// Turns to show: chronological order, capped to the latest N.
     private var visibleTurns: [ConversationTurn] {
@@ -16,6 +18,23 @@ struct PinnedQuestionsStackView: View {
         Group {
             if !visibleTurns.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Previous requests")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary)
+                        Spacer(minLength: 8)
+                        if let onClose {
+                            Button(action: onClose) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(CursorTheme.textSecondary)
+                                    .frame(width: 24, height: 24)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Hide questions")
+                        }
+                    }
                     ForEach(visibleTurns) { turn in
                         PinnedQuestionChip(
                             question: turn.userPrompt,

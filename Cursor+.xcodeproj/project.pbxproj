@@ -35,6 +35,8 @@
 		A1000027 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000027 /* AppPreferences.swift */; };
 		A1000028 /* ProjectSettingsStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000028 /* ProjectSettingsStorage.swift */; };
 		A1000029 /* SetDebugURLSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000029 /* SetDebugURLSheet.swift */; };
+		A1000030 /* DialogButtonStyles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000030 /* DialogButtonStyles.swift */; };
+		A1000031 /* AppDialogSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000031 /* AppDialogSheet.swift */; };
 		A1000024 /* Textual in Frameworks */ = {isa = PBXBuildFile; productRef = A8000003 /* Textual */; };
 /* End PBXBuildFile section */
 
@@ -68,6 +70,8 @@
 		A2000027 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
 		A2000028 /* ProjectSettingsStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSettingsStorage.swift; sourceTree = "<group>"; };
 		A2000029 /* SetDebugURLSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetDebugURLSheet.swift; sourceTree = "<group>"; };
+		A2000030 /* DialogButtonStyles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogButtonStyles.swift; sourceTree = "<group>"; };
+		A2000031 /* AppDialogSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDialogSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -109,8 +113,17 @@
 			children = (
 				A5000011 /* MainWindow */,
 				A5000016 /* Settings */,
+				A5000023 /* Components */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		A5000023 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A2000031 /* AppDialogSheet.swift */,
+			);
+			path = Components;
 			sourceTree = "<group>";
 		};
 		A5000010 /* App */ = {
@@ -215,6 +228,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000007 /* CursorTheme.swift */,
+				A2000030 /* DialogButtonStyles.swift */,
 			);
 			path = Theme;
 			sourceTree = "<group>";
@@ -357,6 +371,8 @@
 				A1000025 /* PinnedQuestionsView.swift in Sources */,
 				A1000028 /* ProjectSettingsStorage.swift in Sources */,
 				A1000029 /* SetDebugURLSheet.swift in Sources */,
+				A1000030 /* DialogButtonStyles.swift in Sources */,
+				A1000031 /* AppDialogSheet.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

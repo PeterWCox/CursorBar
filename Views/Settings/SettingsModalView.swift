@@ -55,13 +55,9 @@ struct SettingsModalView: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(CursorTheme.textPrimary)
             Spacer()
-            Button(action: { dismiss() }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(CursorTheme.textTertiary)
-                    .symbolRenderingMode(.hierarchical)
-            }
-            .buttonStyle(.plain)
+            Button("Close", action: { dismiss() })
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(DialogSecondaryButtonStyle())
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
@@ -120,21 +116,35 @@ private struct GeneralSettingsPaneView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     VStack(alignment: .leading, spacing: 10) {
-                        TextField("~/dev", text: $projectsRootPath)
-                            .textFieldStyle(.roundedBorder)
-
-                        HStack(spacing: 10) {
-                            Button("Browse...") {
-                                selectProjectsRootFolder()
+                        Button(action: { selectProjectsRootFolder() }) {
+                            HStack(spacing: 12) {
+                                Text(resolvedProjectsRootPath)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(CursorTheme.textPrimary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Image(systemName: "folder.badge.plus")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(CursorTheme.textSecondary)
+                                    .symbolRenderingMode(.hierarchical)
                             }
-
-                            if projectsRootPath != AppPreferences.defaultProjectsRootPath {
-                                Button("Reset") {
-                                    projectsRootPath = AppPreferences.defaultProjectsRootPath
-                                }
-                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(CursorTheme.editor, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(CursorTheme.borderStrong, lineWidth: 1)
+                            )
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.plain)
+
+                        if projectsRootPath != AppPreferences.defaultProjectsRootPath {
+                            Button("Reset to default") {
+                                projectsRootPath = AppPreferences.defaultProjectsRootPath
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
                     .padding(16)
                     .background(CursorTheme.surfaceMuted.opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -173,7 +183,7 @@ private struct GeneralSettingsPaneView: View {
 // MARK: - About pane (placeholder + GitHub)
 
 private struct AboutPaneView: View {
-    private let githubURL = "https://github.com"
+    private let githubURL = "https://github.com/PeterWCox/Cursor-"
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -196,7 +206,7 @@ private struct AboutPaneView: View {
                     .textCase(.uppercase)
                     .tracking(0.6)
 
-                Text("Placeholder content. You can add a short description, version info, credits, or links here.")
+                Text("Cursor+ is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
                     .font(.system(size: 14))
                     .foregroundStyle(CursorTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

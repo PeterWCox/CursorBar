@@ -4,7 +4,7 @@ import SwiftUI
 
 private struct ShortcutRow: Identifiable {
     let id = UUID()
-    let keys: String
+    let keys: [String]  // multiple shortcuts per action
     let action: String
 }
 
@@ -13,27 +13,26 @@ private struct ShortcutRow: Identifiable {
 struct KeyboardShortcutsContentView: View {
     private static let sections: [(title: String, rows: [ShortcutRow])] = [
         ("Tabs", [
-            ShortcutRow(keys: "⌘T", action: "New tab"),
-            ShortcutRow(keys: "⌘N", action: "New tab"),
-            ShortcutRow(keys: "⌘W", action: "Close tab"),
+            ShortcutRow(keys: ["⌘T", "⌘N"], action: "New tab"),
+            ShortcutRow(keys: ["⌘W"], action: "Close tab"),
         ]),
         ("Navigation", [
-            ShortcutRow(keys: "⌘S", action: "Toggle sidebar"),
-            ShortcutRow(keys: "⇥ Tab", action: "Focus prompt input"),
+            ShortcutRow(keys: ["⇥ Tab"], action: "Focus prompt input"),
         ]),
         ("Composer", [
-            ShortcutRow(keys: "↵ Return", action: "Send message"),
-            ShortcutRow(keys: "⇧↵ Shift + Return", action: "New line in message"),
-            ShortcutRow(keys: "⌘V", action: "Paste (including screenshots)"),
+            ShortcutRow(keys: ["↵ Return"], action: "Send message"),
+            ShortcutRow(keys: ["⇧↵ Shift + Return"], action: "New line in message"),
+            ShortcutRow(keys: ["⌘V"], action: "Paste (including screenshots)"),
         ]),
         ("Agent", [
-            ShortcutRow(keys: "⌃C", action: "Stop agent"),
+            ShortcutRow(keys: ["⌃C"], action: "Stop agent"),
         ]),
     ]
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 24) {
+                comingSoonBanner
                 ForEach(Self.sections, id: \.title) { section in
                     KeyboardShortcutsContentView.sectionView(title: section.title, rows: section.rows)
                 }
@@ -41,6 +40,20 @@ struct KeyboardShortcutsContentView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(24)
         }
+    }
+
+    private var comingSoonBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(CursorTheme.brandBlue)
+            Text("Ability to customise these shortcuts is coming soon.")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CursorTheme.brandBlue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     fileprivate static func sectionView(title: String, rows: [ShortcutRow]) -> some View {
@@ -58,7 +71,11 @@ struct KeyboardShortcutsContentView: View {
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(CursorTheme.textPrimary)
                         Spacer(minLength: 16)
-                        keyCaps(row.keys)
+                        HStack(spacing: 6) {
+                            ForEach(row.keys, id: \.self) { key in
+                                keyCaps(key)
+                            }
+                        }
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)

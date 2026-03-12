@@ -75,9 +75,10 @@ struct SettingsView: View {
                 ForEach(projectCommands) { cmd in
                     quickActionRow(cmd, scope: .project)
                 }
-                Button(action: { showAddSheet = true }) {
-                    Label("Add quick action", systemImage: "plus.circle")
-                }
+                // Add quick action – commented out
+                // Button(action: { showAddSheet = true }) {
+                //     Label("Add quick action", systemImage: "plus.circle")
+                // }
             } header: {
                 Text("Quick actions")
             } footer: {
@@ -98,11 +99,12 @@ struct SettingsView: View {
             let trimmed = debugURL.trimmingCharacters(in: .whitespacesAndNewlines)
             ProjectSettingsStorage.setDebugURL(workspacePath: workspacePath, trimmed.isEmpty ? nil : trimmed)
         }
-        .sheet(isPresented: $showAddSheet) {
-            QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
-                addCommand(newCommand)
-            }
-        }
+        // Add quick action sheet – commented out
+        // .sheet(isPresented: $showAddSheet) {
+        //     QuickActionEditSheet(workspacePath: workspacePath, existing: nil) { newCommand in
+        //         addCommand(newCommand)
+        //     }
+        // }
         .sheet(item: $editingCommand) { cmd in
             QuickActionEditSheet(workspacePath: workspacePath, existing: cmd) { updated in
                 updateCommand(old: cmd, updated: updated)

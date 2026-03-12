@@ -15,30 +15,14 @@ struct NewBranchSheet: View {
     private let fieldBorder = Color(NSColor.separatorColor)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(CursorTheme.brandBlue)
-                Text("New branch")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                Spacer()
-                HStack(spacing: 8) {
-                    Button("Cancel") { dismiss() }
-                        .keyboardShortcut(.cancelAction)
-                        .buttonStyle(.bordered)
-                    Button("Create") { submit() }
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding(.bottom, 14)
-
-            Divider()
-                .opacity(0.5)
-                .padding(.bottom, 16)
-
+        AppDialogSheet(
+            icon: "arrow.triangle.branch",
+            title: "New branch",
+            onCancel: { dismiss() },
+            primaryTitle: "Create",
+            primaryAction: submit,
+            minWidth: 360
+        ) {
             Text("Create a new branch from \(currentBranch.isEmpty ? "HEAD" : currentBranch).")
                 .font(.system(size: 13))
                 .foregroundStyle(CursorTheme.textSecondary)
@@ -68,11 +52,6 @@ struct NewBranchSheet: View {
                     .padding(.bottom, 8)
             }
         }
-        .padding(24)
-        .frame(minWidth: 360)
-        .background(CursorTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CursorTheme.border, lineWidth: 1))
         .onAppear {
             isFieldFocused = true
         }

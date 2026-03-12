@@ -21,39 +21,20 @@ struct SetDebugURLSheet: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack(spacing: 10) {
-                Image(systemName: "globe")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(CursorTheme.brandBlue)
-                Text("View in Browser")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                Spacer()
-                HStack(spacing: 8) {
-                    Button("Cancel") { dismiss() }
-                        .keyboardShortcut(.cancelAction)
-                        .buttonStyle(.bordered)
-                    Button("Save") { saveAndOpenIfNeeded() }
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding(.bottom, 14)
-
-            Divider()
-                .opacity(0.5)
-                .padding(.bottom, 16)
-
-            // Description
+        AppDialogSheet(
+            icon: "globe",
+            title: "View in Browser",
+            onCancel: { dismiss() },
+            primaryTitle: "Save",
+            primaryAction: saveAndOpenIfNeeded,
+            minWidth: 420
+        ) {
             Text("Set the URL that opens when you use \"View in Browser\". Handy for local dev servers.")
                 .font(.system(size: 13))
                 .foregroundStyle(CursorTheme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 14)
 
-            // URL field with label
             VStack(alignment: .leading, spacing: 6) {
                 Text("URL")
                     .font(.system(size: 12, weight: .medium))
@@ -68,7 +49,6 @@ struct SetDebugURLSheet: View {
             }
             .padding(.bottom, 12)
 
-            // Quick-fill suggestions
             HStack(spacing: 6) {
                 Text("Quick fill:")
                     .font(.system(size: 11, weight: .medium))
@@ -87,17 +67,11 @@ struct SetDebugURLSheet: View {
             }
             .padding(.bottom, 16)
 
-            // Open after save
             Toggle("Open in browser after saving", isOn: $openAfterSave)
                 .toggleStyle(.checkbox)
                 .font(.system(size: 13))
                 .foregroundStyle(CursorTheme.textPrimary)
         }
-        .padding(24)
-        .frame(minWidth: 420)
-        .background(CursorTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CursorTheme.border, lineWidth: 1))
         .onAppear {
             urlString = initialURL
         }
@@ -129,32 +103,17 @@ struct CreateDebugScriptSheet: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "ladybug.fill")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(CursorTheme.brandBlue)
-                Text("Create debug.sh")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary)
-                Spacer()
-                HStack(spacing: 8) {
-                    Button("Cancel") { dismiss() }
-                        .keyboardShortcut(.cancelAction)
-                        .buttonStyle(.bordered)
-                    Button("Create") { saveAndMaybeRun(false) }
-                        .buttonStyle(.bordered)
-                    Button("Create & Run") { saveAndMaybeRun(true) }
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding(.bottom, 14)
-
-            Divider()
-                .opacity(0.5)
-                .padding(.bottom, 16)
-
+        AppDialogSheet(
+            icon: "ladybug.fill",
+            title: "Create debug.sh",
+            onCancel: { dismiss() },
+            primaryTitle: "Create & Run",
+            primaryAction: { saveAndMaybeRun(true) },
+            secondaryPrimaryTitle: "Create",
+            secondaryPrimaryAction: { saveAndMaybeRun(false) },
+            minWidth: 560,
+            minHeight: 420
+        ) {
             Text("`debug.sh` was not found in the project root. Paste the script below and it will be saved to `\(workspacePath)/debug.sh`.")
                 .font(.system(size: 13))
                 .foregroundStyle(CursorTheme.textSecondary)
@@ -179,11 +138,6 @@ struct CreateDebugScriptSheet: View {
                     .padding(.top, 12)
             }
         }
-        .padding(24)
-        .frame(minWidth: 560, minHeight: 420)
-        .background(CursorTheme.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(CursorTheme.border, lineWidth: 1))
     }
 
     private func saveAndMaybeRun(_ shouldRun: Bool) {
