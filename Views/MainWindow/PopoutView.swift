@@ -681,6 +681,9 @@ struct PopoutView: View {
                     isRunning: tab.isRunning
                 )
                 openInCursorButton
+                if gitHubRepositoryURL(workspacePath: tab.workspacePath) != nil {
+                    openInCursorMoreMenu
+                }
             }
 
             queuedFollowUpsView
@@ -852,6 +855,32 @@ struct PopoutView: View {
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
         .help("Open this workspace in Cursor")
+    }
+
+    /// Three-dot menu after "Open in Cursor": e.g. Open in Github when remote is GitHub.
+    private var openInCursorMoreMenu: some View {
+        Menu {
+            if let githubURL = gitHubRepositoryURL(workspacePath: tab.workspacePath) {
+                Button("Open in Github") {
+                    NSWorkspace.shared.open(githubURL)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(CursorTheme.textPrimary)
+                .frame(width: 28, height: 28)
+                .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(CursorTheme.border, lineWidth: 1)
+                )
+        }
+        .menuStyle(.borderlessButton)
+        .foregroundColor(.white)
+        .colorScheme(.dark)
+        .fixedSize(horizontal: true, vertical: false)
+        .help("More actions")
     }
 
     private var viewInBrowserMenu: some View {

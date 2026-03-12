@@ -162,6 +162,40 @@ func gitCreateBranch(name: String, workspacePath: String) -> String? {
     return err.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+/// Returns the GitHub repository web URL (https://github.com/owner/repo) if the workspace has a GitHub remote; nil otherwise.
+func gitHubRepositoryURL(workspacePath: String) -> URL? {
+    let url = URL(fileURLWithPath: workspacePath)
+    guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["remote", "get-url", "origin"]
+    process.currentDirectoryURL = url
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+    guard (try? process.run()) != nil else { return nil }
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else { return nil }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    let urlString = (String(data: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if urlString.hasPrefix("https://github.com/") {
+        var path = String(urlString.dropFirst("https://github.com/".count))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        return URL(string: "https://github.com/\(path)")
+    }
+    if urlString.hasPrefix("git@github.com:") {
+        var path = String(urlString.dropFirst("git@github.com:".count))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        return URL(string: "https://github.com/\(path)")
+    }
+    if urlString.hasPrefix("ssh://git@github.com/") {
+        var path = String(urlString.dropFirst("ssh://git@github.com/".count))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        return URL(string: "https://github.com/\(path)")
+    }
+    return nil
+}
+
 // MARK: - Debug script helpers
 
 enum PreferredTerminalApp: String, CaseIterable, Identifiable {
