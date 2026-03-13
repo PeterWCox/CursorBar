@@ -549,15 +549,23 @@ struct PopoutView: View {
                 .opacity(0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Button("New Agent") {
-                    addNewAgentTab()
+                Button("New Agent or Task") {
+                    if tabManager.selectedTasksViewPath != nil, tabManager.selectedTasksViewPath == selectedProjectPath {
+                        tasksViewTriggerAddNew = true
+                    } else {
+                        addNewAgentTab()
+                    }
                 }
                 .keyboardShortcut("t", modifiers: .command)
                 .opacity(0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Button("New Agent") {
-                    addNewAgentTab()
+                Button("New Agent or Task") {
+                    if tabManager.selectedTasksViewPath != nil, tabManager.selectedTasksViewPath == selectedProjectPath {
+                        tasksViewTriggerAddNew = true
+                    } else {
+                        addNewAgentTab()
+                    }
                 }
                 .keyboardShortcut("n", modifiers: .command)
                 .opacity(0)
@@ -570,13 +578,6 @@ struct PopoutView: View {
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(tabManager.recentlyClosedTabs.isEmpty)
-                .opacity(0)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Button("New Agent") {
-                    addNewAgentTab()
-                }
-                .keyboardShortcut("n", modifiers: .command)
                 .opacity(0)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
