@@ -2,6 +2,7 @@ import SwiftUI
 
 // MARK: - Composer action buttons (Show history, etc.)
 struct ComposerActionButtonsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var showPinnedQuestionsPanel: Bool
     var hasContext: Bool
     var isRunning: Bool
@@ -25,13 +26,13 @@ struct ComposerActionButtonsView: View {
                     .lineLimit(1)
             }
             .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(CursorTheme.textPrimary)
+            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(CursorTheme.border, lineWidth: 1)
+                    .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
@@ -44,6 +45,7 @@ struct ComposerActionButtonsView: View {
 private let contextWheelBlue = CursorTheme.spinnerBlue
 
 struct ContextUsageView: View {
+    @Environment(\.colorScheme) private var colorScheme
     var contextUsed: Int
     var contextLimit: Int
 
@@ -61,7 +63,7 @@ struct ContextUsageView: View {
             HStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .stroke(CursorTheme.borderStrong, lineWidth: 3)
+                        .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 3)
                     Circle()
                         .trim(from: 0, to: contextFraction)
                         .stroke(
@@ -73,7 +75,7 @@ struct ContextUsageView: View {
                 .frame(width: 20, height: 20)
                 Text("\(usedK)k / \(limitK)k")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary)
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
             }
             .help(tooltip)
         }
@@ -82,6 +84,7 @@ struct ContextUsageView: View {
 
 // MARK: - Usage (API/billing placeholder; CLI does not expose usage)
 struct UsageView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showUsagePopover = false
 
     var body: some View {
@@ -91,21 +94,21 @@ struct UsageView: View {
             HStack(spacing: 6) {
                 Text("Usage")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary)
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 Text("$???")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary)
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
             }
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showUsagePopover, arrowEdge: .bottom) {
             Text("The Cursor Agent CLI does not currently support showing usage.")
                 .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(CursorTheme.textPrimary)
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                 .padding(12)
                 .frame(width: 240)
-                .background(CursorTheme.surface)
-                .presentationBackground(CursorTheme.surface)
+                .background(CursorTheme.surface(for: colorScheme))
+                .presentationBackground(CursorTheme.surface(for: colorScheme))
         }
     }
 }

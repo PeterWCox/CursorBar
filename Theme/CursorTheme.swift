@@ -20,14 +20,14 @@ enum CursorTheme {
     private static let chromeLight = Color(red: 0.96, green: 0.96, blue: 0.97)
     private static let panelLight = Color(red: 0.94, green: 0.94, blue: 0.96)
     private static let surfaceLight = Color(red: 1.0, green: 1.0, blue: 1.0)
-    private static let surfaceRaisedLight = Color(red: 0.98, green: 0.98, blue: 0.99)
+    private static let surfaceRaisedLight = Color(red: 0.97, green: 0.97, blue: 0.98)
     private static let surfaceMutedLight = Color(red: 0.96, green: 0.96, blue: 0.98)
     private static let editorLight = Color(red: 0.98, green: 0.98, blue: 0.99)
-    private static let borderLight = Color.black.opacity(0.10)
-    private static let borderStrongLight = Color.black.opacity(0.18)
-    private static let textPrimaryLight = Color.black.opacity(0.88)
-    private static let textSecondaryLight = Color.black.opacity(0.58)
-    private static let textTertiaryLight = Color.black.opacity(0.42)
+    private static let borderLight = Color.black.opacity(0.12)
+    private static let borderStrongLight = Color.black.opacity(0.20)
+    private static let textPrimaryLight = Color.black.opacity(0.90)
+    private static let textSecondaryLight = Color.black.opacity(0.65)
+    private static let textTertiaryLight = Color.black.opacity(0.50)
 
     /// Returns the semantic color for the given color scheme. Use in views with `@Environment(\.colorScheme)`.
     static func chrome(for colorScheme: ColorScheme) -> Color { colorScheme == .dark ? chrome : chromeLight }

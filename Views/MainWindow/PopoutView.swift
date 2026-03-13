@@ -740,7 +740,7 @@ struct PopoutView: View {
                                                         .font(.system(size: 11, weight: .regular))
                                                         .italic()
                                                 }
-                                                .foregroundStyle(CursorTheme.textTertiary)
+                                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                                                 .lineLimit(1)
                                                 .truncationMode(.middle)
                                                 .padding(.leading, 14)
@@ -749,7 +749,7 @@ struct PopoutView: View {
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                         Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                                             .font(.system(size: 8, weight: .semibold))
-                                            .foregroundStyle(CursorTheme.textTertiary)
+                                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                                             .frame(width: 10, alignment: .trailing)
                                     }
                                     .contentShape(Rectangle())
@@ -809,11 +809,11 @@ struct PopoutView: View {
                                                 .font(.system(size: 12, weight: .medium))
                                             Spacer(minLength: 4)
                                         }
-                                        .foregroundStyle(CursorTheme.textSecondary)
+                                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 9)
                                         .frame(maxWidth: .infinity)
-                                        .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                        .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                                 .stroke(CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
@@ -867,17 +867,17 @@ struct PopoutView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "checklist")
                                             .font(.system(size: 12))
-                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary : CursorTheme.textSecondary)
+                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                                         Text("Tasks")
                                             .font(.system(size: 12, weight: isTasksSelected ? .semibold : .medium))
-                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary : CursorTheme.textSecondary)
+                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                                             .lineLimit(1)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 7)
                                     .background(
-                                        isTasksSelected ? CursorTheme.surfaceRaised : CursorTheme.surfaceMuted,
+                                        isTasksSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
                                         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     )
                                     .overlay(
@@ -905,16 +905,16 @@ struct PopoutView: View {
                                         Spacer(minLength: 4)
                                         Text("⌘T")
                                             .font(.system(size: 11, weight: .medium))
-                                            .foregroundStyle(CursorTheme.textTertiary)
+                                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                                     }
-                                    .foregroundStyle(CursorTheme.textSecondary)
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 10)
                                     .frame(maxWidth: .infinity)
-                                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(CursorTheme.border, lineWidth: 1)
+                                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -928,14 +928,14 @@ struct PopoutView: View {
                                             .font(.system(size: 13, weight: .medium))
                                         Spacer(minLength: 4)
                                     }
-                                    .foregroundStyle(CursorTheme.textSecondary)
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 10)
                                     .frame(maxWidth: .infinity)
-                                    .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(CursorTheme.border, lineWidth: 1)
+                                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
@@ -957,18 +957,18 @@ struct PopoutView: View {
             VStack(spacing: 28) {
                 Image(systemName: "folder.badge.plus")
                     .font(.system(size: 64, weight: .medium))
-                    .foregroundStyle(CursorTheme.textTertiary)
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     .symbolRenderingMode(.hierarchical)
 
                 VStack(spacing: 12) {
                     Text("Add a project to get started")
                         .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textPrimary)
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .multilineTextAlignment(.center)
 
                     Text("Choose a folder on your Mac to open as a project. You can then ask questions, run the agent, and use Cursor from the menu bar.")
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textSecondary)
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 320)
@@ -1009,12 +1009,12 @@ struct PopoutView: View {
                 VStack(spacing: 10) {
                     Text(projectName)
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textPrimary)
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .multilineTextAlignment(.center)
 
                     Text("This project is open, but it does not have any agent conversations yet.")
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textSecondary)
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 340)
 
@@ -1026,7 +1026,7 @@ struct PopoutView: View {
                                 .font(.system(size: 13, weight: .medium))
                                 .italic()
                         }
-                        .foregroundStyle(CursorTheme.textTertiary)
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     }
                 }
 
@@ -1048,13 +1048,13 @@ struct PopoutView: View {
                     }) {
                         Label("Open in Cursor", systemImage: "arrow.up.forward.app")
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(CursorTheme.textPrimary)
+                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                             .padding(.horizontal, 18)
                             .padding(.vertical, 13)
-                            .background(CursorTheme.surfaceMuted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(CursorTheme.border, lineWidth: 1)
+.background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
@@ -1117,7 +1117,7 @@ struct PopoutView: View {
                 VStack(spacing: 20) {
                     Text(projectName)
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textPrimary)
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .lineLimit(1)
                         .truncationMode(.middle)
 
@@ -1125,25 +1125,25 @@ struct PopoutView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(CursorTheme.textTertiary)
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             Text(branchDisplay.isEmpty ? "No branch" : branchDisplay)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textSecondary)
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         }
 
                         HStack(spacing: 6) {
                             Image(systemName: "cpu")
                                 .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(CursorTheme.textTertiary)
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             Text(modelLabel)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textSecondary)
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         }
                     }
 
                     Text("Ask a question below to start")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary)
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                         .padding(.top, 4)
                 }
                 .padding(.horizontal, 24)
@@ -1153,7 +1153,7 @@ struct PopoutView: View {
                         .fill(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.8))
                         .overlay(
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(CursorTheme.border, lineWidth: 1)
+                                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                         )
                 )
                 .frame(maxWidth: 320)
@@ -1256,7 +1256,7 @@ struct PopoutView: View {
                     if userPromptDisplayText(from: tab.prompt).isEmpty && screenshotPaths(from: tab.prompt).isEmpty {
                         Text("Send message and/or ⌘V to paste one or more screenshots from clipboard. Press Enter to submit and ⇧Enter for new line.")
                             .font(.system(size: 13, weight: .regular, design: .monospaced))
-                            .foregroundStyle(CursorTheme.textTertiary)
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             .padding(.leading, 4)
                             .padding(.top, 6)
                             .padding(.trailing, 8)
@@ -1273,7 +1273,7 @@ struct PopoutView: View {
             .background(CursorTheme.editor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(CursorTheme.border, lineWidth: 1)
+                    .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
             )
 
             HStack(alignment: .center, spacing: 8) {
@@ -1382,7 +1382,7 @@ struct PopoutView: View {
         } label: {
             Image(systemName: "chevron.down.circle")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary)
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
         }
         .menuStyle(.borderlessButton)
         .fixedSize(horizontal: true, vertical: false)
@@ -1406,11 +1406,11 @@ struct PopoutView: View {
                         .font(.system(size: 12, weight: .bold))
                 }
             }
-            .foregroundStyle(CursorTheme.textPrimary)
+            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
             .frame(width: 28, height: 28)
             .background {
                 if tab.isRunning {
-                    Circle().fill(CursorTheme.surfaceRaised)
+                    Circle().fill(CursorTheme.surfaceRaised(for: colorScheme))
                 } else {
                     Circle().fill(CursorTheme.brandGradient)
                 }
@@ -1419,7 +1419,7 @@ struct PopoutView: View {
                 Circle()
                     .stroke(
                         tab.isRunning
-                            ? CursorTheme.borderStrong
+                            ? CursorTheme.borderStrong(for: colorScheme)
                             : CursorTheme.textPrimary(for: colorScheme).opacity(0.14),
                         lineWidth: 1
                     )
@@ -1442,15 +1442,15 @@ struct PopoutView: View {
     }
 
     private var cardBackground: some ShapeStyle {
-        CursorTheme.surface
+        CursorTheme.surface(for: colorScheme)
     }
 
     private var editorBackground: some ShapeStyle {
-        CursorTheme.surfaceMuted
+        CursorTheme.surfaceMuted(for: colorScheme)
     }
 
     private var cardBorder: Color {
-        CursorTheme.border
+        CursorTheme.border(for: colorScheme)
     }
 
     @ViewBuilder
@@ -1463,7 +1463,7 @@ struct PopoutView: View {
                             TextField("Message", text: $editingFollowUpDraft, axis: .vertical)
                                 .textFieldStyle(.plain)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textPrimary)
+                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                                 .lineLimit(2 ... 6)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .onSubmit { applyEditedFollowUp(itemID: item.id, tab: tab) }
@@ -1472,7 +1472,7 @@ struct PopoutView: View {
                             }) {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textPrimary)
+                                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                             }
                             .buttonStyle(.plain)
                             .help("Save")
@@ -1482,14 +1482,14 @@ struct PopoutView: View {
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textTertiary)
+                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             }
                             .buttonStyle(.plain)
                             .help("Cancel")
                         } else {
                             Text(item.text)
                                 .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textPrimary)
+                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                                 .lineLimit(2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button(action: {
@@ -1501,10 +1501,10 @@ struct PopoutView: View {
                                     Text("New Agent")
                                         .font(.system(size: 12, weight: .medium))
                                 }
-                                .foregroundStyle(CursorTheme.textSecondary)
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(CursorTheme.surfaceRaised, in: Capsule())
+                                .background(CursorTheme.surfaceRaised(for: colorScheme), in: Capsule())
                             }
                             .buttonStyle(.plain)
                             .help("Send to new agent")
@@ -1514,7 +1514,7 @@ struct PopoutView: View {
                             }) {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(CursorTheme.textSecondary)
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                             }
                             .buttonStyle(.plain)
                             .help("Edit message")
@@ -1523,7 +1523,7 @@ struct PopoutView: View {
                             }) {
                                 Image(systemName: "xmark.circle.fill")
                                     .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textTertiary)
+                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             }
                             .buttonStyle(.plain)
                         }

@@ -288,7 +288,7 @@ private struct ModelsSettingsPaneContent: View {
         VStack(alignment: .leading, spacing: 24) {
             // Search and refresh
             HStack(spacing: 8) {
-                TextField("Add or search model", text: $modelSearchText)
+                TextField("Search models...", text: $modelSearchText)
                     .textFieldStyle(.roundedBorder)
                 Button {
                     appState.loadModelsFromCLI()
@@ -321,6 +321,7 @@ private struct ModelsSettingsPaneContent: View {
                             }
                         ))
                         .toggleStyle(.switch)
+                        .controlSize(.small)
                         .labelsHidden()
                     }
                     .padding(.horizontal, 12)
@@ -347,16 +348,6 @@ private struct ModelsSettingsPaneContent: View {
                 .foregroundStyle(CursorTheme.brandBlue)
                 .font(.system(size: 14))
             }
-
-            // API Keys section
-            DisclosureGroup("API Keys") {
-                Text("API key configuration can be managed in Cursor.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .padding(.vertical, 8)
-            }
-            .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

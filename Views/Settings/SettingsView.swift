@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
@@ -96,6 +97,7 @@ struct SettingsView: View {
                             disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: set)
                         }
                     ))
+                    .controlSize(.small)
                 }
             } header: {
                 Text("Model Picker")
@@ -156,19 +158,19 @@ struct SettingsView: View {
     private func quickActionRow(_ cmd: QuickActionCommand, scope: QuickActionCommand.Scope) -> some View {
         HStack(spacing: 10) {
             Image(systemName: cmd.icon)
-                .foregroundStyle(CursorTheme.textSecondary)
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 .frame(width: 22, alignment: .center)
             Text(cmd.title)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(scope == .global ? "Global" : "Project")
                 .font(.caption)
-                .foregroundStyle(CursorTheme.textTertiary)
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(CursorTheme.surfaceMuted, in: Capsule())
+                .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
             Button(action: { deleteCommand(cmd, scope: scope) }) {
                 Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(CursorTheme.textTertiary)
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
             }
             .buttonStyle(.plain)
         }

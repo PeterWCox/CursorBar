@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 // MARK: - Tasks (todos) list for a project
 
 struct TasksListView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     /// When set to true from outside (e.g. Cmd+T), show the add-new-task row and focus it.
     var triggerAddNewTask: Binding<Bool> = .constant(false)
@@ -82,7 +83,7 @@ struct TasksListView: View {
         VStack(spacing: 0) {
             header
             Divider()
-                .background(CursorTheme.border)
+                .background(CursorTheme.border(for: colorScheme))
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if todoTasks.isEmpty && visibleArchivedTasks.isEmpty && !isAddingNewTask {
@@ -213,11 +214,11 @@ struct TasksListView: View {
                 HStack(spacing: 6) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textTertiary)
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                         .frame(width: 14, height: 14)
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textSecondary)
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 }
                 .contentShape(Rectangle())
             }
@@ -292,7 +293,7 @@ struct TasksListView: View {
             Button(action: onDismiss) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textSecondary)
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
@@ -301,10 +302,10 @@ struct TasksListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tasks")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary)
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                 Text((workspacePath as NSString).lastPathComponent)
                     .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(CursorTheme.textTertiary)
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -328,14 +329,14 @@ struct TasksListView: View {
         VStack(spacing: 16) {
             Image(systemName: "checklist")
                 .font(.system(size: 48, weight: .medium))
-                .foregroundStyle(CursorTheme.textTertiary)
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .symbolRenderingMode(.hierarchical)
             Text("No tasks yet")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary)
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
             Text("Add a task to track work for this project. You can send any task to a new agent tab.")
                 .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(CursorTheme.textTertiary)
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
             Button(action: {
@@ -360,12 +361,12 @@ struct TasksListView: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "circle")
                     .font(.system(size: 18))
-                    .foregroundStyle(CursorTheme.textTertiary)
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
 
                 TextField("New task…", text: $newTaskDraft)
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(CursorTheme.textPrimary)
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                     .focused($isNewTaskFieldFocused)
                     .onSubmit { commitNewTask() }
                     .onKeyPress(.escape) {
@@ -376,7 +377,7 @@ struct TasksListView: View {
                 Button(action: cancelNewTask) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 16))
-                        .foregroundStyle(CursorTheme.textTertiary)
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 }
                 .buttonStyle(.plain)
             }
@@ -388,10 +389,10 @@ struct TasksListView: View {
             )
         }
         .padding(12)
-        .background(CursorTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(CursorTheme.border, lineWidth: 1)
+                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
         .fileImporter(
             isPresented: $showScreenshotFileImporter,
@@ -415,6 +416,7 @@ struct TasksListView: View {
 // MARK: - Task screenshot thumbnail (in todo row): tappable preview + delete
 
 private struct TaskScreenshotThumbnailView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     let screenshotPath: String
     var onTapPreview: (() -> Void)? = nil
@@ -424,7 +426,7 @@ private struct TaskScreenshotThumbnailView: View {
         ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: screenshotPath)
     }
 
-    /// Small "expand" icon overlay (matches ScreenshotCardView affordance).
+    /// Small "expand" icon overlay (matches ScreenshotCardView affordance). Dark scrim + white icon for contrast on any image.
     private var expandPreviewOverlay: some View {
         ZStack {
             Color.black.opacity(0.25)
@@ -445,7 +447,7 @@ private struct TaskScreenshotThumbnailView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
+                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                     )
                     .overlay(expandPreviewOverlay)
                     .contentShape(Rectangle())
@@ -457,7 +459,7 @@ private struct TaskScreenshotThumbnailView: View {
                     Button(action: { onDelete?() }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 18))
-                            .foregroundStyle(CursorTheme.textTertiary)
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     }
                     .buttonStyle(.plain)
                 }
@@ -469,6 +471,7 @@ private struct TaskScreenshotThumbnailView: View {
 // MARK: - Task row
 
 private struct TaskRowView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let task: ProjectTask
     let workspacePath: String
     /// When set, show a badge for the linked agent status (processing / done / open / stopped).
@@ -492,7 +495,7 @@ private struct TaskRowView: View {
             Button(action: onToggleComplete) {
                 Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 18))
-                    .foregroundStyle(task.completed ? CursorTheme.brandBlue : CursorTheme.textTertiary)
+                    .foregroundStyle(task.completed ? CursorTheme.brandBlue : CursorTheme.textTertiary(for: colorScheme))
             }
             .buttonStyle(.plain)
             .disabled(isEditing)
@@ -501,7 +504,7 @@ private struct TaskRowView: View {
                 if isEditing && !task.completed {
                     TextEditor(text: $editDraft)
                         .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textPrimary)
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .scrollContentBackground(.hidden)
                         .lineSpacing(6)
                         .padding(.vertical, 4)
@@ -530,7 +533,7 @@ private struct TaskRowView: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text(task.content)
                             .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(task.completed ? CursorTheme.textTertiary : CursorTheme.textPrimary)
+                            .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
                             .strikethrough(task.completed)
                             .multilineTextAlignment(.leading)
                             .lineLimit(4)
@@ -542,7 +545,7 @@ private struct TaskRowView: View {
                         }
                     }
                 }
-                if !task.screenshotPaths.isEmpty {
+                if !task.screenshotPaths.isEmpty && !(isEditing && !task.completed) {
                     HStack(alignment: .center, spacing: 6) {
                         ForEach(task.screenshotPaths, id: \.self) { path in
                             TaskScreenshotThumbnailView(
@@ -577,16 +580,16 @@ private struct TaskRowView: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary)
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
         }
         .padding(12)
-        .background(CursorTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(CursorTheme.border, lineWidth: 1)
+                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
         .contextMenu {
             Button(task.completed ? "Mark as not done" : "Mark as Done", systemImage: task.completed ? "circle" : "checkmark.circle") {
@@ -630,7 +633,7 @@ private struct TaskRowView: View {
     private func statusDisplay(_ status: LinkedTaskStatus) -> (icon: String, color: Color, label: String) {
         switch status {
         case .open:
-            return ("circle", CursorTheme.textTertiary, "open")
+            return ("circle", CursorTheme.textTertiary(for: colorScheme), "open")
         case .processing:
             return ("arrow.trianglehead.2.clockwise.rotate.90", CursorTheme.brandBlue, "processing")
         case .done:
@@ -644,6 +647,7 @@ private struct TaskRowView: View {
 // MARK: - Screenshot draft (new task / edit): thumbnails + add controls
 
 private struct TaskScreenshotDraftView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var images: [NSImage]
     @Binding var showFileImporter: Bool
     var thumbnailSize: CGSize
@@ -658,12 +662,12 @@ private struct TaskScreenshotDraftView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
+                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                     )
                 Button(action: { images.remove(at: index) }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 18))
-                        .foregroundStyle(CursorTheme.textTertiary)
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 }
                 .buttonStyle(.plain)
             }
