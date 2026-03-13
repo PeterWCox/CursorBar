@@ -1,0 +1,63 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "[swift]": {
+      "editor.formatOnSave": true
+    },
+    "[markdown]": {
+      "editor.formatOnSave": true
+    },
+    "[json]": {
+      "editor.formatOnSave": true
+    },
+    "[jsonc]": {
+      "editor.formatOnSave": true
+    },
+    "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "file",
+    "workbench.preferredDarkColorTheme": "Visual Studio 2022 Dark",
+    "workbench.preferredLightColorTheme": "Visual Studio 2022 Light",
+    "editor.tokenColorCustomizations": {
+      "textMateRules": [
+        {
+          "scope": "heading.1.markdown",
+          "settings": {
+            "foreground": "#ff6b6b",
+            "fontStyle": "bold"
+          }
+        },
+        {
+          "scope": "heading.2.markdown",
+          "settings": {
+            "foreground": "#4ecdc4",
+            "fontStyle": "bold"
+          }
+        },
+        {
+          "scope": "heading.3.markdown",
+          "settings": {
+            "foreground": "#ffd93d"
+          }
+        }
+      ]
+    },
+    "files.exclude": {
+      "**/build": true,
+      "**/.DS_Store": true
+    },
+    "search.exclude": {
+      "**/build": true,
+      "**/DerivedData": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "sswg.swift-lang",
+      "vscode-icons-team.vscode-icons"
+    ]
+  }
+}
