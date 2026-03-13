@@ -85,11 +85,12 @@ struct SavedTabState: Codable {
 
 // MARK: - Linked task status (for sidebar display)
 
-/// Status of the task linked to an agent: open (not done), processing (agent running), or done (task completed).
+/// Status of the task linked to an agent: open (not done), processing (agent running), done (task completed), or stopped (agent was stopped).
 enum LinkedTaskStatus: String, Equatable {
     case open
     case processing
     case done
+    case stopped
 }
 
 enum TabManagerPersistence {

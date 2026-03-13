@@ -205,8 +205,12 @@ struct TabChip: View {
     private func linkedTaskStatusBadge(_ status: LinkedTaskStatus) -> some View {
         let (icon, color, label) = statusDisplay(status)
         HStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.system(size: 9, weight: .semibold))
+            if status == .processing {
+                LightBlueSpinner(size: 10)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+            }
             Text(label)
                 .font(.system(size: 10, weight: .medium))
         }
@@ -224,6 +228,8 @@ struct TabChip: View {
             return ("arrow.trianglehead.2.clockwise.rotate.90", CursorTheme.brandBlue, "processing")
         case .done:
             return ("checkmark.circle.fill", Color.green, "done")
+        case .stopped:
+            return ("stop.fill", Color.red, "stopped")
         }
     }
 }

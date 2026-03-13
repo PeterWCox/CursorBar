@@ -117,6 +117,8 @@ struct PopoutView: View {
     /// When set, the queued follow-up with this ID is in edit mode; draft text is in editingFollowUpDraft.
     @State private var editingFollowUpID: UUID? = nil
     @State private var editingFollowUpDraft: String = ""
+    /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
+    @State private var tasksViewTriggerAddNew: Bool = false
     /// When true, hide main agent content and show only title bar + tab sidebar (uses AppState so panel can resize).
     private var isMainContentCollapsed: Bool { appState.isMainContentCollapsed }
 
@@ -147,18 +149,21 @@ struct PopoutView: View {
         }
     }
 
-    /// Status of the task linked to this agent for sidebar display (open / processing / done).
+    /// Status of the task linked to this agent for sidebar display (open / processing / done / stopped).
     private func linkedTaskStatus(for tab: AgentTab) -> LinkedTaskStatus? {
         guard let taskID = tab.linkedTaskID else { return nil }
         let tasks = ProjectTasksStorage.tasks(workspacePath: tab.workspacePath)
         guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
         if tab.isRunning { return .processing }
-        return task.completed ? .done : .open
+        if task.completed { return .done }
+        if tab.turns.last?.displayState == .stopped { return .stopped }
+        return .open
     }
 
-    private func tasksListContent(tasksPath: String) -> some View {
+    private func tasksListContent(tasksPath: String, triggerAddNewTask: Binding<Bool>) -> some View {
         TasksListView(
             workspacePath: tasksPath,
+            triggerAddNewTask: triggerAddNewTask,
             onSendToAgent: { prompt, taskID in
                 if let newTab = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: tasksPath) {
                     if let taskID = taskID {
@@ -171,6 +176,15 @@ struct PopoutView: View {
             agentsForWorkspace: tabManager.tabs.filter { $0.workspacePath == tasksPath },
             isTaskLinked: { taskID in
                 tabManager.tabs.contains(where: { $0.linkedTaskID == taskID })
+            },
+            linkedTaskStatusForTaskID: { taskID in
+                guard let tab = tabManager.tabs.first(where: { $0.workspacePath == tasksPath && $0.linkedTaskID == taskID }) else { return nil }
+                if tab.isRunning { return .processing }
+                let tasks = ProjectTasksStorage.tasks(workspacePath: tasksPath)
+                guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
+                if task.completed { return .done }
+                if tab.turns.last?.displayState == .stopped { return .stopped }
+                return .open
             },
             onLinkTaskToAgent: { task, agent in
                 agent.linkedTaskID = task.id
@@ -186,6 +200,7 @@ struct PopoutView: View {
                 tabManager.tabs.first(where: { $0.linkedTaskID == taskID })?.linkedTaskID = nil
             }
         )
+        .id(tasksPath)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(12)
     }
@@ -383,7 +398,7 @@ struct PopoutView: View {
                                         .allowsHitTesting(tabManager.selectedTerminalID == tab.id)
                                 }
                                 if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
-                                    tasksListContent(tasksPath: tasksPath)
+                                    tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
                                 } else if tabManager.selectedTerminalID == nil {
                                     if let active = tabManager.activeTab {
                                         ObservedTabView(tab: active) { tab in
@@ -414,6 +429,17 @@ struct PopoutView: View {
             }
             focusPromptInput?()
             return .handled
+        }
+        .background {
+            Button("") {
+                if tabManager.selectedTasksViewPath != nil, tabManager.selectedTasksViewPath == selectedProjectPath {
+                    tasksViewTriggerAddNew = true
+                } else {
+                    addNewAgentTab()
+                }
+            }
+            .keyboardShortcut("t", modifiers: .command)
+            .hidden()
         }
         .onAppear {
             sanitizeSelectedModel()
@@ -464,6 +490,12 @@ struct PopoutView: View {
                 onSave: { _ in },
                 onOpenAfterSave: nil
             )
+        }
+        .onChange(of: appState.requestOpenInBrowser) {
+            if appState.requestOpenInBrowser {
+                appState.requestOpenInBrowser = false
+                openInBrowserOrShowSetURLSheet()
+            }
         }
         .sheet(isPresented: $showCreateDebugScriptSheet) {
             CreateDebugScriptSheet(
@@ -850,7 +882,7 @@ struct PopoutView: View {
                                 ForEach(group.tabs) { t in
                                     ObservedTabChip(
                                         tab: t,
-                                        linkedTaskStatus: linkedTaskStatus(for: t),
+                                        linkedTaskStatus: nil, // Status shown on task row in Tasks list, not on tab
                                         isSelected: t.id == tabManager.selectedTabID,
                                         showClose: true,
                                         onSelect: {
@@ -944,8 +976,7 @@ struct PopoutView: View {
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                .keyboardShortcut("t", modifiers: .command)
-                                .help("New agent tab (⌘T)")
+                                .help("New agent tab (⌘T); in Tasks view ⌘T adds a new task")
 
                                 Button(action: { addNewTerminalTab() }) {
                                     HStack(spacing: 8) {
@@ -1380,9 +1411,11 @@ struct PopoutView: View {
         }
     }
 
-    /// Cmd+O: open in browser if URL is set, otherwise show Set debug URL sheet.
+    /// Cmd+O: open in browser if URL is set, otherwise show Set debug URL sheet. Does nothing when no project is open (avoids showing Set URL sheet or triggering system Open picker).
     private func openInBrowserOrShowSetURLSheet() {
+        guard hasOpenProjects else { return }
         let path = currentWorkspacePath
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return }
         if let urlString = ProjectSettingsStorage.getDebugURL(workspacePath: path),
            let url = URL(string: urlString) {
             openURLInChrome(url)

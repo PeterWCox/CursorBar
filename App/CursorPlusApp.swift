@@ -209,6 +209,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         appState.loadModelsFromCLI()
     }
 
+    func applicationWillUpdate(_ notification: Notification) {
+        // Steer Cmd+O (File > Open) to our "Open in Browser" so the system doesn't show the file picker when no project or URL is set.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let fileMenu = NSApplication.shared.mainMenu?.item(withTitle: "File")
+            let openItem = fileMenu?.submenu?.item(withTitle: "Open…")
+            ?? fileMenu?.submenu?.item(withTitle: "Open")
+            if let openItem {
+                openItem.target = self
+                openItem.action = #selector(self.handleOpenInBrowser)
+            }
+        }
+    }
+
+    @objc func handleOpenInBrowser() {
+        appState.requestOpenInBrowser = true
+    }
+
     private func applyCollapsedState(_ collapsed: Bool) {
         guard let panel = panel else { return }
         var style = panel.styleMask
@@ -437,6 +455,8 @@ class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @Published var showSettingsSheet: Bool = false
+    /// When true, PopoutView should run "Open in Browser" (used when File > Open / Cmd+O is triggered so we handle it instead of the system file picker).
+    @Published var requestOpenInBrowser: Bool = false
     /// When true, main agent content is hidden and panel is resized to sidebar-only width.
     @Published var isMainContentCollapsed: Bool = false
     @Published private(set) var openProjectCount: Int = 0
