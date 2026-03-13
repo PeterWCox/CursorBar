@@ -35,8 +35,6 @@ struct TabChip: View {
     var latestTurnState: ConversationTurnDisplayState? = nil
     /// True if the user has sent at least one message in this tab (so we can show completion icon).
     var hasPrompted: Bool = true
-    /// When set, show the status of the task linked to this agent (open / processing / done).
-    var linkedTaskStatus: LinkedTaskStatus? = nil
     let showClose: Bool
     var compact: Bool = false
     let onSelect: () -> Void
@@ -110,9 +108,6 @@ struct TabChip: View {
                             .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if let status = linkedTaskStatus {
-                            linkedTaskStatusBadge(status)
-                        }
                     }
                     HStack(spacing: 4) {
                         if let path = workspacePath, !path.isEmpty {
@@ -147,9 +142,6 @@ struct TabChip: View {
                             .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                        if let status = linkedTaskStatus {
-                            linkedTaskStatusBadge(status)
-                        }
                     }
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.triangle.branch")
@@ -170,9 +162,6 @@ struct TabChip: View {
                         .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                    if let status = linkedTaskStatus {
-                        linkedTaskStatusBadge(status)
-                    }
                 }
                 .frame(maxWidth: 160, alignment: .leading)
             }
@@ -202,37 +191,6 @@ struct TabChip: View {
         )
     }
 
-    @ViewBuilder
-    private func linkedTaskStatusBadge(_ status: LinkedTaskStatus) -> some View {
-        let (icon, color, label) = statusDisplay(status)
-        HStack(spacing: 2) {
-            if status == .processing {
-                LightBlueSpinner(size: 10)
-            } else {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
-        .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-    }
-
-    private func statusDisplay(_ status: LinkedTaskStatus) -> (icon: String, color: Color, label: String) {
-        switch status {
-        case .open:
-            return ("circle", CursorTheme.textTertiary(for: colorScheme), "open")
-        case .processing:
-            return ("arrow.trianglehead.2.clockwise.rotate.90", CursorTheme.brandBlue, "processing")
-        case .done:
-            return ("checkmark.circle.fill", CursorTheme.semanticSuccess, "done")
-        case .stopped:
-            return ("stop.fill", CursorTheme.semanticError, "stopped")
-        }
-    }
 }
 
 // MARK: - Project / folder icon from path (uses system icon, including custom folder icons)

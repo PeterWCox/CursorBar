@@ -109,68 +109,64 @@ struct TasksListView: View {
                             if isAddingNewTask {
                                 newTaskRow
                             }
-                        // Todo section
-                        if !todoTasks.isEmpty {
-                            disclosureSection(
-                                title: "Todo",
-                                collapsed: $todoSectionCollapsed,
-                                showFilter: false,
-                                onFilterToggle: nil
-                            ) {
-                                ForEach(todoTasks) { task in
-                                    taskRow(task, isInBacklog: false, onToggleBacklog: {
-                                        ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
-                                        reloadTasks()
-                                    })
-                                }
+                        }
+                        // Todo section (always shown with count)
+                        disclosureSection(
+                            title: "Todo",
+                            count: todoTasks.count,
+                            collapsed: $todoSectionCollapsed,
+                            showFilter: false,
+                            onFilterToggle: nil
+                        ) {
+                            ForEach(todoTasks) { task in
+                                taskRow(task, isInBacklog: false, onToggleBacklog: {
+                                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
+                                    reloadTasks()
+                                })
                             }
                         }
-                        // Backlog section
-                        if !backlogTasks.isEmpty {
-                            disclosureSection(
-                                title: "Backlog",
-                                collapsed: $backlogSectionCollapsed,
-                                showFilter: false,
-                                onFilterToggle: nil,
-                                topPadding: CursorTheme.gapBetweenSections
-                            ) {
-                                ForEach(backlogTasks) { task in
-                                    taskRow(task, isInBacklog: true, onToggleBacklog: {
-                                        ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
-                                        reloadTasks()
-                                    })
-                                }
+                        // Backlog section (always shown with count)
+                        disclosureSection(
+                            title: "Backlog",
+                            count: backlogTasks.count,
+                            collapsed: $backlogSectionCollapsed,
+                            showFilter: false,
+                            onFilterToggle: nil,
+                            topPadding: CursorTheme.gapBetweenSections
+                        ) {
+                            ForEach(backlogTasks) { task in
+                                taskRow(task, isInBacklog: true, onToggleBacklog: {
+                                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
+                                    reloadTasks()
+                                })
                             }
                         }
-                        // Completed section (done tasks)
-                        if !completedTasks.isEmpty {
-                            disclosureSection(
-                                title: "Completed",
-                                collapsed: $completedSectionCollapsed,
-                                showFilter: true,
-                                onFilterToggle: { showOnlyRecentCompleted.toggle() },
-                                topPadding: CursorTheme.gapBetweenSections
-                            ) {
-                                ForEach(visibleCompletedTasks) { task in
-                                    taskRow(task)
-                                }
+                        // Completed section (always shown with count)
+                        disclosureSection(
+                            title: "Completed",
+                            count: completedTasks.count,
+                            collapsed: $completedSectionCollapsed,
+                            showFilter: true,
+                            onFilterToggle: { showOnlyRecentCompleted.toggle() },
+                            topPadding: CursorTheme.gapBetweenSections
+                        ) {
+                            ForEach(visibleCompletedTasks) { task in
+                                taskRow(task)
                             }
                         }
-                        // Deleted section (soft-deleted tasks)
-                        if !deletedTasksList.isEmpty {
-                            disclosureSection(
-                                title: "Deleted",
-                                collapsed: $deletedSectionCollapsed,
-                                showFilter: false,
-                                onFilterToggle: nil,
-                                topPadding: CursorTheme.gapBetweenSections
-                            ) {
-                                ForEach(deletedTasksList) { task in
-                                    deletedTaskRow(task)
-                                }
+                        // Deleted section (always shown with count)
+                        disclosureSection(
+                            title: "Deleted",
+                            count: deletedTasksList.count,
+                            collapsed: $deletedSectionCollapsed,
+                            showFilter: false,
+                            onFilterToggle: nil,
+                            topPadding: CursorTheme.gapBetweenSections
+                        ) {
+                            ForEach(deletedTasksList) { task in
+                                deletedTaskRow(task)
                             }
                         }
-                    }
                 }
                 .padding(CursorTheme.paddingPanel)
             }
@@ -262,10 +258,11 @@ struct TasksListView: View {
     }
 
     /// Section with DisclosureGroup so all accordions (Todo, Backlog, Completed, Deleted) expand/collapse consistently.
-    /// `collapsed` binding: false = expanded, true = collapsed.
+    /// `collapsed` binding: false = expanded, true = collapsed. `count` is shown in title e.g. "Todo (8)".
     @ViewBuilder
     private func disclosureSection<Content: View>(
         title: String,
+        count: Int,
         collapsed: Binding<Bool>,
         showFilter: Bool = false,
         onFilterToggle: (() -> Void)? = nil,
@@ -278,12 +275,13 @@ struct TasksListView: View {
             set: { collapsed.wrappedValue = !$0 }
         )
         let contentView = content()
+        let titleWithCount = "\(title) (\(count))"
         DisclosureGroup(isExpanded: expandedBinding) {
             contentView
                 .padding(.top, CursorTheme.gapSectionTitleToContent)
         } label: {
             HStack(spacing: 8) {
-                Text(title)
+                Text(titleWithCount)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 if showFilter, let onFilterToggle {
@@ -606,7 +604,7 @@ private struct TaskRowView: View {
     let task: ProjectTask
     let workspacePath: String
     var models: [ModelOption] = []
-    /// When set, show a badge for the linked agent status (processing / done / open / stopped).
+    /// When set, the leading icon reflects the linked agent status (processing / done / open / stopped).
     var linkedTaskStatus: LinkedTaskStatus? = nil
     var isEditing: Bool = false
     @Binding var editDraft: String
@@ -627,12 +625,29 @@ private struct TaskRowView: View {
 
     private var isProcessing: Bool { linkedTaskStatus == .processing }
 
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if linkedTaskStatus == .processing {
+            LightBlueSpinner(size: 18)
+        } else if linkedTaskStatus == .done {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(CursorTheme.semanticSuccess)
+        } else if task.completed {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(CursorTheme.brandBlue)
+        } else {
+            Image(systemName: "circle")
+                .font(.system(size: 18))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: onToggleComplete) {
-                Image(systemName: task.completed ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle(task.completed ? CursorTheme.brandBlue : CursorTheme.textTertiary(for: colorScheme))
+                leadingIcon
             }
             .buttonStyle(.plain)
             .disabled(isEditing || isProcessing)
@@ -687,9 +702,6 @@ private struct TaskRowView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
-                        if let status = linkedTaskStatus {
-                            taskStatusBadge(status)
-                        }
                     }
                 }
                 if !task.screenshotPaths.isEmpty && !(isEditing && !task.completed) {
@@ -786,37 +798,6 @@ private struct TaskRowView: View {
         }
     }
 
-    @ViewBuilder
-    private func taskStatusBadge(_ status: LinkedTaskStatus) -> some View {
-        let (icon, color, label) = statusDisplay(status)
-        HStack(spacing: 2) {
-            if status == .processing {
-                LightBlueSpinner(size: 10)
-            } else {
-                Image(systemName: icon)
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-        }
-        .foregroundStyle(color)
-        .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
-        .padding(.vertical, CursorTheme.paddingBadgeVertical)
-        .background(color.opacity(0.2), in: RoundedRectangle(cornerRadius: CursorTheme.spaceXS, style: .continuous))
-    }
-
-    private func statusDisplay(_ status: LinkedTaskStatus) -> (icon: String, color: Color, label: String) {
-        switch status {
-        case .open:
-            return ("circle", CursorTheme.textTertiary(for: colorScheme), "open")
-        case .processing:
-            return ("arrow.trianglehead.2.clockwise.rotate.90", CursorTheme.brandBlue, "processing")
-        case .done:
-            return ("checkmark.circle.fill", CursorTheme.semanticSuccess, "done")
-        case .stopped:
-            return ("stop.fill", CursorTheme.semanticError, "stopped")
-        }
-    }
 }
 
 // MARK: - Screenshot draft (new task / edit): thumbnails + add controls

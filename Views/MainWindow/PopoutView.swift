@@ -65,7 +65,6 @@ private struct TerminalTabChip: View {
 /// Sidebar chip that observes its tab so only this chip re-renders when that tab's state changes (e.g. isRunning).
 private struct ObservedTabChip: View {
     @ObservedObject var tab: AgentTab
-    var linkedTaskStatus: LinkedTaskStatus? = nil
     let isSelected: Bool
     let showClose: Bool
     let onSelect: () -> Void
@@ -81,7 +80,6 @@ private struct ObservedTabChip: View {
             isRunning: tab.isRunning,
             latestTurnState: tab.turns.last?.displayState,
             hasPrompted: !tab.turns.isEmpty,
-            linkedTaskStatus: linkedTaskStatus,
             showClose: showClose,
             compact: false,
             onSelect: onSelect,
@@ -666,20 +664,22 @@ struct PopoutView: View {
                 .frame(height: isMainContentCollapsed ? 28 : 36)
 
             if !isMainContentCollapsed {
-                Text("BETA")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Self.agentSpinnerBlue)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Self.agentSpinnerBlue.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-                if Self.isDebugBuild {
-                    Text("DEBUG")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("BETA")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Self.debugBadgeAmber)
+                        .foregroundStyle(Self.agentSpinnerBlue)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(Self.debugBadgeAmber.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .background(Self.agentSpinnerBlue.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+                    if Self.isDebugBuild {
+                        Text("DEBUG")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Self.debugBadgeAmber)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Self.debugBadgeAmber.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
                 }
             }
 
@@ -856,7 +856,6 @@ struct PopoutView: View {
                                 ForEach(group.tabs) { t in
                                     ObservedTabChip(
                                         tab: t,
-                                        linkedTaskStatus: linkedTaskStatus(for: t),
                                         isSelected: t.id == tabManager.selectedTabID,
                                         showClose: true,
                                         onSelect: {
