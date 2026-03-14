@@ -1,6 +1,12 @@
 import SwiftUI
+#if DEBUG
+import Inject
+#endif
 
 struct SettingsView: View {
+    #if DEBUG
+    @ObserveInjection var inject
+    #endif
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
@@ -156,6 +162,9 @@ struct SettingsView: View {
                 editingCommand = nil
             }
         }
+        #if DEBUG
+        .enableInjection()
+        #endif
     }
 
     @ViewBuilder

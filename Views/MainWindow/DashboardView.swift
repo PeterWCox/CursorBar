@@ -1,4 +1,7 @@
 import SwiftUI
+#if DEBUG
+import Inject
+#endif
 
 // MARK: - Dashboard (Preview, Advanced) for a project
 
@@ -9,12 +12,17 @@ enum DashboardTab: String, CaseIterable {
 }
 
 struct DashboardView: View {
+    #if DEBUG
+    @ObserveInjection var inject
+    #endif
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     var onDismiss: () -> Void
-    /// Remove this project from Cursor Metro without deleting files on disk.
+    /// Remove this project from Cursor+ without deleting files on disk.
     var onRemoveProject: () -> Void
     @Binding var selectedTab: DashboardTab
+    /// When set, Regenerate Setup (and Configure Setup when not configured) launches an agent with a setup prompt instead of switching to Advanced. Call with workspace path.
+    var onLaunchSetupAgent: ((String) -> Void)? = nil
 
     @State private var debugURL: String = ""
     @State private var startupScriptContents: String = ""
@@ -45,6 +53,9 @@ struct DashboardView: View {
             debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
             startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
         }
+        #if DEBUG
+        .enableInjection()
+        #endif
     }
 
     private var header: some View {
@@ -117,40 +128,96 @@ struct DashboardView: View {
 
     private static let defaultStartupScript = """
     #!/bin/bash
-    # Add commands to build and start your app.
-    # Example: npm run dev
+    # This script runs with cwd = project root (the folder that contains .metro). Do not cd into .metro.
+    # Add commands to build and start your app, e.g. npm run dev or: cd budget && npm run dev
+    """
+
+    /// Prompt sent to the agent when launching setup/regenerate. Agent creates .metro/startup.sh and .metro/project.json (debugUrl) from scratch.
+    static let setupAgentPrompt = """
+    Set up Cursor Metro for this project from scratch.
+
+    1) Create or overwrite .metro/startup.sh with a script that builds and runs the app. Use #!/bin/bash and make the script executable.
+
+    Important: The script is always run with the shell's current working directory set to the **project root** (the directory that contains .metro), NOT inside .metro. Write the script as if it runs in the project root: use commands like `npm run dev` if package.json is in the project root, or `cd budget && npm run dev` (or whatever the app subfolder is) if the app lives in a subfolder. Do not cd into .metro or assume the script runs from .metro.
+
+    2) If this is a web app, create or update .metro/project.json with a "debugUrl" field set to the URL where the app is served (e.g. http://localhost:3000).
+
+    Detect the project type from the repo (package.json, etc.) and configure accordingly.
     """
 
     private var previewContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: CursorTheme.spaceS) {
                 let isConfigured = startupScriptContents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                if isConfigured {
+                let terminalRunning = previewTerminalCommand != nil
+                let hasPreviewURL = (debugURL.trimmingCharacters(in: .whitespacesAndNewlines)).isEmpty == false
+
+                if terminalRunning {
+                    // State: terminal running — Stop + Open in Browser
                     ActionButton(
-                        title: "Start Preview",
-                        icon: "play.fill",
+                        title: "Stop",
+                        icon: "stop.fill",
                         action: {
-                            previewTerminalCommand = "bash .metro/startup.sh"
+                            previewTerminalCommand = nil
                             previewTerminalKey = UUID()
                         },
-                        help: "Run .metro/startup.sh in the terminal below",
-                        style: .play
+                        help: "Stop the process and reset the terminal",
+                        style: .stop
+                    )
+                    if hasPreviewURL {
+                        ActionButton(
+                            title: "Open in Browser",
+                            icon: "safari",
+                            action: {
+                                guard let url = URL(string: debugURL.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+                                openURLInChrome(url)
+                            },
+                            help: "Open the preview URL in Chrome",
+                            style: .primary
+                        )
+                    }
+                } else {
+                    // State: terminal not running — Start (if configured) + Regenerate/Configure Setup
+                    if isConfigured {
+                        ActionButton(
+                            title: "Start Preview",
+                            icon: "play.fill",
+                            action: {
+                                previewTerminalCommand = "bash .metro/startup.sh"
+                                previewTerminalKey = UUID()
+                            },
+                            help: "Run .metro/startup.sh in the terminal below",
+                            style: .play
+                        )
+                    }
+                    ActionButton(
+                        title: isConfigured ? "Regenerate Setup" : "Configure Setup",
+                        icon: "gearshape",
+                        action: {
+                            if let launch = onLaunchSetupAgent {
+                                launch(workspacePath)
+                                return
+                            }
+                            if isConfigured {
+                                ProjectSettingsStorage.setDebugURL(workspacePath: workspacePath, nil)
+                                debugURL = ""
+                                ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, Self.defaultStartupScript)
+                                startupScriptContents = Self.defaultStartupScript
+                            } else {
+                                let trimmed = startupScriptContents.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if trimmed.isEmpty {
+                                    ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, Self.defaultStartupScript)
+                                    startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? Self.defaultStartupScript
+                                }
+                            }
+                            selectedTab = .settings
+                        },
+                        help: onLaunchSetupAgent != nil
+                            ? (isConfigured ? "Launch an agent to regenerate .metro/startup.sh and debug URL from scratch" : "Launch an agent to set up .metro/startup.sh and debug URL for this project")
+                            : (isConfigured ? "Reset startup script to default and open Advanced to reconfigure" : "Set up .metro/startup.sh and open Advanced to set debug URL and startup script"),
+                        style: .accent
                     )
                 }
-                ActionButton(
-                    title: "Configure Setup",
-                    icon: "gearshape",
-                    action: {
-                        let trimmed = startupScriptContents.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed.isEmpty {
-                            ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, Self.defaultStartupScript)
-                            startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? Self.defaultStartupScript
-                        }
-                        selectedTab = .settings
-                    },
-                    help: "Set up .metro/startup.sh and open Advanced to set debug URL and startup script",
-                    style: .accent
-                )
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, CursorTheme.paddingPanel)
@@ -196,7 +263,7 @@ struct DashboardView: View {
                 Text("Startup script (startup.sh)")
                     .font(.system(size: CursorTheme.fontSecondary, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                Text("This is the script that runs in your terminal so you can preview the app.")
+                Text("This script runs with the terminal’s working directory set to the project root (the folder that contains .metro). Use paths or cd relative to the project root.")
                     .font(.system(size: CursorTheme.fontCaption, weight: .regular))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 TextEditor(text: $startupScriptContents)
@@ -216,10 +283,10 @@ struct DashboardView: View {
             }
 
             VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                Text("Remove from Cursor Metro")
+                Text("Remove from Cursor+")
                     .font(.system(size: CursorTheme.fontSecondary, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                Text("Remove this project from the sidebar and close its tabs in Cursor Metro. This does not delete the project folder or any files on disk.")
+                Text("Remove this project from the sidebar and close its tabs in Cursor+. This does not delete the project folder or any files on disk.")
                     .font(.system(size: CursorTheme.fontBodySmall, weight: .regular))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -231,7 +298,7 @@ struct DashboardView: View {
                         .foregroundStyle(CursorTheme.semanticError)
                 }
                 .buttonStyle(.plain)
-                .help("Remove this project from Cursor Metro without deleting any files")
+                .help("Remove this project from Cursor+ without deleting any files")
             }
             .padding(CursorTheme.paddingCard)
             .frame(maxWidth: .infinity, alignment: .leading)

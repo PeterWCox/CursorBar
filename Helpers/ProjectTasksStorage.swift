@@ -4,42 +4,72 @@ import AppKit
 // MARK: - Per-project tasks (todos)
 // Stored in .metro/tasks.json; only tasks for the current project are shown in that project's Tasks view.
 
+enum TaskState: String, Codable, CaseIterable {
+    case backlog
+    case inProgress
+    case completed
+    case deleted
+}
+
 struct ProjectTask: Identifiable, Codable, Equatable {
     var id: UUID
     var content: String
     var createdAt: Date
-    var completed: Bool
+    /// Canonical lifecycle for the task. This is the only source of truth for top-level task state.
+    var taskState: TaskState
     /// When the task was marked completed; nil if not completed or completed before this field existed.
     var completedAt: Date?
-    /// When true, task is soft-deleted and shown in the Deleted section. When false, task is active or completed.
-    var deleted: Bool
     /// When the task was deleted; nil if not deleted.
     var deletedAt: Date?
     /// Relative paths under .metro (e.g. "screenshots/<id>_0.png") for task screenshots. Empty = no screenshots.
     var screenshotPaths: [String]
     /// Model ID to use when sending this task to an agent (e.g. "auto", "gpt-5.4-medium"). Defaults to Auto.
     var modelId: String
-    /// When true, task appears in Backlog section instead of Todo (only for non-completed tasks).
-    var backlog: Bool
+    /// Preserves the last non-deleted state so soft-deleted tasks can be restored.
+    var preDeletionTaskState: TaskState?
     /// Linked agent tab for this task when one has been created.
     var agentTabID: UUID?
 
-    init(id: UUID = UUID(), content: String, createdAt: Date = Date(), completed: Bool = false, completedAt: Date? = nil, deleted: Bool = false, deletedAt: Date? = nil, screenshotPaths: [String] = [], modelId: String = AvailableModels.autoID, backlog: Bool = false, agentTabID: UUID? = nil) {
+    var completed: Bool { taskState == .completed }
+    var deleted: Bool { taskState == .deleted }
+    var backlog: Bool { taskState == .backlog }
+
+    init(
+        id: UUID = UUID(),
+        content: String,
+        createdAt: Date = Date(),
+        taskState: TaskState? = nil,
+        completed: Bool = false,
+        completedAt: Date? = nil,
+        deleted: Bool = false,
+        deletedAt: Date? = nil,
+        screenshotPaths: [String] = [],
+        modelId: String = AvailableModels.autoID,
+        backlog: Bool = false,
+        preDeletionTaskState: TaskState? = nil,
+        agentTabID: UUID? = nil
+    ) {
         self.id = id
         self.content = content
         self.createdAt = createdAt
-        self.completed = completed
+        self.taskState = taskState ?? Self.migratedTaskState(completed: completed, deleted: deleted, backlog: backlog)
         self.completedAt = completedAt
-        self.deleted = deleted
         self.deletedAt = deletedAt
         self.screenshotPaths = screenshotPaths
         self.modelId = modelId
-        self.backlog = backlog
+        self.preDeletionTaskState = preDeletionTaskState
         self.agentTabID = agentTabID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, content, createdAt, completed, completedAt, deleted, deletedAt, screenshotPath, screenshotPaths, modelId, backlog, agentTabID
+        case id, content, createdAt, taskState, completed, completedAt, deleted, deletedAt, screenshotPath, screenshotPaths, modelId, backlog, preDeletionTaskState, agentTabID
+    }
+
+    private static func migratedTaskState(completed: Bool, deleted: Bool, backlog: Bool) -> TaskState {
+        if deleted { return .deleted }
+        if completed { return .completed }
+        if backlog { return .backlog }
+        return .inProgress
     }
 
     init(from decoder: Decoder) throws {
@@ -47,9 +77,12 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         id = try c.decode(UUID.self, forKey: .id)
         content = try c.decode(String.self, forKey: .content)
         createdAt = try c.decode(Date.self, forKey: .createdAt)
-        completed = try c.decode(Bool.self, forKey: .completed)
+        let completed = try c.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        let deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
+        let backlog = try c.decodeIfPresent(Bool.self, forKey: .backlog) ?? false
+        taskState = try c.decodeIfPresent(TaskState.self, forKey: .taskState)
+            ?? Self.migratedTaskState(completed: completed, deleted: deleted, backlog: backlog)
         completedAt = try c.decodeIfPresent(Date.self, forKey: .completedAt)
-        deleted = try c.decodeIfPresent(Bool.self, forKey: .deleted) ?? false
         deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
         if let paths = try c.decodeIfPresent([String].self, forKey: .screenshotPaths) {
             screenshotPaths = paths
@@ -59,7 +92,7 @@ struct ProjectTask: Identifiable, Codable, Equatable {
             screenshotPaths = []
         }
         modelId = try c.decodeIfPresent(String.self, forKey: .modelId) ?? AvailableModels.autoID
-        backlog = try c.decodeIfPresent(Bool.self, forKey: .backlog) ?? false
+        preDeletionTaskState = try c.decodeIfPresent(TaskState.self, forKey: .preDeletionTaskState)
         agentTabID = try c.decodeIfPresent(UUID.self, forKey: .agentTabID)
     }
 
@@ -68,6 +101,7 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         try c.encode(id, forKey: .id)
         try c.encode(content, forKey: .content)
         try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(taskState, forKey: .taskState)
         try c.encode(completed, forKey: .completed)
         try c.encodeIfPresent(completedAt, forKey: .completedAt)
         try c.encode(deleted, forKey: .deleted)
@@ -75,6 +109,7 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         try c.encode(screenshotPaths, forKey: .screenshotPaths)
         try c.encode(modelId, forKey: .modelId)
         try c.encode(backlog, forKey: .backlog)
+        try c.encodeIfPresent(preDeletionTaskState, forKey: .preDeletionTaskState)
         try c.encodeIfPresent(agentTabID, forKey: .agentTabID)
     }
 }
@@ -84,6 +119,36 @@ private struct ProjectTasksFile: Codable {
 }
 
 enum ProjectTasksStorage {
+    private static func setTaskState(_ newState: TaskState, for task: inout ProjectTask) {
+        let previousState = task.taskState
+        guard previousState != newState else { return }
+
+        switch newState {
+        case .backlog, .inProgress:
+            task.taskState = newState
+            if previousState == .completed {
+                task.completedAt = nil
+            }
+            if previousState == .deleted {
+                task.deletedAt = nil
+                task.preDeletionTaskState = nil
+            }
+        case .completed:
+            task.taskState = .completed
+            if previousState != .completed {
+                task.completedAt = Date()
+            }
+            if previousState == .deleted {
+                task.deletedAt = nil
+                task.preDeletionTaskState = nil
+            }
+        case .deleted:
+            task.preDeletionTaskState = previousState == .deleted ? task.preDeletionTaskState : previousState
+            task.taskState = .deleted
+            task.deletedAt = Date()
+        }
+    }
+
     static func tasksURL(workspacePath: String) -> URL {
         URL(fileURLWithPath: workspacePath)
             .appendingPathComponent(".metro")
@@ -125,7 +190,7 @@ enum ProjectTasksStorage {
     /// Active tasks only (not deleted). Newest first so new tasks appear at top of In Review/Backlog.
     static func tasks(workspacePath: String) -> [ProjectTask] {
         load(workspacePath: workspacePath).tasks
-            .filter { !$0.deleted }
+            .filter { $0.taskState != .deleted }
             .sorted { $0.createdAt > $1.createdAt }
     }
 
@@ -161,13 +226,13 @@ enum ProjectTasksStorage {
     /// Soft-deleted tasks, newest first.
     static func deletedTasks(workspacePath: String) -> [ProjectTask] {
         load(workspacePath: workspacePath).tasks
-            .filter(\.deleted)
+            .filter { $0.taskState == .deleted }
             .sorted { ($0.deletedAt ?? .distantPast) >= ($1.deletedAt ?? .distantPast) }
     }
 
-    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], modelId: String = AvailableModels.autoID, backlog: Bool = false) -> ProjectTask {
+    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], modelId: String = AvailableModels.autoID, taskState: TaskState = .inProgress) -> ProjectTask {
         var file = load(workspacePath: workspacePath)
-        var task = ProjectTask(content: content, modelId: modelId, backlog: backlog)
+        var task = ProjectTask(content: content, taskState: taskState, modelId: modelId)
         let dir = screenshotsDirectoryURL(workspacePath: workspacePath)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var paths: [String] = []
@@ -187,16 +252,12 @@ enum ProjectTasksStorage {
         return task
     }
 
-    static func updateTask(workspacePath: String, id: UUID, content: String? = nil, completed: Bool? = nil, modelId: String? = nil, backlog: Bool? = nil) {
+    static func updateTask(workspacePath: String, id: UUID, content: String? = nil, taskState: TaskState? = nil, modelId: String? = nil) {
         var file = load(workspacePath: workspacePath)
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
         if let content = content { file.tasks[index].content = content }
-        if let completed = completed {
-            file.tasks[index].completed = completed
-            file.tasks[index].completedAt = completed ? Date() : nil
-        }
+        if let taskState { setTaskState(taskState, for: &file.tasks[index]) }
         if let modelId = modelId { file.tasks[index].modelId = modelId }
-        if let backlog = backlog { file.tasks[index].backlog = backlog }
         save(workspacePath: workspacePath, file)
     }
 
@@ -240,8 +301,7 @@ enum ProjectTasksStorage {
     static func deleteTask(workspacePath: String, id: UUID) {
         var file = load(workspacePath: workspacePath)
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
-        file.tasks[index].deleted = true
-        file.tasks[index].deletedAt = Date()
+        setTaskState(.deleted, for: &file.tasks[index])
         save(workspacePath: workspacePath, file)
     }
 
@@ -249,8 +309,11 @@ enum ProjectTasksStorage {
     static func restoreTask(workspacePath: String, id: UUID) {
         var file = load(workspacePath: workspacePath)
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
-        file.tasks[index].deleted = false
+        let restoredState = file.tasks[index].preDeletionTaskState
+            ?? (file.tasks[index].completedAt != nil ? .completed : .inProgress)
+        file.tasks[index].taskState = restoredState
         file.tasks[index].deletedAt = nil
+        file.tasks[index].preDeletionTaskState = nil
         save(workspacePath: workspacePath, file)
     }
 

@@ -27,33 +27,14 @@ enum PreferredAppearance: String, CaseIterable, Identifiable {
     }
 }
 
-/// Sort order for the models list in Settings > Models. Order of cases: A–Z first, then default.
-enum ModelsSortOrder: String, CaseIterable, Identifiable {
-    case alphabetical = "alphabetical"
-    case defaultOrder = "default"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .alphabetical: return "A–Z"
-        case .defaultOrder: return "Default"
-        }
-    }
-}
-
 enum AppPreferences {
     static let projectsRootPathKey = "projectsRootPath"
     static let preferredTerminalAppKey = "preferredTerminalApp"
     static let preferredAppearanceKey = "preferredAppearance"
     /// Key for model IDs to hide from the model picker. Persisted via UserDefaults when used with @AppStorage.
     static let disabledModelIdsKey = "disabledModelIds"
-    /// Key for models list sort order in Settings > Models (A–Z vs default). Value: ModelsSortOrder.rawValue.
-    static let modelsSortOrderKey = "modelsSortOrder"
     /// Default value: no models disabled, so all models are shown in the picker.
     static let defaultDisabledModelIdsRaw: String = ""
-    /// Default models list sort: default (API) order.
-    static let defaultModelsSortOrderRaw: String = ModelsSortOrder.defaultOrder.rawValue
     /// Default appearance: follow system light/dark.
     static let defaultPreferredAppearance: String = PreferredAppearance.system.rawValue
 

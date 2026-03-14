@@ -1,5 +1,8 @@
 import SwiftUI
 import AppKit
+#if DEBUG
+import Inject
+#endif
 
 // MARK: - Tasks view Cmd+T coordinator (so key monitor can trigger SwiftUI state)
 private final class TasksViewShortcutCoordinator: ObservableObject {
@@ -7,6 +10,7 @@ private final class TasksViewShortcutCoordinator: ObservableObject {
     var keyMonitor: Any?
 
     deinit {
+        //
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
         }
@@ -156,6 +160,9 @@ private struct ObservedTabChip: View {
 // MARK: - Main popout panel view
 
 struct PopoutView: View {
+    #if DEBUG
+    @ObserveInjection var inject
+    #endif
     @EnvironmentObject var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
     var dismiss: () -> Void = {}
@@ -175,7 +182,6 @@ struct PopoutView: View {
     @State private var currentBranch: String = ""
     @State private var quickActionCommands: [QuickActionCommand] = []
     @State private var composerTextHeight: CGFloat = 24
-    @State private var showSetDebugURLSheet: Bool = false
     @State private var showCreateDebugScriptSheet: Bool = false
     /// When set, show "Are you sure?" before closing this tab (agent still processing).
     @State private var closeTabConfirmationTabID: UUID? = nil
@@ -189,7 +195,6 @@ struct PopoutView: View {
     @State private var tasksViewTriggerAddNew: Bool = false
     @State private var dashboardTabsByWorkspacePath: [String: DashboardTab] = [:]
     @StateObject private var tasksViewShortcutCoordinator = TasksViewShortcutCoordinator()
-    @State private var addProjectButtonHovered: Bool = false
     /// Tab whose agent header prompt accordion is expanded (show full prompt below title).
     @State private var expandedPromptTabID: UUID? = nil
     /// When true, hide main agent content and show only title bar + tab sidebar (uses AppState so panel can resize).
@@ -234,31 +239,30 @@ struct PopoutView: View {
         }
     }
 
-    /// Status of the task linked to this agent for sidebar display (open / processing / done / stopped).
-    private func linkedTaskStatus(for tab: AgentTab) -> LinkedTaskStatus? {
+    /// Agent status linked to this task for sidebar and task list display.
+    private func linkedTaskState(for tab: AgentTab) -> AgentTaskState? {
         guard let taskID = tab.linkedTaskID else { return nil }
         let tasks = ProjectTasksStorage.tasks(workspacePath: tab.workspacePath)
         guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
+        if task.taskState == .backlog { return .none }
         if tab.isRunning { return .processing }
-        if task.completed { return .done }
         if tab.turns.last?.displayState == .stopped { return .stopped }
-        // Agent finished speaking (last turn completed); show done instead of open.
-        if tab.turns.last?.displayState == .completed { return .done }
-        return .open
+        if tab.turns.last?.displayState == .completed { return .review }
+        return .todo
     }
 
-    /// Status of a task in this workspace if any agent tab is linked to it (for badge on task row).
-    private func linkedTaskStatusForTask(taskID: UUID, workspacePath: String) -> LinkedTaskStatus? {
+    /// Agent status of a task in this workspace if any agent tab is linked to it.
+    private func linkedTaskStateForTask(taskID: UUID, workspacePath: String) -> AgentTaskState? {
         guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) else { return nil }
-        return linkedTaskStatus(for: tab)
+        return linkedTaskState(for: tab)
     }
 
     /// Builds [taskID: status] for the given workspace so the Tasks list has an explicit dependency on tab state and updates when linked tabs run/complete.
-    private func linkedStatusesForWorkspace(_ workspacePath: String) -> [UUID: LinkedTaskStatus] {
-        var result: [UUID: LinkedTaskStatus] = [:]
+    private func linkedStatusesForWorkspace(_ workspacePath: String) -> [UUID: AgentTaskState] {
+        var result: [UUID: AgentTaskState] = [:]
         for tab in tabManager.tabs where tab.workspacePath == workspacePath {
             guard let taskID = tab.linkedTaskID else { continue }
-            result[taskID] = linkedTaskStatus(for: tab)
+            result[taskID] = linkedTaskState(for: tab)
         }
         return result
     }
@@ -291,6 +295,13 @@ struct PopoutView: View {
         if let agentTabID = ProjectTasksStorage.linkedAgentTabID(workspacePath: workspacePath, taskID: task.id),
            tabManager.tabs.contains(where: { $0.id == agentTabID }) {
             selectLinkedAgentTab(agentTabID)
+            return
+        }
+        if tabManager.reopenLinkedTaskTab(
+            workspacePath: workspacePath,
+            taskID: task.id,
+            preferredTabID: ProjectTasksStorage.linkedAgentTabID(workspacePath: workspacePath, taskID: task.id)
+        ) {
             return
         }
         guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) else { return }
@@ -384,7 +395,11 @@ struct PopoutView: View {
             selectedTab: Binding(
                 get: { dashboardTabsByWorkspacePath[dashboardPath] ?? .preview },
                 set: { dashboardTabsByWorkspacePath[dashboardPath] = $0 }
-            )
+            ),
+            onLaunchSetupAgent: { path in
+                _ = addNewAgentTab(initialPrompt: DashboardView.setupAgentPrompt, lastWorkspacePath: path)
+                tabManager.hideDashboardView()
+            }
         )
         .id(dashboardPath)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -478,10 +493,6 @@ struct PopoutView: View {
 
             hiddenShortcutButton("Open in Cursor", key: ".") {
                 openCurrentProjectInCursor()
-            }
-
-            hiddenShortcutButton("Preview", key: "p") {
-                openInBrowserOrShowSetURLSheet()
             }
 
             hiddenShortcutButton("New Task", key: "t") {
@@ -620,14 +631,16 @@ struct PopoutView: View {
     @State private var focusPromptInput: (() -> Void)?
     @State private var isPromptFirstResponder: (() -> Bool)?
 
-    /// Agent tabs whose linked task is completed are hidden from the sidebar.
+    /// Linked agent tabs are shown only for in-progress tasks that still need agent visibility.
     private func isAgentTabVisibleInSidebar(_ tab: AgentTab) -> Bool {
         guard let taskID = tab.linkedTaskID else { return true }
-        guard let task = ProjectTasksStorage.task(workspacePath: tab.workspacePath, id: taskID) else { return true }
-        return !task.completed
+        guard let task = ProjectTasksStorage.task(workspacePath: tab.workspacePath, id: taskID) else { return false }
+        guard task.taskState == .inProgress else { return false }
+        let agentState = linkedTaskState(for: tab)
+        return agentState == .processing || agentState == .review || agentState == .stopped
     }
 
-    /// Tabs grouped by workspace path, order preserved by first occurrence. Agent tabs linked to completed tasks are excluded.
+    /// Tabs grouped by workspace path, order preserved by first occurrence. Linked agent tabs only appear while their tasks are actively in progress.
     private var tabGroups: [TabSidebarGroup] {
         _ = appState.taskListRevision
         let visibleTabs = tabManager.tabs.filter { isAgentTabVisibleInSidebar($0) }
@@ -783,14 +796,6 @@ struct PopoutView: View {
         )) {
             SettingsModalView()
         }
-        .sheet(isPresented: $showSetDebugURLSheet) {
-            SetDebugURLSheet(
-                workspacePath: currentWorkspacePath,
-                initialURL: ProjectSettingsStorage.getDebugURL(workspacePath: currentWorkspacePath) ?? "",
-                onSave: { _ in },
-                onOpenAfterSave: nil
-            )
-        }
         .onChange(of: appState.requestOpenInBrowser) {
             if appState.requestOpenInBrowser {
                 appState.requestOpenInBrowser = false
@@ -836,11 +841,14 @@ struct PopoutView: View {
             }
         }
         .overlay(globalShortcutOverlay)
+        #if DEBUG
+        .enableInjection()
+        #endif
     }
 
     // MARK: - Unified header
 
-    /// Light blue used for agent-tab progress spinner; reused for beta badge.
+    /// Light blue used for agent-tab progress spinner.
     private static let agentSpinnerBlue = CursorTheme.spinnerBlue
     /// Dark green for debug build badge (only visible in Debug configuration).
     private static let debugBadgeDarkGreen = Color(red: 0.0, green: 0.45, blue: 0.2)
@@ -857,7 +865,7 @@ struct PopoutView: View {
     private var topBar: some View {
         HStack(spacing: 14) {
             // Logo: always show when expanded; when collapsed show only the logo (no BETA/DEBUG).
-            Image("CursorMetroLogo")
+            Image("CursorPlusLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: isMainContentCollapsed ? 28 : 36)
@@ -866,10 +874,10 @@ struct PopoutView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("BETA")
                         .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Self.agentSpinnerBlue)
+                        .foregroundStyle(Color(red: 1, green: 0.88, blue: 0.1))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
-                        .background(Self.agentSpinnerBlue.opacity(0.18), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .background(Color(red: 1, green: 0.88, blue: 0.1).opacity(0.28), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
 
                     if Self.isDebugBuild {
                         Text("DEBUG")
@@ -1088,24 +1096,6 @@ struct PopoutView: View {
                 )
             }
             .buttonStyle(.plain)
-            .keyboardShortcut("p", modifiers: .command)
-            .overlay(alignment: .top) {
-                if addProjectButtonHovered {
-                    Text("⌘P")
-                        .font(.system(size: 11))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 4)
-                        .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                        )
-                        .shadow(color: .black.opacity(0.15), radius: 4, y: 1)
-                        .offset(y: -28)
-                }
-            }
-            .onHover { addProjectButtonHovered = $0 }
         }
         .padding(.horizontal, Self.sidebarContentPadding)
         .frame(width: sidebarWidth)
@@ -1232,22 +1222,25 @@ struct PopoutView: View {
 
     // MARK: - Agent area content (observed by tab; only this subtree re-renders when active tab streams)
 
-    /// Display status for the agent header and status bar (Processing / Pending Review / Completed / Ready).
-    private func agentDisplayStatus(for tab: AgentTab) -> (label: String, isProcessing: Bool, isPendingReview: Bool, isCompleted: Bool) {
+    /// Display status for the agent header and status bar (Processing / Review / Stopped / Completed / Ready).
+    private func agentDisplayStatus(for tab: AgentTab) -> (label: String, isProcessing: Bool, isPendingReview: Bool, isStopped: Bool, isCompleted: Bool) {
         if tab.isRunning {
-            return ("Processing", true, false, false)
+            return ("Processing", true, false, false, false)
         }
         if let taskID = tab.linkedTaskID {
             let tasks = ProjectTasksStorage.tasks(workspacePath: tab.workspacePath)
-            if let task = tasks.first(where: { $0.id == taskID }), task.completed {
-                return ("Completed", false, false, true)
+            if let task = tasks.first(where: { $0.id == taskID }), task.taskState == .completed {
+                return ("Completed", false, false, false, true)
             }
-            let status = linkedTaskStatus(for: tab)
-            if status == .done || status == .stopped {
-                return ("Pending Review", false, true, false)
+            let status = linkedTaskState(for: tab)
+            if status == .stopped {
+                return ("Stopped", false, false, true, false)
+            }
+            if status == .review {
+                return ("Pending Review", false, true, false, false)
             }
         }
-        return ("Ready", false, false, false)
+        return ("Ready", false, false, false, false)
     }
 
     private func agentHeader(tab: AgentTab, fullPrompt: String, isExpanded: Bool, onToggleExpand: @escaping () -> Void) -> some View {
@@ -1327,9 +1320,13 @@ struct PopoutView: View {
     }
 
     @ViewBuilder
-    private func agentStatusIcon(tab: AgentTab, status: (label: String, isProcessing: Bool, isPendingReview: Bool, isCompleted: Bool)) -> some View {
+    private func agentStatusIcon(tab: AgentTab, status: (label: String, isProcessing: Bool, isPendingReview: Bool, isStopped: Bool, isCompleted: Bool)) -> some View {
         if status.isProcessing {
             LightBlueSpinner(size: CursorTheme.fontIconList)
+        } else if status.isStopped {
+            Image(systemName: "square.fill")
+                .font(.system(size: CursorTheme.fontIconList - 2, weight: .semibold))
+                .foregroundStyle(CursorTheme.semanticError)
         } else if status.isPendingReview {
             Image(systemName: "clock.fill")
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
@@ -1652,7 +1649,7 @@ struct PopoutView: View {
         }
     }
 
-    /// Cmd+O: open in browser if URL is set, otherwise show Set debug URL sheet. With no project, opens Add Project so the shortcut always does something.
+    /// Cmd+O: open in browser if URL is set, otherwise open workspace in Finder. With no project, opens Add Project so the shortcut always does something.
     private func openInBrowserOrShowSetURLSheet() {
         guard hasOpenProjects else {
             addProject()
@@ -1663,7 +1660,7 @@ struct PopoutView: View {
         if previewURL(for: path) != nil {
             openPreview(for: path)
         } else {
-            showSetDebugURLSheet = true
+            openWorkspaceInFinder(workspacePath: path)
         }
     }
 

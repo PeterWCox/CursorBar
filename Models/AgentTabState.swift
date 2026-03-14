@@ -97,13 +97,14 @@ struct SavedTabState: Codable {
     }
 }
 
-// MARK: - Linked task status (for sidebar display)
+// MARK: - Linked agent status (for task and sidebar display)
 
-/// Status of the task linked to an agent: open (not done), processing (agent running), done (task completed), or stopped (agent was stopped).
-enum LinkedTaskStatus: String, Equatable {
-    case open
+/// Status of agent work linked to a task. This is separate from the task lifecycle state.
+enum AgentTaskState: String, Equatable {
+    case none
+    case todo
     case processing
-    case done
+    case review
     case stopped
 }
 
@@ -512,7 +513,10 @@ class TabManager: ObservableObject {
         if let index = tabs.firstIndex(where: { $0.id == id }) {
             let tabToClose = tabs[index]
             if let taskID = tabToClose.linkedTaskID {
-                ProjectTasksStorage.clearAgentTab(workspacePath: tabToClose.workspacePath, taskID: taskID)
+                let linkedTask = ProjectTasksStorage.task(workspacePath: tabToClose.workspacePath, id: taskID)
+                if linkedTask?.taskState != .completed {
+                    ProjectTasksStorage.clearAgentTab(workspacePath: tabToClose.workspacePath, taskID: taskID)
+                }
             }
             recentlyClosedTabs.append(tabToClose.toSaved())
             if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
@@ -549,7 +553,10 @@ class TabManager: ObservableObject {
         let toClose = tabs.filter { $0.workspacePath == path }
         for tab in toClose {
             if let taskID = tab.linkedTaskID {
-                ProjectTasksStorage.clearAgentTab(workspacePath: path, taskID: taskID)
+                let linkedTask = ProjectTasksStorage.task(workspacePath: path, id: taskID)
+                if linkedTask?.taskState != .completed {
+                    ProjectTasksStorage.clearAgentTab(workspacePath: path, taskID: taskID)
+                }
             }
             recentlyClosedTabs.append(tab.toSaved())
             if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
@@ -592,6 +599,25 @@ class TabManager: ObservableObject {
         if let taskID = tab.linkedTaskID {
             ProjectTasksStorage.assignAgentTab(workspacePath: tab.workspacePath, taskID: taskID, agentTabID: tab.id)
         }
+        return selectAgentTab(id: tab.id)
+    }
+
+    /// Reopens the most recently closed tab linked to a specific task.
+    func reopenLinkedTaskTab(workspacePath: String, taskID: UUID, preferredTabID: UUID? = nil) -> Bool {
+        let matchIndex = recentlyClosedTabs.indices.reversed().first { index in
+            let saved = recentlyClosedTabs[index]
+            guard saved.workspacePath == workspacePath, saved.linkedTaskID == taskID else { return false }
+            return preferredTabID == nil || saved.id == preferredTabID
+        }
+        guard let matchIndex else { return false }
+
+        let saved = recentlyClosedTabs.remove(at: matchIndex)
+        guard Self.workspacePathExists(saved.workspacePath) else { return false }
+        addProject(path: saved.workspacePath, select: true)
+        let tab = AgentTab(from: saved)
+        tabs.append(tab)
+        observe(tab)
+        ProjectTasksStorage.assignAgentTab(workspacePath: saved.workspacePath, taskID: taskID, agentTabID: tab.id)
         return selectAgentTab(id: tab.id)
     }
 

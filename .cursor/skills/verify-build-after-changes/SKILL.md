@@ -1,6 +1,6 @@
 ---
 name: verify-build-after-changes
-description: Ensures the Cursor Metro app still compiles after agent-made code changes. Use after editing Swift or other source files, refactoring, or applying fixes—run a build and fix any compile errors before considering the task done.
+description: Ensures the Cursor+ app still compiles after agent-made code changes. Use after editing Swift or other source files, refactoring, or applying fixes—run a build and fix any compile errors before considering the task done.
 ---
 
 # Verify Build After Changes

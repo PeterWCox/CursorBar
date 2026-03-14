@@ -53,7 +53,7 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         terminal.processDelegate = context.coordinator
         terminal.translatesAutoresizingMaskIntoConstraints = false
 
-        let dir = (workspacePath as NSString).expandingTildeInPath
+        let dir = projectRootForTerminal(workspacePath: workspacePath)
         let cmd = initialCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let cmd = cmd, !cmd.isEmpty {
             terminal.startProcess(
@@ -85,13 +85,21 @@ struct EmbeddedTerminalView: NSViewRepresentable {
             terminal.topAnchor.constraint(equalTo: container.topAnchor, constant: inset),
             terminal.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -inset),
         ])
+        // Clear the terminal after the shell has started so it opens with a clean screen (avoids
+        // repeated prompt lines from layout/resize when the app is reopened and the terminal is first to focus).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak terminal] in
+            terminal?.send(txt: "clear\n")
+        }
         return container
     }
 
     func updateNSView(_ nsView: TerminalContainerView, context: Context) {
         guard isSelected else { return }
-        // Focus the container so it forwards to the terminal; terminal then receives key events (Control+C/SIGINT, etc.).
+        // Focus the container once so the terminal receives key events (Control+C/SIGINT, etc.). Only set when
+        // not already first responder to avoid repeated focus/layout cycles that can cause prompt redraws.
         DispatchQueue.main.async {
+            guard nsView.window?.firstResponder !== nsView,
+                  nsView.window?.firstResponder !== nsView.embeddedTerminal else { return }
             nsView.window?.makeFirstResponder(nsView)
         }
     }

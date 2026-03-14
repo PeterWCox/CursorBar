@@ -1,6 +1,6 @@
-# Cursor Metro — OOP Structure
+# Cursor+ — OOP Structure
 
-High-level object-oriented structure of the Cursor Metro macOS app: entry point, state, models, views, services, and helpers. Use this to see how types are grouped and how the UI is composed.
+High-level object-oriented structure of the Cursor+ macOS app: entry point, state, models, views, services, and helpers. Use this to see how types are grouped and how the UI is composed.
 
 ---
 
@@ -42,7 +42,7 @@ Root content is **PopoutView**, which can show:
 - **Sidebar** — Groups by project; each group has **ObservedTabChip** (agent tabs), **TerminalTabChip** (terminal tabs), and a “Tasks” entry. **TabChip** shows title, optional **linkedTaskStatus** badge, and uses **LightBlueSpinner** when running. **WorkspacePickerView** and **GitBranchPickerView** live in the main flow; **ProjectIconView** shows folder icon from path.
 - **Main content** — Either:
   - **TasksListView** for the selected project (task list, add/edit/complete, send to agent), which uses **TaskRowView**, **TaskScreenshotThumbnailView**, **TaskScreenshotDraftView**, etc., or
-  - Agent content: top bar (**BrandMark**, **ModelPickerView**, **QuickActionButtonsView**), composer (**SubmittableTextEditor**, **ComposerActionButtonsView**, **PinnedQuestionsView**, **SetDebugURLSheet**, **CreateDebugScriptSheet**), and output (**OutputScrollView**, **ConversationViews**: **ConversationTurnView**, **ConversationSegmentView**, **ProcessingPlaceholderView**, **StoppedPlaceholderView**; **ScreenshotCardView**, **ScreenshotPreviewModal**), or
+  - Agent content: top bar (**BrandMark**, **ModelPickerView**, **QuickActionButtonsView**), composer (**SubmittableTextEditor**, **ComposerActionButtonsView**, **PinnedQuestionsView**, **CreateDebugScriptSheet**), and output (**OutputScrollView**, **ConversationViews**: **ConversationTurnView**, **ConversationSegmentView**, **ProcessingPlaceholderView**, **StoppedPlaceholderView**; **ScreenshotCardView**, **ScreenshotPreviewModal**), or
   - **EmbeddedTerminalView** for the selected terminal tab.
 
 Other UI:
@@ -133,7 +133,6 @@ Views:
       ContextUsageView: "context usage"
       UsageView: "usage display"
       PinnedQuestionsView: "PinnedQuestionsStackView, PinnedQuestionChip"
-      SetDebugURLSheet: "debug URL sheet"
       CreateDebugScriptSheet: "debug script sheet"
     Output:
       OutputScrollView: "scroll container"

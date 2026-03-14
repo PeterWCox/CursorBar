@@ -294,7 +294,7 @@ final class AgentRunner {
             args += ["--model", model]
         }
         process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: workspacePath)
+        process.currentDirectoryURL = URL(fileURLWithPath: projectRootForTerminal(workspacePath: workspacePath))
         
         let env = ProcessInfo.processInfo.environment
         var fullEnv = env

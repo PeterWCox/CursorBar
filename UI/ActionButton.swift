@@ -17,6 +17,7 @@ struct ActionButton: View {
         case primary   // textPrimary, surfaceMuted
         case secondary // textSecondary, surfaceMuted.opacity(0.7)
         case play      // green (run/start)
+        case stop      // red (stop/reset)
         case debug     // blue (VS-style debug)
         case accent    // purple (AI / configure)
     }
@@ -48,6 +49,7 @@ struct ActionButton: View {
         case .primary: return CursorTheme.textPrimary(for: colorScheme)
         case .secondary: return CursorTheme.textSecondary(for: colorScheme)
         case .play: return CursorTheme.semanticSuccess
+        case .stop: return CursorTheme.semanticError
         case .debug: return CursorTheme.semanticDebug
         case .accent: return CursorTheme.brandPurple
         }
@@ -58,6 +60,7 @@ struct ActionButton: View {
         case .primary: return CursorTheme.surfaceMuted(for: colorScheme)
         case .secondary: return CursorTheme.surfaceMuted(for: colorScheme).opacity(0.7)
         case .play: return CursorTheme.semanticSuccess.opacity(0.15)
+        case .stop: return CursorTheme.semanticError.opacity(0.15)
         case .debug: return CursorTheme.semanticDebug.opacity(0.15)
         case .accent: return CursorTheme.brandPurple.opacity(0.15)
         }
@@ -67,6 +70,7 @@ struct ActionButton: View {
         switch style {
         case .primary, .secondary: return CursorTheme.border(for: colorScheme)
         case .play: return CursorTheme.semanticSuccess.opacity(0.5)
+        case .stop: return CursorTheme.semanticError.opacity(0.5)
         case .debug: return CursorTheme.semanticDebug.opacity(0.5)
         case .accent: return CursorTheme.brandPurple.opacity(0.5)
         }

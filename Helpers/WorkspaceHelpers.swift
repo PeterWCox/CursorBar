@@ -123,6 +123,20 @@ func deleteScreenshotCacheOlderThan(days: Int) {
     }
 }
 
+// MARK: - Project root (terminal / process working directory)
+
+/// Returns the project root for running terminal or process. If `workspacePath` ends with `/.metro`, returns the parent directory so the shell/agent runs in the project root, not inside `.metro`.
+func projectRootForTerminal(workspacePath: String) -> String {
+    let trimmed = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return trimmed }
+    let expanded = (trimmed as NSString).expandingTildeInPath
+    let url = URL(fileURLWithPath: expanded)
+    if url.lastPathComponent == ".metro" {
+        return url.deletingLastPathComponent().path
+    }
+    return expanded
+}
+
 // MARK: - Project folders and Git
 
 /// Returns immediate subdirectories of `rootPath` that contain a `.metro` directory (Metro projects only).
@@ -372,11 +386,12 @@ func createDebugScript(workspacePath: String, contents: String) throws {
 }
 
 func launchDebugScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
-    guard !workspacePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    guard !root.isEmpty else {
         return "Select a workspace before running Debug."
     }
 
-    let scriptURL = debugScriptURL(workspacePath: workspacePath)
+    let scriptURL = debugScriptURL(workspacePath: root)
     guard FileManager.default.fileExists(atPath: scriptURL.path) else {
         return "`debug.sh` was not found in the project root."
     }
@@ -385,7 +400,7 @@ func launchDebugScript(workspacePath: String, preferredTerminal: PreferredTermin
         return "No supported terminal app is available. Install Terminal or iTerm."
     }
 
-    let command = debugShellCommand(workspacePath: workspacePath)
+    let command = debugShellCommand(workspacePath: root)
     switch terminal {
     case .automatic:
         return "No supported terminal app is available. Install Terminal or iTerm."
@@ -523,10 +538,11 @@ func migrateCursormetroToMetroIfNeeded(workspacePath: String) {
 /// Launches the project's startup script (`.metro/startup.sh`) with bash in the preferred terminal.
 /// Returns an error message on failure, nil on success.
 func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
-    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: workspacePath)
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: root)
     let scriptPath = scriptURL.path
     guard FileManager.default.fileExists(atPath: scriptPath),
-          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath),
+          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: root),
           !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return "No startup script configured for this project. Add script content in Preview → Advanced (startup.sh)."
     }
@@ -535,7 +551,7 @@ func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerm
         return "No supported terminal app is available. Install Terminal or iTerm."
     }
 
-    let quotedPath = singleQuotedShellValue(workspacePath)
+    let quotedPath = singleQuotedShellValue(root)
     let quotedScript = singleQuotedShellValue(scriptPath)
     let command = "cd \(quotedPath) && /bin/bash \(quotedScript)"
 

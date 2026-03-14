@@ -7,9 +7,7 @@ import UniformTypeIdentifiers
 /// One tab per task state.
 enum TasksListTab: String, CaseIterable {
     case backlog = "Backlog"
-    case todo = "In Review"
-    case processing = "Processing"
-    case finished = "Review"
+    case inProgress = "In Progress"
     case completed = "Completed"
     case deleted = "Deleted"
 }
@@ -19,8 +17,8 @@ struct TasksListView: View {
     let workspacePath: String
     /// When set to true from outside (e.g. Cmd+T), show the add-new-task row and focus it.
     var triggerAddNewTask: Binding<Bool> = .constant(false)
-    /// Linked agent status per task ID (open / processing / done / stopped) so the task row can show a badge. Passed from parent so the list updates when tabs run/complete.
-    var linkedStatuses: [UUID: LinkedTaskStatus] = [:]
+    /// Linked agent status per task ID so the task row can show review/processing state separately from task lifecycle.
+    var linkedStatuses: [UUID: AgentTaskState] = [:]
     /// Models to show in the task model picker (same as input bar).
     var models: [ModelOption]
     /// Send task content to a new agent; when taskID is non-nil, the new agent is linked to that task. When screenshotPaths is non-empty, those paths (under .metro) are attached to the prompt. modelId is the task's chosen model (e.g. "auto").
@@ -50,8 +48,8 @@ struct TasksListView: View {
     @State private var newTaskDraftScreenshots: [(id: UUID, image: NSImage)] = []
     /// While the add-task row is visible, intercept Cmd+V for image paste without breaking normal text paste.
     @State private var newTaskPasteKeyMonitor: Any?
-    /// Which top-level tab is selected: In Progress, Backlog, or Archive.
-    @State private var selectedTasksTab: TasksListTab = .todo
+    /// Which top-level tab is selected.
+    @State private var selectedTasksTab: TasksListTab = .inProgress
 
     private static let completedRecentInterval: TimeInterval = 24 * 60 * 60
 
@@ -60,38 +58,34 @@ struct TasksListView: View {
         deletedTasksList = ProjectTasksStorage.deletedTasks(workspacePath: workspacePath)
     }
 
-    private var todoTasks: [ProjectTask] {
-        tasks.filter { task in
-            guard !task.completed, !task.backlog else { return false }
-            let status = linkedStatuses[task.id]
-            return status != .processing && status != .done
-        }
-    }
-
     private var backlogTasks: [ProjectTask] {
-        tasks.filter { task in
-            guard !task.completed, task.backlog else { return false }
-            let status = linkedStatuses[task.id]
-            return status != .processing && status != .done
+        tasks.filter { $0.taskState == .backlog }
+    }
+
+    private var inProgressTasks: [ProjectTask] {
+        tasks.filter { $0.taskState == .inProgress }
+    }
+
+    private var reviewTasks: [ProjectTask] {
+        inProgressTasks.filter {
+            let state = linkedStatuses[$0.id]
+            return state == .review || state == .stopped
         }
     }
 
-    /// Tasks currently being processed by a linked agent.
     private var processingTasks: [ProjectTask] {
-        tasks.filter { linkedStatuses[$0.id] == .processing }
+        inProgressTasks.filter { linkedStatuses[$0.id] == .processing }
     }
 
-    /// Tasks whose linked agent has finished (done or stopped) and need review. Excludes completed tasks so they only appear in Completed.
-    private var finishedTasks: [ProjectTask] {
-        tasks.filter { task in
-            guard !task.completed else { return false }
-            let s = linkedStatuses[task.id]
-            return s == .done || s == .stopped
+    private var todoTasks: [ProjectTask] {
+        inProgressTasks.filter {
+            let state = linkedStatuses[$0.id]
+            return state == nil || state == .none || state == .todo
         }
     }
 
     private var completedTasks: [ProjectTask] {
-        tasks.filter(\.completed)
+        tasks.filter { $0.taskState == .completed }
     }
 
     private var visibleCompletedTasks: [ProjectTask] {
@@ -105,8 +99,14 @@ struct TasksListView: View {
     private func commitNewTask() {
         let trimmed = newTaskDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
-            let asBacklog = (selectedTasksTab == .backlog)
-            _ = ProjectTasksStorage.addTask(workspacePath: workspacePath, content: trimmed, screenshotImages: newTaskDraftScreenshots.map(\.image), modelId: newTaskModelId, backlog: asBacklog)
+            let taskState: TaskState = (selectedTasksTab == .backlog) ? .backlog : .inProgress
+            _ = ProjectTasksStorage.addTask(
+                workspacePath: workspacePath,
+                content: trimmed,
+                screenshotImages: newTaskDraftScreenshots.map(\.image),
+                modelId: newTaskModelId,
+                taskState: taskState
+            )
             reloadTasks()
             newTaskDraft = ""
             newTaskDraftScreenshots = []
@@ -184,14 +184,14 @@ struct TasksListView: View {
             reloadTasks()
             // Handle Cmd+T when it fired before this view was in the hierarchy (trigger already true).
             if triggerAddNewTask.wrappedValue {
-                showNewTaskComposer(selecting: .todo)
+                showNewTaskComposer(selecting: .inProgress)
                 triggerAddNewTask.wrappedValue = false
             }
         }
         .onChange(of: workspacePath) { _, _ in reloadTasks() }
         .onChange(of: triggerAddNewTask.wrappedValue) { _, requested in
             if requested {
-                showNewTaskComposer(selecting: .todo)
+                showNewTaskComposer(selecting: .inProgress)
                 triggerAddNewTask.wrappedValue = false
             }
         }
@@ -221,9 +221,7 @@ struct TasksListView: View {
     private func taskCount(for tab: TasksListTab) -> Int {
         switch tab {
         case .backlog: return backlogTasks.count
-        case .todo: return todoTasks.count
-        case .processing: return processingTasks.count
-        case .finished: return finishedTasks.count
+        case .inProgress: return inProgressTasks.count
         case .completed: return completedTasks.count
         case .deleted: return deletedTasksList.count
         }
@@ -234,19 +232,19 @@ struct TasksListView: View {
             ForEach(TasksListTab.allCases, id: \.self) { tab in
                 Button {
                     selectedTasksTab = tab
-                    if tab != .todo && tab != .backlog && isAddingNewTask {
+                    if tab != .inProgress && tab != .backlog && isAddingNewTask {
                         isAddingNewTask = false
                         cancelNewTask()
                     }
                 } label: {
                     Text("\(tab.rawValue) (\(taskCount(for: tab)))")
                         .font(.system(size: 13, weight: selectedTasksTab == tab ? .semibold : .medium))
-                        .foregroundStyle(selectedTasksTab == tab ? (tab == .finished ? CursorTheme.semanticReview : CursorTheme.textPrimary(for: colorScheme)) : CursorTheme.textSecondary(for: colorScheme))
+                        .foregroundStyle(selectedTasksTab == tab ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                         .padding(.horizontal, CursorTheme.spaceM)
                         .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
                 }
                 .buttonStyle(.plain)
-                .background(selectedTasksTab == tab ? (tab == .finished ? CursorTheme.semanticReview.opacity(0.2) : CursorTheme.surfaceMuted(for: colorScheme)) : Color.clear)
+                .background(selectedTasksTab == tab ? CursorTheme.surfaceMuted(for: colorScheme) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
             Spacer(minLength: 0)
@@ -259,14 +257,10 @@ struct TasksListView: View {
     @ViewBuilder
     private func tabContent() -> some View {
         switch selectedTasksTab {
-        case .todo:
-            todoContent
+        case .inProgress:
+            inProgressContent
         case .backlog:
             backlogContent
-        case .processing:
-            processingContent
-        case .finished:
-            finishedContent
         case .completed:
             completedContent
         case .deleted:
@@ -275,20 +269,40 @@ struct TasksListView: View {
     }
 
     @ViewBuilder
-    private var todoContent: some View {
+    private var inProgressContent: some View {
         newTaskButton
-        let isEmpty = todoTasks.isEmpty && !isAddingNewTask
+        let isEmpty = inProgressTasks.isEmpty && !isAddingNewTask
         if isEmpty {
-            emptyState
+            emptyStateInProgress
         } else {
             if isAddingNewTask {
                 newTaskRow
             }
-            ForEach(todoTasks) { task in
-                taskRow(task, isInBacklog: false, onToggleBacklog: {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
-                    reloadTasks()
-                })
+            inProgressSection(title: "Review", tasks: reviewTasks)
+            inProgressSection(title: "Processing", tasks: processingTasks)
+            inProgressSection(title: "Todo", tasks: todoTasks)
+        }
+    }
+
+    @ViewBuilder
+    private func inProgressSection(title: String, tasks sectionTasks: [ProjectTask]) -> some View {
+        if !sectionTasks.isEmpty {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                Text(title)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
+                    .foregroundStyle(title == "Review" ? CursorTheme.semanticReview : CursorTheme.textSecondary(for: colorScheme))
+                ForEach(sectionTasks) { task in
+                    let canMoveToBacklog = linkedStatuses[task.id] == nil || linkedStatuses[task.id] == .none
+                    taskRow(
+                        task,
+                        stateTransitionLabel: canMoveToBacklog ? "Move to Backlog" : nil,
+                        stateTransitionIcon: "tray.full",
+                        onStateTransition: canMoveToBacklog ? {
+                            ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, taskState: .backlog)
+                            reloadTasks()
+                        } : nil
+                    )
+                }
             }
         }
     }
@@ -317,42 +331,8 @@ struct TasksListView: View {
                 newTaskRow
             }
             ForEach(backlogTasks) { task in
-                taskRow(task, isInBacklog: true, onToggleBacklog: {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
-                    reloadTasks()
-                })
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var processingContent: some View {
-        if processingTasks.isEmpty {
-            emptyStateProcessing
-        } else {
-            ForEach(processingTasks) { task in
-                taskRow(task, isInBacklog: task.backlog, onToggleBacklog: task.backlog ? {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
-                    reloadTasks()
-                } : {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
-                    reloadTasks()
-                })
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var finishedContent: some View {
-        if finishedTasks.isEmpty {
-            emptyStateFinished
-        } else {
-            ForEach(finishedTasks) { task in
-                taskRow(task, isInBacklog: task.backlog, onToggleBacklog: task.backlog ? {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
-                    reloadTasks()
-                } : {
-                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
+                taskRow(task, stateTransitionLabel: "Move to In Progress", stateTransitionIcon: "arrow.right.circle", onStateTransition: {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, taskState: .inProgress)
                     reloadTasks()
                 })
             }
@@ -401,17 +381,22 @@ struct TasksListView: View {
     }
 
     @ViewBuilder
-    private func taskRow(_ task: ProjectTask, isInBacklog: Bool = false, onToggleBacklog: (() -> Void)? = nil) -> some View {
+    private func taskRow(
+        _ task: ProjectTask,
+        stateTransitionLabel: String? = nil,
+        stateTransitionIcon: String = "arrow.right.circle",
+        onStateTransition: (() -> Void)? = nil
+    ) -> some View {
         TaskRowView(
             task: task,
             workspacePath: workspacePath,
             models: models,
-            linkedTaskStatus: linkedStatuses[task.id],
+            agentTaskState: linkedStatuses[task.id] ?? .none,
             isEditing: editingTask?.id == task.id,
             editDraft: $editingDraft,
             isEditorFocused: $isTaskEditorFocused,
             onTap: {
-                if linkedStatuses[task.id] != nil {
+                if let linkedState = linkedStatuses[task.id], linkedState != .none {
                     onOpenLinkedAgent(task)
                 } else {
                     let content = task.content
@@ -426,7 +411,8 @@ struct TasksListView: View {
             onCommitEdit: commitEdit,
             onCancelEdit: { editingTask = nil },
             onToggleComplete: {
-                ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, completed: !task.completed)
+                let nextState: TaskState = (task.taskState == .completed) ? .inProgress : .completed
+                ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, taskState: nextState)
                 reloadTasks()
                 onTasksDidUpdate()
             },
@@ -446,8 +432,9 @@ struct TasksListView: View {
                 ProjectTasksStorage.removeTaskScreenshot(workspacePath: workspacePath, id: task.id, screenshotPath: path)
                 reloadTasks()
             } : nil,
-            isInBacklog: isInBacklog,
-            onToggleBacklog: onToggleBacklog
+            stateTransitionLabel: stateTransitionLabel,
+            stateTransitionIcon: stateTransitionIcon,
+            onStateTransition: onStateTransition
         )
     }
 
@@ -546,7 +533,7 @@ struct TasksListView: View {
             Text("No backlog tasks")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-            Text("Move tasks here from In Review when you want to work on them later.")
+            Text("Create tasks here when you want to queue them up before moving them into active work.")
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .multilineTextAlignment(.center)
@@ -554,22 +541,6 @@ struct TasksListView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, CursorTheme.spaceXXL + CursorTheme.spaceL)
-    }
-
-    private var emptyStateProcessing: some View {
-        emptyStatePlaceholder(
-            icon: "gearshape.2",
-            title: "No tasks processing",
-            subtitle: "Tasks sent to an agent appear here while they run."
-        )
-    }
-
-    private var emptyStateFinished: some View {
-        emptyStatePlaceholder(
-            icon: "checkmark.circle",
-            title: "No tasks to review",
-            subtitle: "Tasks whose agent run has completed or stopped appear here."
-        )
     }
 
     private var emptyStateCompleted: some View {
@@ -588,6 +559,14 @@ struct TasksListView: View {
         )
     }
 
+    private var emptyStateInProgress: some View {
+        emptyStatePlaceholder(
+            icon: "checklist",
+            title: "No in-progress tasks",
+            subtitle: "Move a backlog task here or create a new task to start active work."
+        )
+    }
+
     private func emptyStatePlaceholder(icon: String, title: String, subtitle: String) -> some View {
         VStack(spacing: 16) {
             Image(systemName: icon)
@@ -598,25 +577,6 @@ struct TasksListView: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
             Text(subtitle)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 280)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, CursorTheme.spaceXXL + CursorTheme.spaceL)
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checklist")
-                .font(.system(size: 48, weight: .medium))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                .symbolRenderingMode(.hierarchical)
-            Text("No tasks yet")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-            Text("Add a task to track work for this project. You can send any task to a new agent tab.")
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .multilineTextAlignment(.center)
@@ -751,8 +711,8 @@ private struct TaskRowView: View {
     let task: ProjectTask
     let workspacePath: String
     var models: [ModelOption] = []
-    /// When set, the leading icon reflects the linked agent status (processing / done / open / stopped).
-    var linkedTaskStatus: LinkedTaskStatus? = nil
+    /// Agent state is independent from the task lifecycle and drives the In Progress grouping.
+    var agentTaskState: AgentTaskState = .none
     var isEditing: Bool = false
     @Binding var editDraft: String
     var isEditorFocused: FocusState<Bool>.Binding
@@ -765,28 +725,34 @@ private struct TaskRowView: View {
     let onDelete: () -> Void
     var onPreviewScreenshot: ((String) -> Void)? = nil
     var onDeleteScreenshot: ((String) -> Void)? = nil
-    var isInBacklog: Bool = false
-    var onToggleBacklog: (() -> Void)? = nil
+    var stateTransitionLabel: String? = nil
+    var stateTransitionIcon: String = "arrow.right.circle"
+    var onStateTransition: (() -> Void)? = nil
 
-    private var isProcessing: Bool { linkedTaskStatus == .processing }
-    private var canOpenLinkedAgent: Bool { linkedTaskStatus == .processing || linkedTaskStatus == .done || linkedTaskStatus == .stopped }
+    private var isProcessing: Bool { agentTaskState == .processing }
+    private var canOpenLinkedAgent: Bool { agentTaskState != .none }
+    private var canDelegate: Bool { task.taskState == .inProgress && agentTaskState == .none }
 
     @ViewBuilder
     private var leadingIcon: some View {
-        if linkedTaskStatus == .processing {
+        if agentTaskState == .processing {
             LightBlueSpinner(size: 18)
-        } else if linkedTaskStatus == .done {
-            Image(systemName: "clock.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(CursorTheme.semanticReview)
-        } else if linkedTaskStatus == .stopped {
-            Image(systemName: "clock.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(CursorTheme.semanticReview)
         } else if task.completed {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
                 .foregroundStyle(CursorTheme.brandBlue)
+        } else if agentTaskState == .review {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(CursorTheme.semanticReview)
+        } else if agentTaskState == .stopped {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(CursorTheme.semanticReview)
+        } else if agentTaskState == .todo {
+            Image(systemName: "person")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
         } else {
             Image(systemName: "circle")
                 .font(.system(size: 18))
@@ -796,15 +762,19 @@ private struct TaskRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
+            // Leading icon: never used to complete. For Todo, Person icon = Delegate to agent (same as 3-dot menu).
             Group {
                 if isProcessing {
                     leadingIcon
-                } else {
-                    Button(action: onToggleComplete) {
+                } else if agentTaskState == .todo && canDelegate {
+                    Button(action: onSendToAgent) {
                         leadingIcon
                     }
                     .buttonStyle(.plain)
                     .disabled(isEditing)
+                    .help("Delegate to agent")
+                } else {
+                    leadingIcon
                 }
             }
 
@@ -892,15 +862,17 @@ private struct TaskRowView: View {
                         Divider()
                     }
                     if !task.completed {
-                        Button("Delegate", systemImage: "person") {
-                            onSendToAgent()
+                        if canDelegate {
+                            Button("Delegate", systemImage: "person") {
+                                onSendToAgent()
+                            }
                         }
                         Button("Edit", systemImage: "pencil") {
                             onTap()
                         }
-                        if let onToggleBacklog {
-                            Button(isInBacklog ? "In Review" : "Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
-                                onToggleBacklog()
+                        if let stateTransitionLabel, let onStateTransition {
+                            Button(stateTransitionLabel, systemImage: stateTransitionIcon) {
+                                onStateTransition()
                             }
                         }
                         Divider()
@@ -933,18 +905,20 @@ private struct TaskRowView: View {
                 }
                 Divider()
             }
-            if !task.completed {
+            if canDelegate {
                 Button("Delegate", systemImage: "person") {
                     onSendToAgent()
                 }
                 .disabled(isProcessing)
+            }
+            if task.taskState != .completed {
                 Button("Edit", systemImage: "pencil") {
                     onTap()
                 }
                 .disabled(isProcessing)
-                if let onToggleBacklog {
-                    Button(isInBacklog ? "In Review" : "Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
-                        onToggleBacklog()
+                if let stateTransitionLabel, let onStateTransition {
+                    Button(stateTransitionLabel, systemImage: stateTransitionIcon) {
+                        onStateTransition()
                     }
                     .disabled(isProcessing)
                 }

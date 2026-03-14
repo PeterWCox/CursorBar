@@ -1,9 +1,9 @@
 ---
 name: ui-cursor
-description: Apply Cursor Metro's design system for consistent UI. Use when adding or changing SwiftUI views, padding, spacing, font sizes, or colors so new and edited UI matches the app's theme and stays consistent.
+description: Apply Cursor+'s design system for consistent UI. Use when adding or changing SwiftUI views, padding, spacing, font sizes, or colors so new and edited UI matches the app's theme and stays consistent.
 ---
 
-# Cursor Metro UI design system
+# Cursor+ UI design system
 
 Use **Theme/CursorTheme.swift** for all visual constants. Do not hardcode colors, padding, spacing, or font sizes in views.
 

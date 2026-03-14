@@ -15,11 +15,10 @@ struct KeyboardShortcutsContentView: View {
         ("App", [
             ShortcutRow(keys: ["⌘,"], action: "Open Settings"),
             ShortcutRow(keys: ["⌘0"], action: "Center popup (menu bar only)"),
-            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor Metro"),
+            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor+"),
             ShortcutRow(keys: ["⎋ Esc"], action: "Dismiss modal / Cancel"),
         ]),
         ("Tabs", [
-            ShortcutRow(keys: ["⌘P"], action: "Preview"),
             ShortcutRow(keys: ["⌘T"], action: "New task"),
             ShortcutRow(keys: ["⌘G"], action: "Focus Git tab for current project"),
             ShortcutRow(keys: ["⌘O"], action: "Open in Browser (or set URL)"),

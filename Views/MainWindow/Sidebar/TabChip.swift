@@ -56,9 +56,9 @@ struct TabChip: View {
             if isRunning {
                 LightBlueSpinner(size: 14)
             } else if latestTurnState == .stopped {
-                Image(systemName: "clock.fill")
+                Image(systemName: "square.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(CursorTheme.semanticReview)
+                    .foregroundStyle(CursorTheme.semanticError)
             } else if hasPrompted {
                 Image(systemName: "clock.fill")
                     .font(.system(size: 14))
@@ -87,9 +87,9 @@ struct TabChip: View {
             if isRunning {
                 LightBlueSpinner(size: 10)
             } else if latestTurnState == .stopped {
-                Image(systemName: "clock.fill")
+                Image(systemName: "square.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CursorTheme.semanticReview)
+                    .foregroundStyle(CursorTheme.semanticError)
             } else if hasPrompted {
                 Image(systemName: "clock.fill")
                     .font(.system(size: 12))

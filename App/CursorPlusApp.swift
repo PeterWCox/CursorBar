@@ -1,6 +1,9 @@
 import SwiftUI
 import AppKit
 import Combine
+#if DEBUG
+import Inject
+#endif
 
 // MARK: - Menu bar icon (template, adapts to light/dark menu bar)
 
@@ -95,6 +98,12 @@ enum BrandStatusIcon {
 struct CursorPlusApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        #if DEBUG
+        Bundle(path: "/Applications/InjectionIII.app/Contents/Resources/macOSInjection.bundle")?.load()
+        #endif
+    }
+
     var body: some Scene {
         Settings {
             SettingsView()
@@ -168,7 +177,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         let image = BrandStatusIcon.makeImage(size: 22)
-        image.accessibilityDescription = "Cursor Metro"
+        image.accessibilityDescription = "Cursor+"
 
         let menu = NSMenu()
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
@@ -178,14 +187,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         centerPanelItem.target = self
         menu.addItem(centerPanelItem)
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Quit Cursor Metro", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Cursor+", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         let iconSize: CGFloat = 22
         let view = StatusItemView(frame: NSRect(x: 0, y: 0, width: iconSize, height: iconSize))
         view.image = image
-        view.toolTip = "Cursor Metro"
+        view.toolTip = "Cursor+"
         view.contextMenu = menu
         view.onLeftClick = { [weak self] in
             self?.togglePanel()
