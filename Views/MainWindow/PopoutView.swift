@@ -188,7 +188,6 @@ struct PopoutView: View {
     /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
     @State private var tasksViewTriggerAddNew: Bool = false
     @State private var dashboardTabsByWorkspacePath: [String: DashboardTab] = [:]
-    @State private var dashboardGitRefreshID = UUID()
     @StateObject private var tasksViewShortcutCoordinator = TasksViewShortcutCoordinator()
     @State private var addProjectButtonHovered: Bool = false
     /// Tab whose agent header prompt accordion is expanded (show full prompt below title).
@@ -376,40 +375,18 @@ struct PopoutView: View {
     }
 
     private func dashboardContent(dashboardPath: String) -> some View {
-        let (dashboardBranch, dashboardBranches) = dashboardPath == currentWorkspacePath
-            ? (currentBranch, gitBranches)
-            : loadGitBranches(workspacePath: dashboardPath)
-        return DashboardView(
+        DashboardView(
             workspacePath: dashboardPath,
-            currentBranch: dashboardBranch,
-            gitBranches: dashboardBranches,
             onDismiss: { tabManager.hideDashboardView() },
-            onConfigureProject: { taskContent, agentPrompt in
-                createLinkedTaskAndAgent(
-                    taskContent: taskContent,
-                    agentPrompt: agentPrompt,
-                    workspacePath: dashboardPath,
-                    selectAgent: true
-                )
-            },
             onRemoveProject: {
                 removeProject(workspacePath: dashboardPath)
             },
-            onGitInitialized: { path in
-                if path == tabManager.activeProjectPath, let active = tabManager.activeTab {
-                    let (cur, list) = loadGitBranches(workspacePath: path)
-                    currentBranch = cur
-                    gitBranches = list
-                    active.currentBranch = cur
-                }
-                dashboardGitRefreshID = UUID()
-            },
             selectedTab: Binding(
-                get: { dashboardTabsByWorkspacePath[dashboardPath] ?? .settings },
+                get: { dashboardTabsByWorkspacePath[dashboardPath] ?? .preview },
                 set: { dashboardTabsByWorkspacePath[dashboardPath] = $0 }
             )
         )
-        .id("\(dashboardPath)-\(dashboardGitRefreshID.uuidString)")
+        .id(dashboardPath)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(12)
     }
@@ -509,10 +486,6 @@ struct PopoutView: View {
 
             hiddenShortcutButton("New Task", key: "t") {
                 showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true)
-            }
-
-            hiddenShortcutButton("Focus Git", key: "g") {
-                focusDashboardTab(.git)
             }
 
             hiddenShortcutButton("Reopen Closed Tab", key: "t", modifiers: [.command, .shift]) {
@@ -869,8 +842,8 @@ struct PopoutView: View {
 
     /// Light blue used for agent-tab progress spinner; reused for beta badge.
     private static let agentSpinnerBlue = CursorTheme.spinnerBlue
-    /// Amber for debug build badge (only visible in Debug configuration).
-    private static let debugBadgeAmber = CursorTheme.brandAmber
+    /// Dark green for debug build badge (only visible in Debug configuration).
+    private static let debugBadgeDarkGreen = Color(red: 0.0, green: 0.45, blue: 0.2)
 
     /// True when built with Debug configuration (SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG).
     private static var isDebugBuild: Bool {
@@ -901,10 +874,10 @@ struct PopoutView: View {
                     if Self.isDebugBuild {
                         Text("DEBUG")
                             .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(Self.debugBadgeAmber)
+                            .foregroundStyle(Self.debugBadgeDarkGreen)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Self.debugBadgeAmber.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .background(Self.debugBadgeDarkGreen.opacity(0.22), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
                     }
                 }
             }
@@ -996,9 +969,9 @@ struct PopoutView: View {
 
                             }
                             if !isCollapsed {
-                                let isDashboardSelected = tabManager.selectedDashboardViewPath == group.path
+                                let isPreviewSelected = tabManager.selectedDashboardViewPath == group.path
                                 Button {
-                                    dashboardTabsByWorkspacePath[group.path] = .settings
+                                    dashboardTabsByWorkspacePath[group.path] = .preview
                                     tabManager.showDashboardView(workspacePath: group.path)
                                     if appState.isMainContentCollapsed {
                                         withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
@@ -1007,28 +980,27 @@ struct PopoutView: View {
                                     HStack(spacing: 6) {
                                         Image(systemName: "square.grid.2x2")
                                             .font(.system(size: 12))
-                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        Text("Dashboard")
-                                            .font(.system(size: 12, weight: isDashboardSelected ? .semibold : .medium))
-                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                        Text("Preview")
+                                            .font(.system(size: 12, weight: isPreviewSelected ? .semibold : .medium))
+                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
                                             .lineLimit(1)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 7)
                                     .background(
-                                        isDashboardSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                                        isPreviewSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
                                         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     )
                                     .overlay(
                                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isDashboardSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                                            .stroke(isPreviewSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
                                     )
                                 }
                                 .buttonStyle(.plain)
-                                .help("Dashboard: Settings, Git")
+                                .help("Preview: terminal, Start Preview, Configure Setup")
                                 let isTasksSelected = tabManager.selectedTasksViewPath == group.path
-                                let hasPreviewURL = previewURL(for: group.path) != nil
                                 Button {
                                     tabManager.showTasksView(workspacePath: group.path)
                                     if appState.isMainContentCollapsed {
@@ -1058,41 +1030,6 @@ struct PopoutView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("View tasks for this project")
-                                let isPreviewSelected = tabManager.selectedDashboardViewPath == group.path && (dashboardTabsByWorkspacePath[group.path] ?? .settings) == .preview
-                                Button {
-                                    if hasPreviewURL {
-                                        openPreview(for: group.path)
-                                    } else {
-                                        dashboardTabsByWorkspacePath[group.path] = .preview
-                                        tabManager.showDashboardView(workspacePath: group.path)
-                                        if appState.isMainContentCollapsed {
-                                            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-                                        }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "globe")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        Text("Preview")
-                                            .font(.system(size: 12, weight: isPreviewSelected ? .semibold : .medium))
-                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        isPreviewSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isPreviewSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .help(hasPreviewURL ? "Open preview URL in Chrome" : "Dashboard Preview: terminal and Run startup script")
                                 ForEach(group.tabs) { t in
                                     ObservedTabChip(
                                         tab: t,

@@ -528,7 +528,7 @@ func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerm
     guard FileManager.default.fileExists(atPath: scriptPath),
           let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath),
           !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return "No startup script configured for this project. Add script content in Dashboard → Settings (startup.sh)."
+        return "No startup script configured for this project. Add script content in Preview → Advanced (startup.sh)."
     }
 
     guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {

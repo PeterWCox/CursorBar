@@ -260,7 +260,7 @@ private struct PreviewSettingsPaneContent: View {
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     .textCase(.uppercase)
                     .tracking(0.6)
-                TextField("http://localhost:3000", text: $debugURL)
+                TextField("", text: $debugURL)
                     .textFieldStyle(.roundedBorder)
             }
 

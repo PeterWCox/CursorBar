@@ -633,27 +633,35 @@ struct TasksListView: View {
                     .font(.system(size: 18))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
 
-                ZStack(alignment: .leading) {
-                    TextField("", text: $newTaskDraft)
-                        .textFieldStyle(.plain)
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $newTaskDraft)
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .scrollContentBackground(.hidden)
+                        .scrollDisabled(true)
                         .focused($isNewTaskFieldFocused)
-                        .onSubmit { commitNewTask() }
+                        .onKeyPress { press in
+                            if press.key == .return && !NSEvent.modifierFlags.contains(.shift) {
+                                commitNewTask()
+                                return .handled
+                            }
+                            return .ignored
+                        }
                         .onKeyPress(.escape) {
                             cancelNewTask()
                             return .handled
                         }
-                        .frame(height: 24)
+                        .frame(minHeight: 24, maxHeight: 120)
+                        .padding(.horizontal, -4)
+                        .padding(.vertical, -4)
                     if newTaskDraft.isEmpty {
                         Text("New task…")
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                            .padding(.leading, 2)
                             .allowsHitTesting(false)
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(minWidth: 0, maxWidth: .infinity)
 
                 Button(action: cancelNewTask) {
                     Image(systemName: "xmark.circle.fill")
@@ -808,7 +816,7 @@ private struct TaskRowView: View {
                         .scrollContentBackground(.hidden)
                         .lineSpacing(6)
                         .padding(.vertical, CursorTheme.spaceXS)
-                        .frame(minHeight: 36, maxHeight: 160)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
                         .focused(isEditorFocused)
                         .onKeyPress { press in
                             if press.key == .return {
@@ -840,7 +848,8 @@ private struct TaskRowView: View {
                             .strikethrough(task.completed)
                             .multilineTextAlignment(.leading)
                             .lineLimit(4)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 if canOpenLinkedAgent {
@@ -849,6 +858,7 @@ private struct TaskRowView: View {
                             }
                             .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
                     }
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 if !task.screenshotPaths.isEmpty && !(isEditing && !task.completed) {
                     HStack(alignment: .center, spacing: 6) {
@@ -871,7 +881,7 @@ private struct TaskRowView: View {
                     .disabled(isProcessing)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
             if !isProcessing {
                 Menu {

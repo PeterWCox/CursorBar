@@ -20,7 +20,7 @@ struct SettingsView: View {
             Section {
                 HStack {
                     Text("View in Browser URL:")
-                    TextField("http://localhost:3000", text: $debugURL)
+                    TextField("", text: $debugURL)
                         .textFieldStyle(.roundedBorder)
                 }
                 VStack(alignment: .leading, spacing: 4) {

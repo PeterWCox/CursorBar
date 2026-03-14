@@ -7,7 +7,7 @@ private struct ProjectSettingsFile: Codable {
     var debugUrl: String?
     /// Deprecated: startup script is now stored in .metro/startup.sh. Kept for decoding old project.json.
     var startupScript: String?
-    /// Instructions for the agent when debugging (e.g. "when the terminal is opened" context). Used when creating a debug agent from Dashboard.
+    /// Instructions for the agent when debugging (e.g. "when the terminal is opened" context). Used when creating a debug agent from Preview.
     var debugInstructions: String?
 }
 
@@ -89,7 +89,7 @@ enum ProjectSettingsStorage {
         try? content.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    // MARK: - Debug instructions (prefilled when creating debug agent from Dashboard)
+    // MARK: - Debug instructions (prefilled when creating debug agent from Preview)
 
     static func getDebugInstructions(workspacePath: String) -> String? {
         let trimmed = load(workspacePath: workspacePath).debugInstructions?.trimmingCharacters(in: .whitespacesAndNewlines)

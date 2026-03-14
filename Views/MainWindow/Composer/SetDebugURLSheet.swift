@@ -39,7 +39,7 @@ struct SetDebugURLSheet: View {
                 Text("URL")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary)
-                TextField("http://localhost:3000", text: $urlString)
+                TextField("", text: $urlString)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
                     .padding(8)

@@ -45,6 +45,7 @@ enum CursorTheme {
     static let brandBlue = Color(red: 0.40, green: 0.61, blue: 1.00)
     static let brandPurple = Color(red: 0.55, green: 0.40, blue: 0.98)
     static let brandAmber = Color(red: 0.98, green: 0.76, blue: 0.31)
+    static let brandOrange = Color(red: 1.0, green: 0.55, blue: 0.0)
     static let premiumGold = Color(red: 1.00, green: 0.84, blue: 0.39)
     static let premiumRose = Color(red: 0.98, green: 0.50, blue: 0.71)
     /// Bright gold for selected premium model text/icon so it’s obvious at a glance.
@@ -67,6 +68,8 @@ enum CursorTheme {
     static let semanticReview = Color(red: 1.0, green: 0.58, blue: 0.22)
     /// Spinner and loading accent (e.g. agent running). Use for progress/activity.
     static let spinnerBlue = Color(red: 0.45, green: 0.68, blue: 1.0)
+    /// Debug/breakpoint accent (e.g. Visual Studio–style debug button).
+    static let semanticDebug = Color(red: 0.0, green: 0.48, blue: 0.78)
     /// Soft error background (e.g. error card tint).
     static let semanticErrorTint = Color(red: 1.0, green: 0.64, blue: 0.67)
 
