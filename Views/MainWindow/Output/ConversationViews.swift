@@ -34,7 +34,7 @@ private func toolCallStatusLabel(for status: ToolCallSegmentStatus) -> String {
     case .running: return "Running"
     case .completed: return "Done"
     case .failed: return "Failed"
-    case .stopped: return "Stopped"
+    case .stopped: return "Review"
     }
 }
 
@@ -43,7 +43,7 @@ private func toolCallTint(for status: ToolCallSegmentStatus) -> Color {
     case .running: return CursorTheme.brandBlue
     case .completed: return CursorTheme.textSecondary
     case .failed: return CursorTheme.semanticErrorTint
-    case .stopped: return CursorTheme.semanticError
+    case .stopped: return CursorTheme.semanticReview
     }
 }
 
@@ -425,8 +425,8 @@ struct StoppedPlaceholderView: View {
         HStack(spacing: 8) {
             Image(systemName: "square.fill")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(CursorTheme.semanticError)
-            Text("Stopped")
+                .foregroundStyle(CursorTheme.semanticReview)
+            Text("Review")
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary)
         }

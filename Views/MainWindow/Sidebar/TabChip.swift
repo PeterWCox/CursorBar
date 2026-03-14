@@ -56,13 +56,13 @@ struct TabChip: View {
             if isRunning {
                 LightBlueSpinner(size: 14)
             } else if latestTurnState == .stopped {
-                Image(systemName: "square.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(CursorTheme.semanticError)
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(CursorTheme.semanticReview)
             } else if hasPrompted {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: "clock.fill")
                     .font(.system(size: 14))
-                    .foregroundStyle(isSelected ? CursorTheme.brandBlue : CursorTheme.textTertiary(for: colorScheme))
+                    .foregroundStyle(isSelected ? CursorTheme.brandBlue : CursorTheme.semanticReview)
             } else {
                 Image(systemName: "bubble.left")
                     .font(.system(size: 14))
@@ -87,13 +87,13 @@ struct TabChip: View {
             if isRunning {
                 LightBlueSpinner(size: 10)
             } else if latestTurnState == .stopped {
-                Image(systemName: "square.fill")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(CursorTheme.semanticError)
+                Image(systemName: "clock.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.semanticReview)
             } else if hasPrompted {
-                Image(systemName: "checkmark.circle.fill")
+                Image(systemName: "clock.fill")
                     .font(.system(size: 12))
-                    .foregroundStyle(CursorTheme.semanticSuccess)
+                    .foregroundStyle(CursorTheme.semanticReview)
             } else {
                 Image(systemName: "bubble.left")
                     .font(.system(size: 12))

@@ -152,6 +152,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel!
     let appState = AppState()
     private var cancellables = Set<AnyCancellable>()
+    private var requestNewTaskObserver: NSObjectProtocol?
+    private var openInBrowserKeyMonitor: Any?
+    private var openInCursorKeyMonitor: Any?
     private var savedExpandedPanelWidth: CGFloat = 720
     private var savedExpandedPanelHeight: CGFloat?
 
@@ -182,6 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let iconSize: CGFloat = 22
         let view = StatusItemView(frame: NSRect(x: 0, y: 0, width: iconSize, height: iconSize))
         view.image = image
+        view.toolTip = "Cursor Metro"
         view.contextMenu = menu
         view.onLeftClick = { [weak self] in
             self?.togglePanel()
@@ -206,6 +210,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        requestNewTaskObserver = NotificationCenter.default.addObserver(
+            forName: FloatingPanel.requestNewTaskNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            self?.appState.requestShowTasksAndNewTask = true
+        }
+
+        openInBrowserKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let isCmdO = event.modifierFlags.contains(.command)
+                && event.charactersIgnoringModifiers?.lowercased() == "o"
+            if isCmdO {
+                self.handleOpenInBrowser()
+                return nil
+            }
+            return event
+        }
+
+        openInCursorKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isCmdPeriod = mods == .command && event.charactersIgnoringModifiers == "."
+            if isCmdPeriod {
+                self.handleOpenInCursor()
+                return nil
+            }
+            return event
+        }
+
         appState.loadModelsFromCLI()
     }
 
@@ -224,7 +258,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleOpenInBrowser() {
+        if !panel.isVisible {
+            togglePanel()
+        }
         appState.requestOpenInBrowser = true
+    }
+
+    @objc func handleOpenInCursor() {
+        if !panel.isVisible {
+            togglePanel()
+        }
+        appState.requestOpenInCursor = true
     }
 
     private func applyCollapsedState(_ collapsed: Bool) {
@@ -449,14 +493,34 @@ class FloatingPanel: NSPanel {
     }
 
     override var canBecomeKey: Bool { true }
+
+    /// So Cmd+T always creates/focuses a new task when the panel is key (SwiftUI shortcuts can miss when focus is in list/text). Cmd+Shift+T is left for Reopen Closed Tab.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods.contains(.command), !mods.contains(.shift) else { return super.performKeyEquivalent(with: event) }
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if key == "t" {
+            NotificationCenter.default.post(name: FloatingPanel.requestNewTaskNotification, object: self)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    static let requestNewTaskNotification = Notification.Name("FloatingPanelRequestNewTask")
 }
 
 class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @Published var showSettingsSheet: Bool = false
+    /// Incremented when tasks are updated (e.g. completed) so the sidebar can hide agent tabs for completed tasks.
+    @Published var taskListRevision: UUID = UUID()
     /// When true, PopoutView should run "Open in Browser" (used when File > Open / Cmd+O is triggered so we handle it instead of the system file picker).
     @Published var requestOpenInBrowser: Bool = false
+    /// When true, PopoutView should open the current project in Cursor (triggered by Cmd+.).
+    @Published var requestOpenInCursor: Bool = false
+    /// When true, PopoutView should show Tasks and focus new-task input (triggered by Cmd+T from panel or menu).
+    @Published var requestShowTasksAndNewTask: Bool = false
     /// When true, main agent content is hidden and panel is resized to sidebar-only width.
     @Published var isMainContentCollapsed: Bool = false
     @Published private(set) var openProjectCount: Int = 0
@@ -496,6 +560,11 @@ class AppState: ObservableObject {
 
     func saveTabState() {
         tabManager.saveState()
+    }
+
+    /// Call when tasks are updated (e.g. toggled completed) so the sidebar refreshes and can hide completed-task agent tabs.
+    func notifyTasksDidUpdate() {
+        taskListRevision = UUID()
     }
 
     var workspaceDisplayName: String {

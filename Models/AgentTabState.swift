@@ -58,6 +58,9 @@ struct SavedAgentTab: Codable {
 }
 
 struct SavedTabState: Codable {
+    static let currentSchemaVersion = 2
+
+    var schemaVersion: Int
     var tabs: [SavedAgentTab]
     var selectedTabID: UUID?
     var projects: [SavedProject]
@@ -69,6 +72,7 @@ struct SavedTabState: Codable {
         projects: [SavedProject],
         selectedProjectPath: String?
     ) {
+        self.schemaVersion = Self.currentSchemaVersion
         self.tabs = tabs
         self.selectedTabID = selectedTabID
         self.projects = projects
@@ -76,6 +80,7 @@ struct SavedTabState: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case schemaVersion
         case tabs
         case selectedTabID
         case projects
@@ -84,6 +89,7 @@ struct SavedTabState: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         tabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .tabs) ?? []
         selectedTabID = try container.decodeIfPresent(UUID.self, forKey: .selectedTabID)
         projects = try container.decodeIfPresent([SavedProject].self, forKey: .projects) ?? []
@@ -118,7 +124,14 @@ enum TabManagerPersistence {
         } catch {
             return nil
         }
-        return try? JSONDecoder().decode(SavedTabState.self, from: data)
+        guard let state = try? JSONDecoder().decode(SavedTabState.self, from: data) else {
+            return nil
+        }
+        if state.schemaVersion < SavedTabState.currentSchemaVersion {
+            try? FileManager.default.removeItem(at: saveURL)
+            return nil
+        }
+        return state
     }
 
     static func save(_ state: SavedTabState) {
@@ -251,6 +264,8 @@ class TabManager: ObservableObject {
     @Published var selectedTerminalID: UUID?
     /// When non-nil, main content shows the Tasks view for this project (instead of Agent or Terminal).
     @Published var selectedTasksViewPath: String?
+    /// When non-nil, main content shows the Dashboard view (Settings, Git, Terminal) for this project.
+    @Published var selectedDashboardViewPath: String?
     @Published var selectedProjectPath: String?
     /// Stack of recently closed tabs (most recent last) for "Reopen closed tab" (Cmd+Shift+T). Capped at 20.
     @Published private(set) var recentlyClosedTabs: [SavedAgentTab] = []
@@ -261,7 +276,9 @@ class TabManager: ObservableObject {
 
     init(loadedState: SavedTabState? = nil) {
         if let saved = loadedState {
-            let restoredTabs = saved.tabs.map { AgentTab(from: $0) }
+            let restoredTabs = saved.tabs
+                .filter { $0.linkedTaskID != nil }
+                .map { AgentTab(from: $0) }
             let filteredTabs = restoredTabs.filter { TabManager.workspacePathExists($0.workspacePath) }
             let restoredProjects = saved.projects
                 .map { ProjectState(path: $0.path) }
@@ -288,7 +305,9 @@ class TabManager: ObservableObject {
     /// Persist current tabs and selected tab to disk (call on quit or periodically).
     func saveState() {
         let state = SavedTabState(
-            tabs: tabs.map { $0.toSaved() },
+            tabs: tabs
+                .filter { $0.linkedTaskID != nil }
+                .map { $0.toSaved() },
             selectedTabID: selectedTabID,
             projects: projects.map { SavedProject(path: $0.path) },
             selectedProjectPath: selectedProjectPath
@@ -296,15 +315,15 @@ class TabManager: ObservableObject {
         TabManagerPersistence.save(state)
     }
 
-    /// Current agent tab, or nil when a terminal tab, tasks view, or no tab is selected.
+    /// Current agent tab, or nil when a terminal tab, tasks view, dashboard, or no tab is selected.
     var activeTab: AgentTab? {
-        guard selectedTerminalID == nil, selectedTasksViewPath == nil, let selectedTabID else { return nil }
+        guard selectedTerminalID == nil, selectedTasksViewPath == nil, selectedDashboardViewPath == nil, let selectedTabID else { return nil }
         return tabs.first { $0.id == selectedTabID }
     }
 
-    /// Current terminal tab, or nil when an agent tab, tasks view, or no terminal is selected.
+    /// Current terminal tab, or nil when an agent tab, tasks view, dashboard, or no terminal is selected.
     var activeTerminalTab: TerminalTab? {
-        guard selectedTasksViewPath == nil, let selectedTerminalID else { return nil }
+        guard selectedTasksViewPath == nil, selectedDashboardViewPath == nil, let selectedTerminalID else { return nil }
         return terminalTabs.first { $0.id == selectedTerminalID }
     }
 
@@ -314,6 +333,18 @@ class TabManager: ObservableObject {
 
     var openProjectCount: Int {
         projects.count
+    }
+
+    /// Replaces the project list with paths discovered on disk (e.g. from loadDevFolders). Keeps selectedProjectPath if it’s still in the new list.
+    func setProjectsFromPaths(_ paths: [String]) {
+        let normalized = paths.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { Self.workspacePathExists($0) }
+        let newProjects = normalized.map { ProjectState(path: $0) }
+        let validPaths = Set(normalized)
+        projects = newProjects
+        if let current = selectedProjectPath, !validPaths.contains(current) {
+            selectedProjectPath = projects.first?.path
+        }
+        reconcileSelection(preferredProjectPath: selectedProjectPath)
     }
 
     func addProject(path: String, select: Bool = true) {
@@ -345,18 +376,22 @@ class TabManager: ObservableObject {
         if let selectedTab = activeTab, selectedTab.workspacePath == path { return }
         if let selectedTerminal = activeTerminalTab, selectedTerminal.workspacePath == path { return }
         if selectedTasksViewPath == path { return }
+        if selectedDashboardViewPath == path { return }
         if let firstTab = tabs.first(where: { $0.workspacePath == path }) {
             selectedTabID = firstTab.id
             selectedTerminalID = nil
             selectedTasksViewPath = nil
+            selectedDashboardViewPath = nil
         } else if let firstTerminal = terminalTabs.first(where: { $0.workspacePath == path }) {
             selectedTerminalID = firstTerminal.id
             selectedTabID = nil
             selectedTasksViewPath = nil
+            selectedDashboardViewPath = nil
         } else {
             selectedTabID = nil
             selectedTerminalID = nil
             selectedTasksViewPath = nil
+            selectedDashboardViewPath = path
         }
     }
 
@@ -366,13 +401,42 @@ class TabManager: ObservableObject {
         guard projects.contains(where: { $0.path == resolved }) else { return }
         selectedProjectPath = resolved
         selectedTasksViewPath = resolved
+        selectedDashboardViewPath = nil
         selectedTabID = nil
         selectedTerminalID = nil
+    }
+
+    /// Show the Dashboard view (Settings, Git, Terminal) for the given project.
+    func showDashboardView(workspacePath path: String) {
+        let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard projects.contains(where: { $0.path == resolved }) else { return }
+        selectedProjectPath = resolved
+        selectedDashboardViewPath = resolved
+        selectedTasksViewPath = nil
+        selectedTabID = nil
+        selectedTerminalID = nil
+    }
+
+    @discardableResult
+    func selectAgentTab(id: UUID) -> Bool {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return false }
+        selectedTabID = tab.id
+        selectedTerminalID = nil
+        selectedTasksViewPath = nil
+        selectedDashboardViewPath = nil
+        selectedProjectPath = tab.workspacePath
+        return true
     }
 
     /// Leave Tasks view and return to Agent/Terminal selection for the current project.
     func hideTasksView() {
         selectedTasksViewPath = nil
+        reconcileSelection(preferredProjectPath: selectedProjectPath)
+    }
+
+    /// Leave Dashboard view and return to Agent/Terminal selection for the current project.
+    func hideDashboardView() {
+        selectedDashboardViewPath = nil
         reconcileSelection(preferredProjectPath: selectedProjectPath)
     }
 
@@ -398,6 +462,7 @@ class TabManager: ObservableObject {
             selectedTabID = tab.id
             selectedTerminalID = nil
             selectedTasksViewPath = nil
+            selectedDashboardViewPath = nil
             selectedProjectPath = resolved
         }
         return tab
@@ -415,6 +480,7 @@ class TabManager: ObservableObject {
         selectedTerminalID = tab.id
         selectedTabID = nil
         selectedTasksViewPath = nil
+        selectedDashboardViewPath = nil
         selectedProjectPath = resolved
         return tab
     }
@@ -426,6 +492,7 @@ class TabManager: ObservableObject {
         let closedPath = tabToClose.workspacePath
         terminalTabs.remove(at: index)
         if wasSelected {
+            selectedDashboardViewPath = nil
             if let replacement = terminalTabs.first(where: { $0.workspacePath == closedPath }) {
                 selectedTerminalID = replacement.id
                 selectedTasksViewPath = nil
@@ -444,6 +511,9 @@ class TabManager: ObservableObject {
     func closeTab(_ id: UUID) {
         if let index = tabs.firstIndex(where: { $0.id == id }) {
             let tabToClose = tabs[index]
+            if let taskID = tabToClose.linkedTaskID {
+                ProjectTasksStorage.clearAgentTab(workspacePath: tabToClose.workspacePath, taskID: taskID)
+            }
             recentlyClosedTabs.append(tabToClose.toSaved())
             if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
                 recentlyClosedTabs.removeFirst()
@@ -453,6 +523,7 @@ class TabManager: ObservableObject {
             tabs.remove(at: index)
             tabSubscriptions[id] = nil
             if wasSelected {
+                selectedDashboardViewPath = nil
                 if let replacement = tabs.first(where: { $0.workspacePath == closedProjectPath }) {
                     selectedTabID = replacement.id
                     selectedTerminalID = nil
@@ -477,6 +548,9 @@ class TabManager: ObservableObject {
     func removeProject(_ path: String) {
         let toClose = tabs.filter { $0.workspacePath == path }
         for tab in toClose {
+            if let taskID = tab.linkedTaskID {
+                ProjectTasksStorage.clearAgentTab(workspacePath: path, taskID: taskID)
+            }
             recentlyClosedTabs.append(tab.toSaved())
             if recentlyClosedTabs.count > Self.maxRecentlyClosedTabs {
                 recentlyClosedTabs.removeFirst()
@@ -494,6 +568,9 @@ class TabManager: ObservableObject {
         if selectedTasksViewPath == path {
             selectedTasksViewPath = nil
         }
+        if selectedDashboardViewPath == path {
+            selectedDashboardViewPath = nil
+        }
         if let activeTab, activeTab.workspacePath == path {
             selectedTabID = nil
         }
@@ -506,14 +583,16 @@ class TabManager: ObservableObject {
     /// Reopens the most recently closed tab. Returns true if a tab was restored.
     func reopenLastClosedTab() -> Bool {
         guard let saved = recentlyClosedTabs.popLast() else { return false }
+        guard saved.linkedTaskID != nil else { return false }
         guard Self.workspacePathExists(saved.workspacePath) else { return false }
         addProject(path: saved.workspacePath, select: true)
         let tab = AgentTab(from: saved)
         tabs.append(tab)
         observe(tab)
-        selectedTabID = tab.id
-        selectedProjectPath = tab.workspacePath
-        return true
+        if let taskID = tab.linkedTaskID {
+            ProjectTasksStorage.assignAgentTab(workspacePath: tab.workspacePath, taskID: taskID, agentTabID: tab.id)
+        }
+        return selectAgentTab(id: tab.id)
     }
 
     private func bindTabChanges() {
@@ -560,11 +639,18 @@ class TabManager: ObservableObject {
 
         if let preferredProjectPath, validProjectPaths.contains(preferredProjectPath) {
             selectedProjectPath = preferredProjectPath
+            if activeTab == nil, activeTerminalTab == nil, selectedTasksViewPath != preferredProjectPath {
+                selectedDashboardViewPath = preferredProjectPath
+            }
             return
         }
 
         if selectedProjectPath == nil {
             selectedProjectPath = projects.first?.path
+        }
+
+        if let path = selectedProjectPath, activeTab == nil, activeTerminalTab == nil, selectedTasksViewPath != path {
+            selectedDashboardViewPath = path
         }
     }
 

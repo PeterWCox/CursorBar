@@ -4,6 +4,16 @@ import UniformTypeIdentifiers
 
 // MARK: - Tasks (todos) list for a project
 
+/// One tab per task state.
+enum TasksListTab: String, CaseIterable {
+    case backlog = "Backlog"
+    case todo = "In Review"
+    case processing = "Processing"
+    case finished = "Review"
+    case completed = "Completed"
+    case deleted = "Deleted"
+}
+
 struct TasksListView: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
@@ -13,36 +23,35 @@ struct TasksListView: View {
     var linkedStatuses: [UUID: LinkedTaskStatus] = [:]
     /// Models to show in the task model picker (same as input bar).
     var models: [ModelOption]
-    /// Send task content to a new agent; when taskID is non-nil, the new agent is linked to that task. When screenshotPaths is non-empty, those paths (under .cursormetro) are attached to the prompt. modelId is the task's chosen model (e.g. "auto").
+    /// Send task content to a new agent; when taskID is non-nil, the new agent is linked to that task. When screenshotPaths is non-empty, those paths (under .metro) are attached to the prompt. modelId is the task's chosen model (e.g. "auto").
     var onSendToAgent: (String, UUID?, [String], String) -> Void
+    /// Open the linked agent for a task when the row represents active or completed agent work.
+    var onOpenLinkedAgent: (ProjectTask) -> Void = { _ in }
+    /// Called when any task is updated (e.g. completed, edited) so the sidebar can refresh (e.g. hide agent tabs for completed tasks).
+    var onTasksDidUpdate: () -> Void = { }
     var onDismiss: () -> Void
 
     @State private var tasks: [ProjectTask] = []
     @State private var editingTask: ProjectTask?
     @State private var editingDraft: String = ""
-    @State private var editingScreenshotImages: [NSImage] = []
-    @State private var showEditScreenshotFileImporter: Bool = false
     @State private var isAddingNewTask: Bool = false
     @State private var newTaskDraft: String = ""
     @State private var newTaskModelId: String = AvailableModels.autoID
-    @State private var newTaskScreenshots: [NSImage] = []
-    @State private var showScreenshotFileImporter: Bool = false
     @FocusState private var isNewTaskFieldFocused: Bool
     @FocusState private var isTaskEditorFocused: Bool
     /// When true, show only completed tasks completed in the last 24 hours. When false, show all completed.
     @State private var showOnlyRecentCompleted: Bool = true
-    /// Collapsed state for Todo, Backlog, Completed, and Deleted sections (false = expanded).
-    @State private var todoSectionCollapsed: Bool = false
-    @State private var backlogSectionCollapsed: Bool = true
-    @State private var completedSectionCollapsed: Bool = true
-    @State private var deletedSectionCollapsed: Bool = true
     @State private var deletedTasksList: [ProjectTask] = []
-    /// When adding a new task, Cmd+V pastes screenshot from clipboard. Monitor is installed only while the new-task row is visible.
-    @State private var newTaskPasteKeyMonitor: Any?
-    /// When editing a task, Cmd+V pastes screenshot from clipboard.
-    @State private var editTaskPasteKeyMonitor: Any?
-    /// URL for full-screen task screenshot preview (same pattern as PopoutView screenshot preview).
+    /// URL for full-screen task screenshot preview (saved task screenshots). Same pattern as PopoutView.
     @State private var taskScreenshotPreviewURL: URL? = nil
+    /// In-memory image for full-screen preview (new-task draft screenshots before save).
+    @State private var taskScreenshotPreviewImage: NSImage? = nil
+    /// Draft screenshots for the new task row (paste before commit). Shown with same thumbnail + preview as existing tasks.
+    @State private var newTaskDraftScreenshots: [(id: UUID, image: NSImage)] = []
+    /// While the add-task row is visible, intercept Cmd+V for image paste without breaking normal text paste.
+    @State private var newTaskPasteKeyMonitor: Any?
+    /// Which top-level tab is selected: In Progress, Backlog, or Archive.
+    @State private var selectedTasksTab: TasksListTab = .todo
 
     private static let completedRecentInterval: TimeInterval = 24 * 60 * 60
 
@@ -52,11 +61,33 @@ struct TasksListView: View {
     }
 
     private var todoTasks: [ProjectTask] {
-        tasks.filter { !$0.completed && !$0.backlog }
+        tasks.filter { task in
+            guard !task.completed, !task.backlog else { return false }
+            let status = linkedStatuses[task.id]
+            return status != .processing && status != .done
+        }
     }
 
     private var backlogTasks: [ProjectTask] {
-        tasks.filter { !$0.completed && $0.backlog }
+        tasks.filter { task in
+            guard !task.completed, task.backlog else { return false }
+            let status = linkedStatuses[task.id]
+            return status != .processing && status != .done
+        }
+    }
+
+    /// Tasks currently being processed by a linked agent.
+    private var processingTasks: [ProjectTask] {
+        tasks.filter { linkedStatuses[$0.id] == .processing }
+    }
+
+    /// Tasks whose linked agent has finished (done or stopped) and need review. Excludes completed tasks so they only appear in Completed.
+    private var finishedTasks: [ProjectTask] {
+        tasks.filter { task in
+            guard !task.completed else { return false }
+            let s = linkedStatuses[task.id]
+            return s == .done || s == .stopped
+        }
     }
 
     private var completedTasks: [ProjectTask] {
@@ -74,11 +105,12 @@ struct TasksListView: View {
     private func commitNewTask() {
         let trimmed = newTaskDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
-            _ = ProjectTasksStorage.addTask(workspacePath: workspacePath, content: trimmed, screenshotImages: newTaskScreenshots, modelId: newTaskModelId)
+            let asBacklog = (selectedTasksTab == .backlog)
+            _ = ProjectTasksStorage.addTask(workspacePath: workspacePath, content: trimmed, screenshotImages: newTaskDraftScreenshots.map(\.image), modelId: newTaskModelId, backlog: asBacklog)
             reloadTasks()
             newTaskDraft = ""
+            newTaskDraftScreenshots = []
             newTaskModelId = AvailableModels.autoID
-            newTaskScreenshots = []
         }
         isAddingNewTask = false
         isNewTaskFieldFocused = false
@@ -86,15 +118,47 @@ struct TasksListView: View {
 
     private func cancelNewTask() {
         newTaskDraft = ""
+        newTaskDraftScreenshots = []
+        taskScreenshotPreviewImage = nil
         newTaskModelId = AvailableModels.autoID
-        newTaskScreenshots = []
         isAddingNewTask = false
         isNewTaskFieldFocused = false
+    }
+
+    private func installNewTaskPasteMonitorIfNeeded() {
+        guard newTaskPasteKeyMonitor == nil else { return }
+        newTaskPasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let isCommandV = modifiers.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
+            guard isCommandV else { return event }
+            guard newTaskDraftScreenshots.count < AppLimits.maxScreenshots else { return event }
+            guard let image = SubmittableTextEditor.imageFromPasteboard(.general) else { return event }
+            newTaskDraftScreenshots.append((id: UUID(), image: image))
+            return nil
+        }
+    }
+
+    private func removeNewTaskPasteMonitor() {
+        guard let monitor = newTaskPasteKeyMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        newTaskPasteKeyMonitor = nil
+    }
+
+    private func showNewTaskComposer(selecting tab: TasksListTab? = nil) {
+        if let tab {
+            selectedTasksTab = tab
+        }
+        newTaskDraft = ""
+        newTaskDraftScreenshots = []
+        taskScreenshotPreviewImage = nil
+        newTaskModelId = AvailableModels.autoID
+        isAddingNewTask = true
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
+            tasksTabBar
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
             ScrollViewReader { proxy in
@@ -103,207 +167,234 @@ struct TasksListView: View {
                         Color.clear
                             .frame(height: 0)
                             .id("tasksScrollTop")
-                        if todoTasks.isEmpty && backlogTasks.isEmpty && visibleCompletedTasks.isEmpty && deletedTasksList.isEmpty && !isAddingNewTask {
-                            emptyState
-                        } else {
-                            if isAddingNewTask {
-                                newTaskRow
-                            }
-                        }
-                        // Todo section (always shown with count)
-                        disclosureSection(
-                            title: "Todo",
-                            count: todoTasks.count,
-                            collapsed: $todoSectionCollapsed,
-                            showFilter: false,
-                            onFilterToggle: nil
-                        ) {
-                            ForEach(todoTasks) { task in
-                                taskRow(task, isInBacklog: false, onToggleBacklog: {
-                                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
-                                    reloadTasks()
-                                })
-                            }
-                        }
-                        // Backlog section (always shown with count)
-                        disclosureSection(
-                            title: "Backlog",
-                            count: backlogTasks.count,
-                            collapsed: $backlogSectionCollapsed,
-                            showFilter: false,
-                            onFilterToggle: nil,
-                            topPadding: CursorTheme.gapBetweenSections
-                        ) {
-                            ForEach(backlogTasks) { task in
-                                taskRow(task, isInBacklog: true, onToggleBacklog: {
-                                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
-                                    reloadTasks()
-                                })
-                            }
-                        }
-                        // Completed section (always shown with count)
-                        disclosureSection(
-                            title: "Completed",
-                            count: completedTasks.count,
-                            collapsed: $completedSectionCollapsed,
-                            showFilter: true,
-                            onFilterToggle: { showOnlyRecentCompleted.toggle() },
-                            topPadding: CursorTheme.gapBetweenSections
-                        ) {
-                            ForEach(visibleCompletedTasks) { task in
-                                taskRow(task)
-                            }
-                        }
-                        // Deleted section (always shown with count)
-                        disclosureSection(
-                            title: "Deleted",
-                            count: deletedTasksList.count,
-                            collapsed: $deletedSectionCollapsed,
-                            showFilter: false,
-                            onFilterToggle: nil,
-                            topPadding: CursorTheme.gapBetweenSections
-                        ) {
-                            ForEach(deletedTasksList) { task in
-                                deletedTaskRow(task)
-                            }
-                        }
+                        tabContent()
+                    }
+                    .padding(CursorTheme.paddingPanel)
                 }
-                .padding(CursorTheme.paddingPanel)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onChange(of: isAddingNewTask) { _, showing in
-                if showing {
-                    proxy.scrollTo("tasksScrollTop", anchor: .top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onChange(of: isAddingNewTask) { _, showing in
+                    if showing {
+                        proxy.scrollTo("tasksScrollTop", anchor: .top)
+                    }
                 }
-            }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { reloadTasks() }
+        .onAppear {
+            reloadTasks()
+            // Handle Cmd+T when it fired before this view was in the hierarchy (trigger already true).
+            if triggerAddNewTask.wrappedValue {
+                showNewTaskComposer(selecting: .todo)
+                triggerAddNewTask.wrappedValue = false
+            }
+        }
         .onChange(of: workspacePath) { _, _ in reloadTasks() }
         .onChange(of: triggerAddNewTask.wrappedValue) { _, requested in
             if requested {
-                isAddingNewTask = true
+                showNewTaskComposer(selecting: .todo)
                 triggerAddNewTask.wrappedValue = false
             }
         }
         .onChange(of: isAddingNewTask) { _, showing in
             if showing {
                 isNewTaskFieldFocused = true
-                // Intercept Cmd+V so pasting an image attaches it as the task screenshot instead of into the text field.
-                newTaskPasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                    let isCommandV = modifiers.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
-                    if isCommandV, newTaskScreenshots.count < AppLimits.maxScreenshots,
-                       let img = SubmittableTextEditor.imageFromPasteboard(NSPasteboard.general) {
-                        newTaskScreenshots.append(img)
-                        return nil
-                    }
-                    return event
-                }
+                installNewTaskPasteMonitorIfNeeded()
             } else {
-                if let monitor = newTaskPasteKeyMonitor {
-                    NSEvent.removeMonitor(monitor)
-                    newTaskPasteKeyMonitor = nil
-                }
+                removeNewTaskPasteMonitor()
             }
         }
-        .onChange(of: editingTask) { _, new in
-            if let task = new {
-                isTaskEditorFocused = true
-                editingScreenshotImages = task.screenshotPaths.compactMap { path in
-                    NSImage(contentsOf: ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: path))
-                }
-                editTaskPasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                    let isCommandV = modifiers.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
-                    if isCommandV, editingScreenshotImages.count < AppLimits.maxScreenshots,
-                       let img = SubmittableTextEditor.imageFromPasteboard(NSPasteboard.general) {
-                        editingScreenshotImages = editingScreenshotImages + [img]
-                        return nil
-                    }
-                    return event
-                }
-            } else {
-                editingScreenshotImages = []
-                if let monitor = editTaskPasteKeyMonitor {
-                    NSEvent.removeMonitor(monitor)
-                    editTaskPasteKeyMonitor = nil
-                }
-            }
-        }
+        .onDisappear { removeNewTaskPasteMonitor() }
         .overlay {
-            if let url = taskScreenshotPreviewURL {
-                ScreenshotPreviewModal(imageURL: url, isPresented: Binding(
-                    get: { true },
-                    set: { if !$0 { taskScreenshotPreviewURL = nil } }
-                ))
-            }
-        }
-        .fileImporter(
-            isPresented: $showEditScreenshotFileImporter,
-            allowedContentTypes: [.image, .png, .jpeg],
-            allowsMultipleSelection: true
-        ) { result in
-            guard case .success(let urls) = result else { return }
-            let toAdd = urls.prefix(AppLimits.maxScreenshots - editingScreenshotImages.count)
-            for url in toAdd {
-                guard url.startAccessingSecurityScopedResource() else { continue }
-                defer { url.stopAccessingSecurityScopedResource() }
-                if let image = NSImage(contentsOf: url) {
-                    editingScreenshotImages.append(image)
-                }
+            if taskScreenshotPreviewURL != nil || taskScreenshotPreviewImage != nil {
+                ScreenshotPreviewModal(
+                    imageURL: taskScreenshotPreviewURL,
+                    image: taskScreenshotPreviewImage,
+                    isPresented: Binding(
+                        get: { true },
+                        set: { if !$0 { taskScreenshotPreviewURL = nil; taskScreenshotPreviewImage = nil } }
+                    )
+                )
             }
         }
     }
 
-    /// Section with DisclosureGroup so all accordions (Todo, Backlog, Completed, Deleted) expand/collapse consistently.
-    /// `collapsed` binding: false = expanded, true = collapsed. `count` is shown in title e.g. "Todo (8)".
-    @ViewBuilder
-    private func disclosureSection<Content: View>(
-        title: String,
-        count: Int,
-        collapsed: Binding<Bool>,
-        showFilter: Bool = false,
-        onFilterToggle: (() -> Void)? = nil,
-        topPadding: CGFloat = 0,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        // DisclosureGroup expects isExpanded (true = open); we store collapsed (true = closed).
-        let expandedBinding = Binding(
-            get: { !collapsed.wrappedValue },
-            set: { collapsed.wrappedValue = !$0 }
-        )
-        let contentView = content()
-        let titleWithCount = "\(title) (\(count))"
-        DisclosureGroup(isExpanded: expandedBinding) {
-            contentView
-                .padding(.top, CursorTheme.gapSectionTitleToContent)
-        } label: {
-            HStack(spacing: 8) {
-                Text(titleWithCount)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                if showFilter, let onFilterToggle {
-                    Button(action: onFilterToggle) {
-                        Text(showOnlyRecentCompleted ? "Show all" : "Last 24 hours")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(CursorTheme.brandBlue)
+    private func taskCount(for tab: TasksListTab) -> Int {
+        switch tab {
+        case .backlog: return backlogTasks.count
+        case .todo: return todoTasks.count
+        case .processing: return processingTasks.count
+        case .finished: return finishedTasks.count
+        case .completed: return completedTasks.count
+        case .deleted: return deletedTasksList.count
+        }
+    }
+
+    private var tasksTabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(TasksListTab.allCases, id: \.self) { tab in
+                Button {
+                    selectedTasksTab = tab
+                    if tab != .todo && tab != .backlog && isAddingNewTask {
+                        isAddingNewTask = false
+                        cancelNewTask()
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    Text("\(tab.rawValue) (\(taskCount(for: tab)))")
+                        .font(.system(size: 13, weight: selectedTasksTab == tab ? .semibold : .medium))
+                        .foregroundStyle(selectedTasksTab == tab ? (tab == .finished ? CursorTheme.semanticReview : CursorTheme.textPrimary(for: colorScheme)) : CursorTheme.textSecondary(for: colorScheme))
+                        .padding(.horizontal, CursorTheme.spaceM)
+                        .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
                 }
-                Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .background(selectedTasksTab == tab ? (tab == .finished ? CursorTheme.semanticReview.opacity(0.2) : CursorTheme.surfaceMuted(for: colorScheme)) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
+        .padding(.vertical, CursorTheme.spaceXS)
+        .background(CursorTheme.chrome(for: colorScheme))
+    }
+
+    @ViewBuilder
+    private func tabContent() -> some View {
+        switch selectedTasksTab {
+        case .todo:
+            todoContent
+        case .backlog:
+            backlogContent
+        case .processing:
+            processingContent
+        case .finished:
+            finishedContent
+        case .completed:
+            completedContent
+        case .deleted:
+            deletedContent
+        }
+    }
+
+    @ViewBuilder
+    private var todoContent: some View {
+        newTaskButton
+        let isEmpty = todoTasks.isEmpty && !isAddingNewTask
+        if isEmpty {
+            emptyState
+        } else {
+            if isAddingNewTask {
+                newTaskRow
+            }
+            ForEach(todoTasks) { task in
+                taskRow(task, isInBacklog: false, onToggleBacklog: {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
+                    reloadTasks()
+                })
             }
         }
-        .padding(.top, topPadding + CursorTheme.spaceXS)
-        .padding(.bottom, CursorTheme.spaceXXS)
+    }
+
+    private var newTaskButton: some View {
+        Button(action: {
+            showNewTaskComposer()
+        }) {
+            Label("New task", systemImage: "plus.circle.fill")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(CursorTheme.brandBlue)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, CursorTheme.spaceS)
+    }
+
+    @ViewBuilder
+    private var backlogContent: some View {
+        newTaskButton
+        let isEmpty = backlogTasks.isEmpty && !isAddingNewTask
+        if isEmpty {
+            emptyStateBacklog
+        } else {
+            if isAddingNewTask {
+                newTaskRow
+            }
+            ForEach(backlogTasks) { task in
+                taskRow(task, isInBacklog: true, onToggleBacklog: {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
+                    reloadTasks()
+                })
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var processingContent: some View {
+        if processingTasks.isEmpty {
+            emptyStateProcessing
+        } else {
+            ForEach(processingTasks) { task in
+                taskRow(task, isInBacklog: task.backlog, onToggleBacklog: task.backlog ? {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
+                    reloadTasks()
+                } : {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
+                    reloadTasks()
+                })
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var finishedContent: some View {
+        if finishedTasks.isEmpty {
+            emptyStateFinished
+        } else {
+            ForEach(finishedTasks) { task in
+                taskRow(task, isInBacklog: task.backlog, onToggleBacklog: task.backlog ? {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: false)
+                    reloadTasks()
+                } : {
+                    ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, backlog: true)
+                    reloadTasks()
+                })
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var completedContent: some View {
+        if visibleCompletedTasks.isEmpty {
+            emptyStateCompleted
+        } else {
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button(action: { showOnlyRecentCompleted.toggle() }) {
+                    Text(showOnlyRecentCompleted ? "Show all" : "Last 24 hours")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(CursorTheme.brandBlue)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.bottom, CursorTheme.spaceXS)
+            ForEach(visibleCompletedTasks) { task in
+                taskRow(task)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var deletedContent: some View {
+        if deletedTasksList.isEmpty {
+            emptyStateDeleted
+        } else {
+            ForEach(deletedTasksList) { task in
+                deletedTaskRow(task)
+            }
+        }
     }
 
     private func commitEdit() {
         let trimmed = editingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, let id = editingTask?.id {
             ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: id, content: trimmed)
-            ProjectTasksStorage.updateTaskScreenshots(workspacePath: workspacePath, id: id, images: editingScreenshotImages)
             reloadTasks()
         }
         editingTask = nil
@@ -318,16 +409,18 @@ struct TasksListView: View {
             linkedTaskStatus: linkedStatuses[task.id],
             isEditing: editingTask?.id == task.id,
             editDraft: $editingDraft,
-            editScreenshotImages: $editingScreenshotImages,
-            showEditScreenshotFileImporter: $showEditScreenshotFileImporter,
             isEditorFocused: $isTaskEditorFocused,
             onTap: {
-                let content = task.content
-                let taskToEdit = task
-                // Defer so when triggered from context/menu the menu dismisses first and inline editor gets focus
-                DispatchQueue.main.async {
-                    editingDraft = content
-                    editingTask = taskToEdit
+                if linkedStatuses[task.id] != nil {
+                    onOpenLinkedAgent(task)
+                } else {
+                    let content = task.content
+                    let taskToEdit = task
+                    // Defer so when triggered from context/menu the menu dismisses first and inline editor gets focus
+                    DispatchQueue.main.async {
+                        editingDraft = content
+                        editingTask = taskToEdit
+                    }
                 }
             },
             onCommitEdit: commitEdit,
@@ -335,6 +428,7 @@ struct TasksListView: View {
             onToggleComplete: {
                 ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, completed: !task.completed)
                 reloadTasks()
+                onTasksDidUpdate()
             },
             onSendToAgent: { onSendToAgent(task.content, task.id, task.screenshotPaths, task.modelId) },
             onModelChange: { newId in
@@ -411,40 +505,106 @@ struct TasksListView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: CursorTheme.spaceM) {
             Button(action: onDismiss) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
+                Image(systemName: "checklist")
+                    .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                     .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("Back")
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tasks")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
                     .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                Text((workspacePath as NSString).lastPathComponent)
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: CursorTheme.spaceXS) {
+                    Image(systemName: "folder")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    Text((workspacePath as NSString).lastPathComponent)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: {
-                newTaskDraft = ""
-                isAddingNewTask = true
-            }) {
-                Label("New task", systemImage: "plus.circle.fill")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(CursorTheme.brandBlue)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
         .padding(.vertical, CursorTheme.paddingHeaderVertical)
+    }
+
+    private var emptyStateBacklog: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "tray.full")
+                .font(.system(size: 48, weight: .medium))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .symbolRenderingMode(.hierarchical)
+            Text("No backlog tasks")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            Text("Move tasks here from In Review when you want to work on them later.")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, CursorTheme.spaceXXL + CursorTheme.spaceL)
+    }
+
+    private var emptyStateProcessing: some View {
+        emptyStatePlaceholder(
+            icon: "gearshape.2",
+            title: "No tasks processing",
+            subtitle: "Tasks sent to an agent appear here while they run."
+        )
+    }
+
+    private var emptyStateFinished: some View {
+        emptyStatePlaceholder(
+            icon: "checkmark.circle",
+            title: "No tasks to review",
+            subtitle: "Tasks whose agent run has completed or stopped appear here."
+        )
+    }
+
+    private var emptyStateCompleted: some View {
+        emptyStatePlaceholder(
+            icon: "checkmark.circle.fill",
+            title: "No completed tasks",
+            subtitle: "Tasks you mark as done appear here."
+        )
+    }
+
+    private var emptyStateDeleted: some View {
+        emptyStatePlaceholder(
+            icon: "trash",
+            title: "No deleted tasks",
+            subtitle: "Deleted tasks appear here until you restore or permanently remove them."
+        )
+    }
+
+    private func emptyStatePlaceholder(icon: String, title: String, subtitle: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: icon)
+                .font(.system(size: 48, weight: .medium))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .symbolRenderingMode(.hierarchical)
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            Text(subtitle)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 280)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, CursorTheme.spaceXXL + CursorTheme.spaceL)
     }
 
     private var emptyState: some View {
@@ -461,18 +621,6 @@ struct TasksListView: View {
                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 280)
-            Button(action: {
-                newTaskDraft = ""
-                isAddingNewTask = true
-            }) {
-                Label("New task", systemImage: "plus")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, CursorTheme.spaceL + CursorTheme.spaceXS)
-                    .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
-                    .background(CursorTheme.brandBlue, in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard - 2, style: .continuous))
-            }
-            .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, CursorTheme.spaceXXL + CursorTheme.spaceL)
@@ -485,16 +633,27 @@ struct TasksListView: View {
                     .font(.system(size: 18))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
 
-                TextField("New task…", text: $newTaskDraft)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14, weight: .regular))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                    .focused($isNewTaskFieldFocused)
-                    .onSubmit { commitNewTask() }
-                    .onKeyPress(.escape) {
-                        cancelNewTask()
-                        return .handled
+                ZStack(alignment: .leading) {
+                    TextField("", text: $newTaskDraft)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .focused($isNewTaskFieldFocused)
+                        .onSubmit { commitNewTask() }
+                        .onKeyPress(.escape) {
+                            cancelNewTask()
+                            return .handled
+                        }
+                        .frame(height: 24)
+                    if newTaskDraft.isEmpty {
+                        Text("New task…")
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                            .padding(.leading, 2)
+                            .allowsHitTesting(false)
                     }
+                }
+                .frame(maxWidth: .infinity)
 
                 Button(action: cancelNewTask) {
                     Image(systemName: "xmark.circle.fill")
@@ -504,16 +663,28 @@ struct TasksListView: View {
                 .buttonStyle(.plain)
             }
 
+            if !newTaskDraftScreenshots.isEmpty {
+                HStack(alignment: .center, spacing: 6) {
+                    ForEach(newTaskDraftScreenshots, id: \.id) { item in
+                        ScreenshotThumbnailView(
+                            image: item.image,
+                            size: CGSize(width: 56, height: 56),
+                            cornerRadius: 6,
+                            onTapPreview: { taskScreenshotPreviewImage = item.image },
+                            onDelete: {
+                                if taskScreenshotPreviewImage === item.image { taskScreenshotPreviewImage = nil }
+                                newTaskDraftScreenshots.removeAll { $0.id == item.id }
+                            }
+                        )
+                    }
+                }
+            }
+
             HStack(alignment: .center, spacing: CursorTheme.spaceS + CursorTheme.spaceXXS) {
                 ModelPickerView(
                     selectedModelId: newTaskModelId,
                     models: models,
                     onSelect: { newTaskModelId = $0 }
-                )
-                TaskScreenshotDraftView(
-                    images: $newTaskScreenshots,
-                    showFileImporter: $showScreenshotFileImporter,
-                    thumbnailSize: CGSize(width: 72, height: 72)
                 )
             }
         }
@@ -523,29 +694,28 @@ struct TasksListView: View {
             RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
-        .fileImporter(
-            isPresented: $showScreenshotFileImporter,
-            allowedContentTypes: [.image, .png, .jpeg],
-            allowsMultipleSelection: true
-        ) { result in
-            guard case .success(let urls) = result else { return }
-            let toAdd = urls.prefix(AppLimits.maxScreenshots - newTaskScreenshots.count)
-            for url in toAdd {
-                guard url.startAccessingSecurityScopedResource() else { continue }
-                defer { url.stopAccessingSecurityScopedResource() }
-                if let image = NSImage(contentsOf: url) {
-                    newTaskScreenshots.append(image)
+        .onPasteCommand(of: [.image, .png, .tiff]) { providers in
+            guard newTaskDraftScreenshots.count < AppLimits.maxScreenshots else { return }
+            for provider in providers {
+                guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else { continue }
+                _ = provider.loadObject(ofClass: NSImage.self) { object, _ in
+                    guard let img = object as? NSImage else { return }
+                    DispatchQueue.main.async {
+                        if newTaskDraftScreenshots.count < AppLimits.maxScreenshots {
+                            newTaskDraftScreenshots.append((id: UUID(), image: img))
+                        }
+                    }
                 }
+                break
             }
         }
     }
 
 }
 
-// MARK: - Task screenshot thumbnail (in todo row): tappable preview + delete
+// MARK: - Task screenshot thumbnail (in todo row): uses shared ScreenshotThumbnailView
 
 private struct TaskScreenshotThumbnailView: View {
-    @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     let screenshotPath: String
     var onTapPreview: (() -> Void)? = nil
@@ -555,45 +725,14 @@ private struct TaskScreenshotThumbnailView: View {
         ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: screenshotPath)
     }
 
-    /// Small "expand" icon overlay (matches ScreenshotCardView affordance). Dark scrim + white icon for contrast on any image.
-    private var expandPreviewOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.25)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
-        }
-    }
-
     var body: some View {
-        if let nsImage = NSImage(contentsOf: imageURL) {
-            HStack(alignment: .center, spacing: 6) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 56, height: 56)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                    )
-                    .overlay(expandPreviewOverlay)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onTapPreview?()
-                    }
-
-                if onDelete != nil {
-                    Button(action: { onDelete?() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
+        ScreenshotThumbnailView(
+            imageURL: imageURL,
+            size: CGSize(width: 56, height: 56),
+            cornerRadius: 6,
+            onTapPreview: onTapPreview,
+            onDelete: onDelete
+        )
     }
 }
 
@@ -608,8 +747,6 @@ private struct TaskRowView: View {
     var linkedTaskStatus: LinkedTaskStatus? = nil
     var isEditing: Bool = false
     @Binding var editDraft: String
-    @Binding var editScreenshotImages: [NSImage]
-    @Binding var showEditScreenshotFileImporter: Bool
     var isEditorFocused: FocusState<Bool>.Binding
     let onTap: () -> Void
     let onCommitEdit: () -> Void
@@ -624,15 +761,20 @@ private struct TaskRowView: View {
     var onToggleBacklog: (() -> Void)? = nil
 
     private var isProcessing: Bool { linkedTaskStatus == .processing }
+    private var canOpenLinkedAgent: Bool { linkedTaskStatus == .processing || linkedTaskStatus == .done || linkedTaskStatus == .stopped }
 
     @ViewBuilder
     private var leadingIcon: some View {
         if linkedTaskStatus == .processing {
             LightBlueSpinner(size: 18)
         } else if linkedTaskStatus == .done {
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: "clock.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(CursorTheme.semanticSuccess)
+                .foregroundStyle(CursorTheme.semanticReview)
+        } else if linkedTaskStatus == .stopped {
+            Image(systemName: "clock.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(CursorTheme.semanticReview)
         } else if task.completed {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 18))
@@ -646,11 +788,17 @@ private struct TaskRowView: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Button(action: onToggleComplete) {
-                leadingIcon
+            Group {
+                if isProcessing {
+                    leadingIcon
+                } else {
+                    Button(action: onToggleComplete) {
+                        leadingIcon
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isEditing)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(isEditing || isProcessing)
 
             VStack(alignment: .leading, spacing: 4) {
                 if isEditing && !task.completed {
@@ -676,20 +824,13 @@ private struct TaskRowView: View {
                             onCancelEdit()
                             return .handled
                         }
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !models.isEmpty {
-                            ModelPickerView(
-                                selectedModelId: task.modelId,
-                                models: models,
-                                onSelect: { onModelChange?($0) }
-                            )
-                            .disabled(isProcessing)
-                        }
-                        TaskScreenshotDraftView(
-                            images: $editScreenshotImages,
-                            showFileImporter: $showEditScreenshotFileImporter,
-                            thumbnailSize: CGSize(width: 72, height: 72)
+                    if !models.isEmpty {
+                        ModelPickerView(
+                            selectedModelId: task.modelId,
+                            models: models,
+                            onSelect: { onModelChange?($0) }
                         )
+                        .disabled(isProcessing)
                     }
                 } else {
                     HStack(alignment: .top, spacing: 8) {
@@ -701,6 +842,11 @@ private struct TaskRowView: View {
                             .lineLimit(4)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
+                            .onTapGesture {
+                                if canOpenLinkedAgent {
+                                    onTap()
+                                }
+                            }
                             .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
                     }
                 }
@@ -727,40 +873,42 @@ private struct TaskRowView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Menu {
-                Button(task.completed ? "Mark as not done" : "Mark as Done", systemImage: task.completed ? "circle" : "checkmark.circle") {
-                    onToggleComplete()
-                }
-                .disabled(isProcessing)
-                if !task.completed {
-                    Divider()
-                    Button("Send to new Agent", systemImage: "bubble.left.and.bubble.right") {
-                        onSendToAgent()
-                    }
-                    .disabled(isProcessing)
-                    Button("Edit task…", systemImage: "pencil") {
-                        onTap()
-                    }
-                    .disabled(isProcessing)
-                    if let onToggleBacklog {
-                        Button(isInBacklog ? "Move to Todo" : "Send to Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
-                            onToggleBacklog()
+            if !isProcessing {
+                Menu {
+                    if canOpenLinkedAgent {
+                        Button("Open linked Agent", systemImage: "arrow.up.right") {
+                            onTap()
                         }
-                        .disabled(isProcessing)
+                        Divider()
                     }
+                    if !task.completed {
+                        Button("Delegate", systemImage: "person") {
+                            onSendToAgent()
+                        }
+                        Button("Edit", systemImage: "pencil") {
+                            onTap()
+                        }
+                        if let onToggleBacklog {
+                            Button(isInBacklog ? "In Review" : "Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
+                                onToggleBacklog()
+                            }
+                        }
+                        Divider()
+                    }
+                    Button(task.completed ? "Mark as not done" : "Complete", systemImage: task.completed ? "circle" : "checkmark.circle") {
+                        onToggleComplete()
+                    }
+                    Button("Delete", systemImage: "trash", role: .destructive) {
+                        onDelete()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 }
-                Divider()
-                Button("Delete", systemImage: "trash", role: .destructive) {
-                    onDelete()
-                }
-                .disabled(isProcessing)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
         }
         .padding(CursorTheme.paddingCard)
         .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
@@ -769,28 +917,33 @@ private struct TaskRowView: View {
                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
         .contextMenu {
-            Button(task.completed ? "Mark as not done" : "Mark as Done", systemImage: task.completed ? "circle" : "checkmark.circle") {
-                onToggleComplete()
-            }
-            .disabled(isProcessing)
-            if !task.completed {
+            if canOpenLinkedAgent {
+                Button("Open linked Agent", systemImage: "arrow.up.right") {
+                    onTap()
+                }
                 Divider()
-                Button("Send to new Agent", systemImage: "bubble.left.and.bubble.right") {
+            }
+            if !task.completed {
+                Button("Delegate", systemImage: "person") {
                     onSendToAgent()
                 }
                 .disabled(isProcessing)
-                Button("Edit task…", systemImage: "pencil") {
+                Button("Edit", systemImage: "pencil") {
                     onTap()
                 }
                 .disabled(isProcessing)
                 if let onToggleBacklog {
-                    Button(isInBacklog ? "Move to Todo" : "Send to Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
+                    Button(isInBacklog ? "In Review" : "Backlog", systemImage: isInBacklog ? "circle.list" : "tray.full") {
                         onToggleBacklog()
                     }
                     .disabled(isProcessing)
                 }
+                Divider()
             }
-            Divider()
+            Button(task.completed ? "Mark as not done" : "Complete", systemImage: task.completed ? "circle" : "checkmark.circle") {
+                onToggleComplete()
+            }
+            .disabled(isProcessing)
             Button("Delete", systemImage: "trash", role: .destructive) {
                 onDelete()
             }
@@ -799,52 +952,3 @@ private struct TaskRowView: View {
     }
 
 }
-
-// MARK: - Screenshot draft (new task / edit): thumbnails + add controls
-
-private struct TaskScreenshotDraftView: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Binding var images: [NSImage]
-    @Binding var showFileImporter: Bool
-    var thumbnailSize: CGSize
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ForEach(Array(images.enumerated()), id: \.offset) { index, img in
-                Image(nsImage: img)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: thumbnailSize.width, height: thumbnailSize.height)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                    )
-                Button(action: { images.remove(at: index) }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                }
-                .buttonStyle(.plain)
-            }
-            if images.count < AppLimits.maxScreenshots {
-                Menu {
-                    Button("Paste from clipboard") {
-                        if let pasted = SubmittableTextEditor.imageFromPasteboard(NSPasteboard.general) {
-                            images.append(pasted)
-                        }
-                    }
-                    Button("Choose file…") {
-                        showFileImporter = true
-                    }
-                } label: {
-                    Label("Add screenshot", systemImage: "photo.badge.plus")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(CursorTheme.brandBlue)
-                }
-                .menuStyle(.borderlessButton)
-            }
-        }
-    }
-}
-

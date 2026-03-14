@@ -82,7 +82,7 @@ struct PinnedQuestionChip: View {
             } else if state == .stopped {
                 Image(systemName: "square.fill")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(CursorTheme.semanticError)
+                    .foregroundStyle(CursorTheme.semanticReview)
                     .padding(.top, 3)
             } else {
                 Image(systemName: "checkmark.circle.fill")

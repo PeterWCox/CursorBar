@@ -13,7 +13,7 @@ struct SettingsView: View {
     @State private var editingCommand: QuickActionCommand?
     @State private var showAddSheet = false
     @State private var debugURL: String = ""
-    @State private var startupScript: String = ""
+    @State private var startupScriptContents: String = ""
 
     var body: some View {
         Form {
@@ -23,15 +23,20 @@ struct SettingsView: View {
                     TextField("http://localhost:3000", text: $debugURL)
                         .textFieldStyle(.roundedBorder)
                 }
-                HStack {
-                    Text("Startup script:")
-                    TextField("e.g. scripts/start.sh or ./start.sh", text: $startupScript)
-                        .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Startup script (startup.sh)")
+                    TextEditor(text: $startupScriptContents)
+                        .font(.system(size: 12))
+                        .frame(minHeight: 60, maxHeight: 100)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
                 }
             } header: {
                 Text("Project settings")
             } footer: {
-                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup script is run with bash from the workspace (use \"Run startup script\" in the composer menu). Saved in .cursormetro/project.json.")
+                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup script is stored in .metro/startup.sh and run with bash (use \"Run startup script\" in the composer menu).")
             }
 
             Section {
@@ -127,18 +132,17 @@ struct SettingsView: View {
         .onAppear {
             reloadCommands()
             debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
-            startupScript = ProjectSettingsStorage.getStartupScript(workspacePath: workspacePath) ?? ""
+            startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
         }
         .onChange(of: workspacePath) { _, _ in
             reloadCommands()
             debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
-            startupScript = ProjectSettingsStorage.getStartupScript(workspacePath: workspacePath) ?? ""
+            startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
         }
         .onDisappear {
             let trimmedUrl = debugURL.trimmingCharacters(in: .whitespacesAndNewlines)
             ProjectSettingsStorage.setDebugURL(workspacePath: workspacePath, trimmedUrl.isEmpty ? nil : trimmedUrl)
-            let trimmedScript = startupScript.trimmingCharacters(in: .whitespacesAndNewlines)
-            ProjectSettingsStorage.setStartupScript(workspacePath: workspacePath, trimmedScript.isEmpty ? nil : trimmedScript)
+            ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, startupScriptContents.isEmpty ? nil : startupScriptContents)
         }
         // Add quick action sheet – commented out
         // .sheet(isPresented: $showAddSheet) {

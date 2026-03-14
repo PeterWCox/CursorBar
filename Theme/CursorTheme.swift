@@ -63,6 +63,8 @@ enum CursorTheme {
     static let semanticError = metroRed
     /// Success or “done” state. Prefer over Color.green for status.
     static let semanticSuccess = Color(red: 0.2, green: 0.78, blue: 0.35)
+    /// "Needs review" state (e.g. agent finished or stopped). Use for Review tab and stopped agent tabs.
+    static let semanticReview = Color(red: 1.0, green: 0.58, blue: 0.22)
     /// Spinner and loading accent (e.g. agent running). Use for progress/activity.
     static let spinnerBlue = Color(red: 0.45, green: 0.68, blue: 1.0)
     /// Soft error background (e.g. error card tint).

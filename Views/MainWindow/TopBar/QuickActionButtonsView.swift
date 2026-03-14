@@ -7,7 +7,6 @@ struct QuickActionButtonsView: View {
     var isDisabled: Bool = false
     var workspacePath: String = ""
     var onCommand: (QuickActionCommand) -> Void = { _ in }
-    var onOpenInBrowser: (() -> Void)? = nil
     var onDebug: (() -> Void)? = nil
     var onAdd: (() -> Void)? = nil
     /// Called after adding a new command so the parent can refresh the list.
@@ -24,16 +23,6 @@ struct QuickActionButtonsView: View {
                     action: { onCommand(cmd) },
                     isDisabled: isDisabled,
                     help: cmd.prompt
-                )
-            }
-
-            if let onOpenInBrowser {
-                ActionButton(
-                    title: "Open in Browser",
-                    icon: "globe",
-                    action: onOpenInBrowser,
-                    isDisabled: isDisabled,
-                    help: "Open project debug URL in Chrome, or open project folder in Finder if no URL is set."
                 )
             }
 

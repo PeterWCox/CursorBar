@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 // MARK: - Per-project tasks (todos)
-// Stored in .cursormetro/tasks.json; only tasks for the current project are shown in that project's Tasks view.
+// Stored in .metro/tasks.json; only tasks for the current project are shown in that project's Tasks view.
 
 struct ProjectTask: Identifiable, Codable, Equatable {
     var id: UUID
@@ -15,14 +15,16 @@ struct ProjectTask: Identifiable, Codable, Equatable {
     var deleted: Bool
     /// When the task was deleted; nil if not deleted.
     var deletedAt: Date?
-    /// Relative paths under .cursormetro (e.g. "screenshots/<id>_0.png") for task screenshots. Empty = no screenshots.
+    /// Relative paths under .metro (e.g. "screenshots/<id>_0.png") for task screenshots. Empty = no screenshots.
     var screenshotPaths: [String]
     /// Model ID to use when sending this task to an agent (e.g. "auto", "gpt-5.4-medium"). Defaults to Auto.
     var modelId: String
     /// When true, task appears in Backlog section instead of Todo (only for non-completed tasks).
     var backlog: Bool
+    /// Linked agent tab for this task when one has been created.
+    var agentTabID: UUID?
 
-    init(id: UUID = UUID(), content: String, createdAt: Date = Date(), completed: Bool = false, completedAt: Date? = nil, deleted: Bool = false, deletedAt: Date? = nil, screenshotPaths: [String] = [], modelId: String = AvailableModels.autoID, backlog: Bool = false) {
+    init(id: UUID = UUID(), content: String, createdAt: Date = Date(), completed: Bool = false, completedAt: Date? = nil, deleted: Bool = false, deletedAt: Date? = nil, screenshotPaths: [String] = [], modelId: String = AvailableModels.autoID, backlog: Bool = false, agentTabID: UUID? = nil) {
         self.id = id
         self.content = content
         self.createdAt = createdAt
@@ -33,10 +35,11 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         self.screenshotPaths = screenshotPaths
         self.modelId = modelId
         self.backlog = backlog
+        self.agentTabID = agentTabID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, content, createdAt, completed, completedAt, deleted, deletedAt, screenshotPath, screenshotPaths, modelId, backlog
+        case id, content, createdAt, completed, completedAt, deleted, deletedAt, screenshotPath, screenshotPaths, modelId, backlog, agentTabID
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +60,7 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         }
         modelId = try c.decodeIfPresent(String.self, forKey: .modelId) ?? AvailableModels.autoID
         backlog = try c.decodeIfPresent(Bool.self, forKey: .backlog) ?? false
+        agentTabID = try c.decodeIfPresent(UUID.self, forKey: .agentTabID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -71,6 +75,7 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         try c.encode(screenshotPaths, forKey: .screenshotPaths)
         try c.encode(modelId, forKey: .modelId)
         try c.encode(backlog, forKey: .backlog)
+        try c.encodeIfPresent(agentTabID, forKey: .agentTabID)
     }
 }
 
@@ -81,25 +86,26 @@ private struct ProjectTasksFile: Codable {
 enum ProjectTasksStorage {
     static func tasksURL(workspacePath: String) -> URL {
         URL(fileURLWithPath: workspacePath)
-            .appendingPathComponent(".cursormetro")
+            .appendingPathComponent(".metro")
             .appendingPathComponent("tasks.json")
     }
 
-    /// Directory for task screenshots: .cursormetro/screenshots/
+    /// Directory for task screenshots: .metro/screenshots/
     static func screenshotsDirectoryURL(workspacePath: String) -> URL {
         URL(fileURLWithPath: workspacePath)
-            .appendingPathComponent(".cursormetro")
+            .appendingPathComponent(".metro")
             .appendingPathComponent("screenshots", isDirectory: true)
     }
 
     /// Full file URL for a task's screenshot. Pass screenshotPath from the task (e.g. "screenshots/<id>.png").
     static func taskScreenshotFileURL(workspacePath: String, screenshotPath: String) -> URL {
         URL(fileURLWithPath: workspacePath)
-            .appendingPathComponent(".cursormetro")
+            .appendingPathComponent(".metro")
             .appendingPathComponent(screenshotPath)
     }
 
     private static func load(workspacePath: String) -> ProjectTasksFile {
+        migrateCursormetroToMetroIfNeeded(workspacePath: workspacePath)
         let url = tasksURL(workspacePath: workspacePath)
         if let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(ProjectTasksFile.self, from: data) {
@@ -116,11 +122,40 @@ enum ProjectTasksStorage {
         try? data.write(to: url)
     }
 
-    /// Active tasks only (not deleted). Todo + completed shown in main list.
+    /// Active tasks only (not deleted). Newest first so new tasks appear at top of In Review/Backlog.
     static func tasks(workspacePath: String) -> [ProjectTask] {
         load(workspacePath: workspacePath).tasks
             .filter { !$0.deleted }
-            .sorted { $0.createdAt < $1.createdAt }
+            .sorted { $0.createdAt > $1.createdAt }
+    }
+
+    static func task(workspacePath: String, id: UUID) -> ProjectTask? {
+        load(workspacePath: workspacePath).tasks.first { $0.id == id }
+    }
+
+    static func linkedAgentTabID(workspacePath: String, taskID: UUID) -> UUID? {
+        task(workspacePath: workspacePath, id: taskID)?.agentTabID
+    }
+
+    static func taskLinkedToAgentTab(workspacePath: String, agentTabID: UUID) -> ProjectTask? {
+        load(workspacePath: workspacePath).tasks.first { $0.agentTabID == agentTabID }
+    }
+
+    static func assignAgentTab(workspacePath: String, taskID: UUID, agentTabID: UUID) {
+        var file = load(workspacePath: workspacePath)
+        guard let index = file.tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        for taskIndex in file.tasks.indices where file.tasks[taskIndex].agentTabID == agentTabID {
+            file.tasks[taskIndex].agentTabID = nil
+        }
+        file.tasks[index].agentTabID = agentTabID
+        save(workspacePath: workspacePath, file)
+    }
+
+    static func clearAgentTab(workspacePath: String, taskID: UUID) {
+        var file = load(workspacePath: workspacePath)
+        guard let index = file.tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        file.tasks[index].agentTabID = nil
+        save(workspacePath: workspacePath, file)
     }
 
     /// Soft-deleted tasks, newest first.
@@ -130,9 +165,9 @@ enum ProjectTasksStorage {
             .sorted { ($0.deletedAt ?? .distantPast) >= ($1.deletedAt ?? .distantPast) }
     }
 
-    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], modelId: String = AvailableModels.autoID) -> ProjectTask {
+    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], modelId: String = AvailableModels.autoID, backlog: Bool = false) -> ProjectTask {
         var file = load(workspacePath: workspacePath)
-        var task = ProjectTask(content: content, modelId: modelId)
+        var task = ProjectTask(content: content, modelId: modelId, backlog: backlog)
         let dir = screenshotsDirectoryURL(workspacePath: workspacePath)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var paths: [String] = []
@@ -147,7 +182,7 @@ enum ProjectTasksStorage {
             }
         }
         task.screenshotPaths = paths
-        file.tasks.append(task)
+        file.tasks.insert(task, at: 0)
         save(workspacePath: workspacePath, file)
         return task
     }
@@ -165,7 +200,7 @@ enum ProjectTasksStorage {
         save(workspacePath: workspacePath, file)
     }
 
-    /// Update the task's screenshots: save images to .cursormetro/screenshots/<id>_0.png, _1.png, etc.; remove any old files not in the new set.
+    /// Update the task's screenshots: save images to .metro/screenshots/<id>_0.png, _1.png, etc.; remove any old files not in the new set.
     static func updateTaskScreenshots(workspacePath: String, id: UUID, images: [NSImage]) {
         var file = load(workspacePath: workspacePath)
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }

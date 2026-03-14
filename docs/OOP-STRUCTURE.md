@@ -61,8 +61,8 @@ Other UI:
 
 ## 6. Helpers & storage
 
-- **ProjectTasksStorage** — Reads/writes per-project tasks (and task screenshots) under `.cursormetro/` (e.g. `tasks.json`, `screenshots/`). Uses **ProjectTask** and a private **ProjectTasksFile** Codable.
-- **ProjectSettingsStorage** — Per-project settings (e.g. under `.cursormetro`).
+- **ProjectTasksStorage** — Reads/writes per-project tasks (and task screenshots) under `.metro/` (e.g. `tasks.json`, `screenshots/`). Uses **ProjectTask** and a private **ProjectTasksFile** Codable.
+- **ProjectSettingsStorage** — Per-project settings (e.g. under `.metro`).
 - **AppPreferences** — UserDefaults-backed app preferences (e.g. projects root, disabled models, terminal app).
 - **WorkspaceHelpers** — Path/workspace utilities; **PreferredTerminalApp** enum for terminal app selection.
 - **TooltipModifier** — SwiftUI modifier for tooltips.
@@ -197,7 +197,7 @@ Theme:
 
 ```yaml
 Project (workspace path):
-  has many: Tasks          # ProjectTask in .cursormetro/tasks.json
+  has many: Tasks          # ProjectTask in .metro/tasks.json
   has many: Conversations  # AgentTab with this workspacePath (tabs are global; association by path)
 
 Task (ProjectTask):
@@ -210,7 +210,7 @@ Conversation (AgentTab):
   has one: conversationId   # cursorChatId, backend session id for --resume; persisted in SavedAgentTab
 ```
 
-- **Tasks** (**ProjectTask**) live per project in **ProjectTasksStorage** (`.cursormetro/tasks.json`). The **TasksListView** shows them for the selected project; you can add, edit, complete, and “send to agent.”
+- **Tasks** (**ProjectTask**) live per project in **ProjectTasksStorage** (`.metro/tasks.json`). The **TasksListView** shows them for the selected project; you can add, edit, complete, and “send to agent.”
 - **Agent tabs** (**AgentTab**) are conversations. An agent tab can be **linked** to a task via `linkedTaskID`; that link is what drives the status badge on the tab chip in the sidebar.
 - **Task status** (**LinkedTaskStatus**: open, processing, done, stopped) is the *agent’s* view of the linked task: open = not started, processing = agent running, done = completed, stopped = run stopped. The sidebar **TabChip** shows this status (and **LightBlueSpinner** when running).
 - **conversationId** — The Cursor backend’s ID for this chat session. On **AgentTab** it’s stored as **cursorChatId** (optional). Passed to **AgentRunner.stream(…, conversationId:)** as `--resume <id>` so the CLI continues the same conversation. Set when a run starts (from backend) and updated when a run ends; persisted in **SavedAgentTab** so conversations can be resumed after app restart.

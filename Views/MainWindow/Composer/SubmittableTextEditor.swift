@@ -50,6 +50,115 @@ final class PasteAwareTextView: NSTextView {
     }
 }
 
+// MARK: - Single-line paste-aware field (e.g. new task row)
+
+/// Single-line NSTextView-based field so Cmd+V and Edit > Paste are handled by our PasteAwareTextView (field editor would steal paste on NSTextField).
+struct SingleLinePasteAwareField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = ""
+    var onSubmit: () -> Void
+    var onCancel: () -> Void
+    var onPasteImage: (() -> Void)?
+    var colorScheme: ColorScheme = .dark
+    var onFocusRequested: ((@escaping () -> Void) -> Void)?
+
+    func makeCoordinator() -> SingleLinePasteAwareField.Coordinator { Coordinator(self) }
+
+    private static func textColor(for colorScheme: ColorScheme) -> NSColor {
+        colorScheme == .dark
+            ? NSColor.white.withAlphaComponent(0.92)
+            : NSColor.black.withAlphaComponent(0.88)
+    }
+
+    private static func typingAttributes(for colorScheme: ColorScheme) -> [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.systemFont(ofSize: 14, weight: .regular),
+            .foregroundColor: textColor(for: colorScheme)
+        ]
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        let textView = PasteAwareTextView()
+        textView.delegate = context.coordinator
+        textView.onPasteImage = onPasteImage
+        textView.isRichText = false
+        textView.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
+        textView.backgroundColor = .clear
+        textView.drawsBackground = false
+        textView.textColor = Self.textColor(for: colorScheme)
+        textView.insertionPointColor = Self.textColor(for: colorScheme)
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.allowsUndo = true
+        textView.textContainerInset = NSSize(width: 0, height: 4)
+        textView.isVerticallyResizable = false
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: 24)
+        textView.minSize = NSSize(width: 0, height: 24)
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.autoresizingMask = [.width]
+        context.coordinator.textView = textView
+
+        if let callback = onFocusRequested {
+            let focusClosure: () -> Void = { [weak scrollView] in
+                guard let sv = scrollView, let tv = sv.documentView as? NSTextView else { return }
+                sv.window?.makeFirstResponder(tv)
+            }
+            callback(focusClosure)
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        context.coordinator.parent = self
+        textView.textColor = Self.textColor(for: colorScheme)
+        textView.insertionPointColor = Self.textColor(for: colorScheme)
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
+        (textView as? PasteAwareTextView)?.onPasteImage = onPasteImage
+        if textView.string != text {
+            textView.string = text
+        }
+    }
+
+    class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: SingleLinePasteAwareField
+        weak var textView: NSTextView?
+
+        init(_ parent: SingleLinePasteAwareField) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = textView else { return }
+            parent.text = tv.string
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                parent.onCancel()
+                return true
+            }
+            return false
+        }
+    }
+}
+
 struct SubmittableTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isDisabled: Bool
@@ -69,6 +178,13 @@ struct SubmittableTextEditor: NSViewRepresentable {
             : NSColor.black.withAlphaComponent(0.88)
     }
 
+    private static func typingAttributes(for colorScheme: ColorScheme) -> [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+            .foregroundColor: textColor(for: colorScheme)
+        ]
+    }
+
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
         let textView = PasteAwareTextView()
@@ -76,7 +192,9 @@ struct SubmittableTextEditor: NSViewRepresentable {
         textView.onPasteImage = onPasteImage
         textView.isRichText = false
         textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
         textView.backgroundColor = .clear
+        textView.drawsBackground = false
         textView.textColor = Self.textColor(for: colorScheme)
         textView.insertionPointColor = Self.textColor(for: colorScheme)
         textView.isEditable = true
@@ -106,6 +224,7 @@ struct SubmittableTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         textView.textColor = Self.textColor(for: colorScheme)
         textView.insertionPointColor = Self.textColor(for: colorScheme)
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
         if textView.string != text {
             textView.string = text
         }

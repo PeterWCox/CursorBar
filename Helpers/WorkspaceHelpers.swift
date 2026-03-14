@@ -125,6 +125,7 @@ func deleteScreenshotCacheOlderThan(days: Int) {
 
 // MARK: - Project folders and Git
 
+/// Returns immediate subdirectories of `rootPath` that contain a `.metro` directory (Metro projects only).
 func loadDevFolders(rootPath: String) -> [URL] {
     let resolvedRootPath = AppPreferences.resolvedProjectsRootPath(rootPath)
     let url = URL(fileURLWithPath: resolvedRootPath)
@@ -133,9 +134,26 @@ func loadDevFolders(rootPath: String) -> [URL] {
         includingPropertiesForKeys: [.isDirectoryKey],
         options: [.skipsHiddenFiles]
     ) else { return [] }
+    let fm = FileManager.default
     return contents
-        .filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+        .filter { candidate in
+            guard (try? candidate.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return false }
+            let metroDir = candidate.appendingPathComponent(".metro", isDirectory: true)
+            var isDir: ObjCBool = false
+            return fm.fileExists(atPath: metroDir.path, isDirectory: &isDir) && isDir.boolValue
+        }
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+}
+
+/// Reads the default branch name from .git/HEAD (e.g. "ref: refs/heads/main" -> "main"). Returns nil if not a symbolic ref or not a git repo.
+func gitDefaultBranchName(workspacePath: String) -> String? {
+    let headURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(".git/HEAD", isDirectory: false)
+    guard let content = try? String(contentsOf: headURL, encoding: .utf8) else { return nil }
+    let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+    let prefix = "ref: refs/heads/"
+    guard trimmed.hasPrefix(prefix) else { return nil }
+    let name = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? nil : name
 }
 
 /// Returns (current branch name, sorted list of local branch names) for the workspace. Empty if not a git repo.
@@ -153,7 +171,7 @@ func loadGitBranches(workspacePath: String) -> (current: String, branches: [Stri
     process.waitUntilExit()
     guard process.terminationStatus == 0 else { return ("", []) }
     let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    let list = (String(data: data, encoding: .utf8) ?? "")
+    var list = (String(data: data, encoding: .utf8) ?? "")
         .split(separator: "\n")
         .map(String.init)
         .filter { !$0.isEmpty }
@@ -168,7 +186,12 @@ func loadGitBranches(workspacePath: String) -> (current: String, branches: [Stri
     guard (try? currentProcess.run()) != nil else { return (list.first ?? "", list) }
     currentProcess.waitUntilExit()
     let currentData = currentPipe.fileHandleForReading.readDataToEndOfFile()
-    let current = (String(data: currentData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    var current = (String(data: currentData, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    // Fresh git init: no commits yet so rev-parse returns "HEAD" but .git/HEAD points to refs/heads/main (or init.defaultBranch). Show that name.
+    if current == "HEAD", list.isEmpty, let defaultBranch = gitDefaultBranchName(workspacePath: workspacePath) {
+        current = defaultBranch
+        list = [defaultBranch]
+    }
     return (current.isEmpty ? (list.first ?? "") : current, list)
 }
 
@@ -483,26 +506,29 @@ func openWorkspaceInFinder(workspacePath: String) {
     NSWorkspace.shared.open(url)
 }
 
+// MARK: - .cursormetro → .metro migration
+
+/// If the workspace has `.cursormetro` but not `.metro`, renames `.cursormetro` to `.metro`. Call before reading/writing project settings or tasks.
+func migrateCursormetroToMetroIfNeeded(workspacePath: String) {
+    let fm = FileManager.default
+    let workspace = URL(fileURLWithPath: workspacePath)
+    let oldDir = workspace.appendingPathComponent(".cursormetro", isDirectory: true)
+    let newDir = workspace.appendingPathComponent(".metro", isDirectory: true)
+    guard fm.fileExists(atPath: oldDir.path), !fm.fileExists(atPath: newDir.path) else { return }
+    try? fm.moveItem(at: oldDir, to: newDir)
+}
+
 // MARK: - Startup script (run with bash in terminal)
 
-/// Launches the project's startup script (path in .cursormetro/project.json) with bash in the preferred terminal.
-/// Script path is relative to workspace or absolute. Returns an error message on failure, nil on success.
+/// Launches the project's startup script (`.metro/startup.sh`) with bash in the preferred terminal.
+/// Returns an error message on failure, nil on success.
 func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
-    guard let scriptSpec = ProjectSettingsStorage.getStartupScript(workspacePath: workspacePath),
-          !scriptSpec.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return "No startup script configured for this project. Set it in Settings → Project settings."
-    }
-
-    let workspaceURL = URL(fileURLWithPath: workspacePath)
-    let scriptPath: String
-    if (scriptSpec as NSString).isAbsolutePath {
-        scriptPath = scriptSpec
-    } else {
-        scriptPath = workspaceURL.appendingPathComponent(scriptSpec).path
-    }
-
-    guard FileManager.default.fileExists(atPath: scriptPath) else {
-        return "Startup script not found: \(scriptSpec)"
+    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: workspacePath)
+    let scriptPath = scriptURL.path
+    guard FileManager.default.fileExists(atPath: scriptPath),
+          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath),
+          !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return "No startup script configured for this project. Add script content in Dashboard → Settings (startup.sh)."
     }
 
     guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {

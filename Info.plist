@@ -13,7 +13,7 @@
     <key>CFBundleDisplayName</key>
     <string>Cursor Metro</string>
     <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
+    <string>Cursor Metro</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

@@ -8,8 +8,10 @@ import Darwin
 /// SwiftUI wrapper for SwiftTerm's LocalProcessTerminalView. Runs a shell in the given workspace directory.
 struct EmbeddedTerminalView: NSViewRepresentable {
     /// Container that draws a terminal-like background and insets the terminal content so text doesn't hug the edges.
+    /// Forwards first responder and mouse clicks to the embedded terminal so Control+C (SIGINT) and other keys reach the process.
     final class TerminalContainerView: NSView {
         static let contentInset: CGFloat = 18
+        weak var embeddedTerminal: LocalProcessTerminalView?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -20,10 +22,26 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         required init?(coder: NSCoder) {
             fatalError("init(coder:) has not been implemented")
         }
+
+        override var acceptsFirstResponder: Bool { true }
+
+        override func becomeFirstResponder() -> Bool {
+            guard let terminal = embeddedTerminal ?? subviews.first as? LocalProcessTerminalView else { return false }
+            return window?.makeFirstResponder(terminal) ?? false
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            if let terminal = embeddedTerminal ?? subviews.first as? LocalProcessTerminalView {
+                window?.makeFirstResponder(terminal)
+            }
+            super.mouseDown(with: event)
+        }
     }
     let workspacePath: String
     /// When true, the terminal view is made first responder so it receives key events (e.g. Control+C).
     var isSelected: Bool = true
+    /// If set, run this command in the shell at startup (e.g. project startup script). Runs in workspace directory.
+    var initialCommand: String? = nil
 
     func makeNSView(context: Context) -> TerminalContainerView {
         let container = TerminalContainerView(frame: .zero)
@@ -35,18 +53,30 @@ struct EmbeddedTerminalView: NSViewRepresentable {
         terminal.processDelegate = context.coordinator
         terminal.translatesAutoresizingMaskIntoConstraints = false
 
-        let shell = Self.userShell
-        let execName = "-" + (shell as NSString).lastPathComponent
         let dir = (workspacePath as NSString).expandingTildeInPath
-        terminal.startProcess(
-            executable: shell,
-            args: [],
-            environment: nil,
-            execName: execName,
-            currentDirectory: dir
-        )
+        let cmd = initialCommand?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cmd = cmd, !cmd.isEmpty {
+            terminal.startProcess(
+                executable: "/bin/bash",
+                args: ["-c", cmd],
+                environment: nil,
+                execName: "bash",
+                currentDirectory: dir
+            )
+        } else {
+            let shell = Self.userShell
+            let execName = "-" + (shell as NSString).lastPathComponent
+            terminal.startProcess(
+                executable: shell,
+                args: [],
+                environment: nil,
+                execName: execName,
+                currentDirectory: dir
+            )
+        }
 
         context.coordinator.terminalView = terminal
+        container.embeddedTerminal = terminal
         container.addSubview(terminal)
         let inset = TerminalContainerView.contentInset
         NSLayoutConstraint.activate([
@@ -59,10 +89,10 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: TerminalContainerView, context: Context) {
-        guard isSelected, let terminal = context.coordinator.terminalView else { return }
-        // Make the terminal first responder so it receives key events (Control+C, etc.).
+        guard isSelected else { return }
+        // Focus the container so it forwards to the terminal; terminal then receives key events (Control+C/SIGINT, etc.).
         DispatchQueue.main.async {
-            terminal.window?.makeFirstResponder(terminal)
+            nsView.window?.makeFirstResponder(nsView)
         }
     }
 

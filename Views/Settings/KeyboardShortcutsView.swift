@@ -12,11 +12,19 @@ private struct ShortcutRow: Identifiable {
 
 struct KeyboardShortcutsContentView: View {
     private static let sections: [(title: String, rows: [ShortcutRow])] = [
+        ("App", [
+            ShortcutRow(keys: ["⌘,"], action: "Open Settings"),
+            ShortcutRow(keys: ["⌘0"], action: "Center popup (menu bar only)"),
+            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor Metro"),
+            ShortcutRow(keys: ["⎋ Esc"], action: "Dismiss modal / Cancel"),
+        ]),
         ("Tabs", [
-            ShortcutRow(keys: ["⌘N", "⌘T"], action: "New agent (same project)"),
-            ShortcutRow(keys: ["⌘P"], action: "Add project"),
+            ShortcutRow(keys: ["⌘P"], action: "Preview"),
+            ShortcutRow(keys: ["⌘T"], action: "New task"),
+            ShortcutRow(keys: ["⌘G"], action: "Focus Git tab for current project"),
             ShortcutRow(keys: ["⌘O"], action: "Open in Browser (or set URL)"),
-            ShortcutRow(keys: ["⌘W"], action: "Close tab"),
+            ShortcutRow(keys: ["⌘."], action: "Open current project in Cursor"),
+            ShortcutRow(keys: ["⌘W"], action: "Close tab or terminal"),
             ShortcutRow(keys: ["⌘⇧T"], action: "Reopen closed tab"),
         ]),
         ("Navigation", [
@@ -24,14 +32,14 @@ struct KeyboardShortcutsContentView: View {
         ]),
         ("Composer", [
             ShortcutRow(keys: ["↵ Return"], action: "Send message"),
-            ShortcutRow(keys: ["⇧↵ Shift + Return"], action: "New line in message"),
+            ShortcutRow(keys: ["⇧↵"], action: "New line in message"),
             ShortcutRow(keys: ["⌘V"], action: "Paste (including screenshots)"),
         ]),
         ("Agent", [
             ShortcutRow(keys: ["⌃C"], action: "Stop agent"),
         ]),
         ("Window", [
-            ShortcutRow(keys: ["⌘B", "⌘S"], action: "Show/hide panel"),
+            ShortcutRow(keys: ["⌘B", "⌘S"], action: "Collapse/expand main content"),
         ]),
     ]
 
@@ -138,10 +146,10 @@ struct KeyboardShortcutsView: View {
 
     private var header: some View {
         HStack {
-            Image(systemName: "keyboard")
+            Image(systemName: "command")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(CursorTheme.brandBlue)
-            Text("Keyboard Shortcuts")
+            Text("Shortcuts")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(CursorTheme.textPrimary)
             Spacer()

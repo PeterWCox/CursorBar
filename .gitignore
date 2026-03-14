@@ -43,7 +43,7 @@ out/
 dist/
 
 # App runtime data (per-workspace project.json, tasks.json)
-.cursormetro/
+.metro/
 
 # IDE / Editor
 .idea/

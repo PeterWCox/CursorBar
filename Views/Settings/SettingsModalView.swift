@@ -5,8 +5,9 @@ import AppKit
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case general = "General"
+    case preview = "Preview"
     case models = "Models"
-    case keyboardShortcuts = "Keyboard Shortcuts"
+    case keyboardShortcuts = "Shortcuts"
     case about = "About"
 
     var id: String { rawValue }
@@ -14,8 +15,9 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "slider.horizontal.3"
+        case .preview: return "globe"
         case .models: return "cpu"
-        case .keyboardShortcuts: return "keyboard"
+        case .keyboardShortcuts: return "command"
         case .about: return "info.circle"
         }
     }
@@ -98,6 +100,10 @@ struct SettingsModalView: View {
             case .general:
                 SettingsPaneContainer(title: SettingsPane.general.rawValue) {
                     GeneralSettingsPaneContent()
+                }
+            case .preview:
+                SettingsPaneContainer(title: SettingsPane.preview.rawValue) {
+                    PreviewSettingsPaneContent()
                 }
             case .models:
                 SettingsPaneContainer(title: SettingsPane.models.rawValue) {
@@ -225,14 +231,101 @@ private struct GeneralSettingsPaneContent: View {
     }
 }
 
+// MARK: - Preview pane (View in Browser URL, startup script)
+
+private struct PreviewSettingsPaneContent: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject var appState: AppState
+    @State private var debugURL: String = ""
+    @State private var startupScriptContents: String = ""
+
+    private var workspacePath: String {
+        appState.tabManager.activeProjectPath ?? appState.workspacePath
+    }
+
+    private var activeProjectPath: String? {
+        appState.tabManager.activeProjectPath
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("These settings apply to the currently selected project. View in Browser opens the URL in Chrome; the startup script runs when you use \"Run startup script\" from the composer menu.")
+                .font(.system(size: 14))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("View in Browser URL")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                TextField("http://localhost:3000", text: $debugURL)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Startup script (startup.sh)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                Text("Stored in `.metro/startup.sh`, run with bash.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                TextEditor(text: $startupScriptContents)
+                    .font(.system(size: 12))
+                    .scrollContentBackground(.hidden)
+                    .padding(8)
+                    .frame(minHeight: 80, maxHeight: 120)
+                    .background(CursorTheme.editor(for: colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                    )
+            }
+
+            if let path = activeProjectPath {
+                Text("Project: \((path as NSString).lastPathComponent)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            loadFromProject()
+        }
+        .onChange(of: appState.tabManager.selectedProjectPath) { _, _ in
+            loadFromProject()
+        }
+        .onDisappear {
+            let trimmedUrl = debugURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            ProjectSettingsStorage.setDebugURL(workspacePath: workspacePath, trimmedUrl.isEmpty ? nil : trimmedUrl)
+            ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, startupScriptContents.isEmpty ? nil : startupScriptContents)
+        }
+    }
+
+    private func loadFromProject() {
+        debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
+        startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
+    }
+}
+
 // MARK: - Models pane (Cursor-like: toggles, default set, View All)
 
 private struct ModelsSettingsPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
+    @AppStorage(AppPreferences.modelsSortOrderKey) private var modelsSortOrderRaw: String = AppPreferences.defaultModelsSortOrderRaw
     @State private var modelSearchText: String = ""
     @State private var showAllModels: Bool = false
+
+    private var modelsSortOrder: ModelsSortOrder {
+        ModelsSortOrder(rawValue: modelsSortOrderRaw) ?? .defaultOrder
+    }
 
     private var allModelIds: Set<String> {
         Set(appState.availableModels.map(\.id))
@@ -243,18 +336,38 @@ private struct ModelsSettingsPaneContent: View {
     }
 
     private var displayedModels: [ModelOption] {
-        let list = showAllModels
+        var list = showAllModels
             ? appState.availableModels
             : appState.availableModels.filter { AvailableModels.isDefaultShown(modelId: $0.id) }
         let search = modelSearchText.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !search.isEmpty else { return list }
-        return list.filter {
-            $0.label.lowercased().contains(search) || $0.id.lowercased().contains(search)
+        if !search.isEmpty {
+            list = list.filter {
+                $0.label.lowercased().contains(search) || $0.id.lowercased().contains(search)
+            }
         }
+        if modelsSortOrder == .alphabetical {
+            list = list.sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+        }
+        return list
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            // Order: A–Z (toggled) first, then Default (untoggled)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Order")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                Picker("Order", selection: $modelsSortOrderRaw) {
+                    ForEach(ModelsSortOrder.allCases, id: \.rawValue) { order in
+                        Text(order.displayName).tag(order.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             // Search and refresh
             HStack(spacing: 8) {
                 TextField("Search models...", text: $modelSearchText)

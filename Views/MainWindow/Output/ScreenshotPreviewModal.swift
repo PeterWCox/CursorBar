@@ -2,10 +2,21 @@ import SwiftUI
 import AppKit
 
 // MARK: - Full-screen modal to preview a screenshot at larger size
+// Pair with ScreenshotThumbnailView: parent shows this modal when user taps a thumbnail (same pattern
+// in PopoutView, TasksListView for existing tasks and new/edit task draft screenshots).
 
 struct ScreenshotPreviewModal: View {
-    var imageURL: URL
+    /// Saved screenshot (file URL). Used when previewing existing task or conversation screenshots.
+    var imageURL: URL? = nil
+    /// In-memory image (e.g. new or edit task draft). When set, shown instead of loading from imageURL.
+    var image: NSImage? = nil
     @Binding var isPresented: Bool
+
+    private var displayImage: NSImage? {
+        if let image { return image }
+        if let url = imageURL { return NSImage(contentsOf: url) }
+        return nil
+    }
 
     var body: some View {
         ZStack {
@@ -27,7 +38,7 @@ struct ScreenshotPreviewModal: View {
                     .padding(16)
                 }
 
-                if let nsImage = NSImage(contentsOf: imageURL) {
+                if let nsImage = displayImage {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
