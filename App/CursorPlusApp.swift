@@ -518,6 +518,114 @@ class FloatingPanel: NSPanel {
     static let requestNewTaskNotification = Notification.Name("FloatingPanelRequestNewTask")
 }
 
+final class HangDiagnostics {
+    static let shared = HangDiagnostics()
+
+    static var logURL: URL {
+        shared.fileURL
+    }
+
+    private let queue = DispatchQueue(label: "CursorPlus.HangDiagnostics")
+    private let fileURL: URL
+    private let formatter = ISO8601DateFormatter()
+    private var isStarted = false
+    private var watchdogTimer: DispatchSourceTimer?
+    private var lastHeartbeatAt = Date()
+    private var lastStallLoggedAt: Date?
+    private var snapshot: [String: String] = [:]
+
+    private init() {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            .appendingPathComponent("CursorPlus", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        fileURL = dir.appendingPathComponent("hang-diagnostics.log")
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    }
+
+    func start() {
+        queue.async {
+            guard !self.isStarted else { return }
+            self.isStarted = true
+            self.appendLocked(event: "diagnostics-started", metadata: [
+                "logPath": self.fileURL.path
+            ])
+            self.startWatchdogLocked()
+            DispatchQueue.main.async {
+                self.scheduleHeartbeat()
+            }
+        }
+    }
+
+    func updateSnapshot(_ snapshot: [String: String]) {
+        queue.async {
+            self.snapshot = snapshot
+        }
+    }
+
+    func record(_ event: String, metadata: [String: String] = [:]) {
+        queue.async {
+            self.appendLocked(event: event, metadata: metadata)
+        }
+    }
+
+    private func scheduleHeartbeat() {
+        queue.async {
+            self.lastHeartbeatAt = Date()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.scheduleHeartbeat()
+        }
+    }
+
+    private func startWatchdogLocked() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1)
+        timer.setEventHandler { [weak self] in
+            self?.checkForStallLocked()
+        }
+        watchdogTimer = timer
+        timer.resume()
+    }
+
+    private func checkForStallLocked() {
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastHeartbeatAt)
+        guard elapsed >= 2.0 else { return }
+        if let lastStallLoggedAt, now.timeIntervalSince(lastStallLoggedAt) < 8.0 {
+            return
+        }
+        lastStallLoggedAt = now
+
+        var metadata = snapshot
+        metadata["stallSeconds"] = String(format: "%.2f", elapsed)
+        appendLocked(event: "main-thread-stall-detected", metadata: metadata)
+    }
+
+    private func appendLocked(event: String, metadata: [String: String]) {
+        let timestamp = formatter.string(from: Date())
+        let payload = metadata
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                let sanitized = value.replacingOccurrences(of: "\n", with: "\\n")
+                return "\(key)=\(sanitized)"
+            }
+            .joined(separator: " ")
+        let line = payload.isEmpty ? "\(timestamp) \(event)\n" : "\(timestamp) \(event) \(payload)\n"
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+        guard let data = line.data(using: .utf8) else { return }
+        do {
+            let handle = try FileHandle(forWritingTo: fileURL)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } catch {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+}
+
 class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
@@ -554,6 +662,7 @@ class AppState: ObservableObject {
     }
 
     init() {
+        HangDiagnostics.shared.start()
         let manager = TabManager(loadedState: TabManagerPersistence.load())
         tabManager = manager
         openProjectCount = manager.openProjectCount
@@ -574,6 +683,7 @@ class AppState: ObservableObject {
     /// Call when tasks are updated (e.g. toggled completed) so the sidebar refreshes and can hide completed-task agent tabs.
     func notifyTasksDidUpdate() {
         taskListRevision = UUID()
+        HangDiagnostics.shared.record("tasks-did-update")
     }
 
     var workspaceDisplayName: String {

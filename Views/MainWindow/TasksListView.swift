@@ -36,11 +36,15 @@ struct TasksListView: View {
     var onOpenLinkedAgent: (ProjectTask) -> Void = { _ in }
     /// Continue a stopped agent: focus its tab and send the "continue" prompt.
     var onContinueAgent: (ProjectTask) -> Void = { _ in }
+    /// Reset a stopped agent: close the linked tab and start a fresh agent with the task content.
+    var onResetAgent: (ProjectTask) -> Void = { _ in }
     /// Stop the agent currently running for a task (from the Processing section).
     var onStopAgent: (ProjectTask) -> Void = { _ in }
     /// Called when any task is updated (e.g. completed, edited) so the sidebar can refresh (e.g. hide agent tabs for completed tasks).
     var onTasksDidUpdate: () -> Void = { }
     var onDismiss: () -> Void
+    /// When false, the list does not show its own header (e.g. when the panel title row already shows "Tasks" + project).
+    var showHeader: Bool = true
 
     @State private var tasks: [ProjectTask] = []
     @State private var editingTask: ProjectTask?
@@ -70,6 +74,31 @@ struct TasksListView: View {
     private func reloadTasks() {
         tasks = ProjectTasksStorage.tasks(workspacePath: workspacePath)
         deletedTasksList = ProjectTasksStorage.deletedTasks(workspacePath: workspacePath)
+    }
+
+    private func hangDiagnosticsSnapshot() -> [String: String] {
+        [
+            "tasksWorkspacePath": workspacePath,
+            "tasksSelectedTab": selectedTasksTab.rawValue,
+            "tasksBacklogCount": "\(backlogTasks.count)",
+            "tasksInProgressCount": "\(inProgressTasks.count)",
+            "tasksProcessingCount": "\(processingTasks.count)",
+            "tasksReviewCount": "\(reviewTasks.count)",
+            "tasksStoppedCount": "\(stoppedTasks.count)",
+            "tasksTodoCount": "\(todoTasks.count)",
+            "tasksCompletedCount": "\(completedTasks.count)",
+            "tasksDeletedCount": "\(deletedTasksList.count)",
+            "tasksIsAddingNew": isAddingNewTask ? "true" : "false"
+        ]
+    }
+
+    private func updateHangDiagnosticsSnapshot() {
+        HangDiagnostics.shared.updateSnapshot(hangDiagnosticsSnapshot())
+    }
+
+    private func recordHangEvent(_ event: String, metadata: [String: String] = [:]) {
+        updateHangDiagnosticsSnapshot()
+        HangDiagnostics.shared.record(event, metadata: metadata)
     }
 
     private var backlogTasks: [ProjectTask] {
@@ -114,6 +143,10 @@ struct TasksListView: View {
     private func commitNewTask() {
         let trimmed = newTaskDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
+            recordHangEvent("tasks-commit-new-task", metadata: [
+                "contentLength": "\(trimmed.count)",
+                "screenshots": "\(newTaskDraftScreenshots.count)"
+            ])
             let taskState: TaskState = (selectedTasksTab == .backlog) ? .backlog : .inProgress
             _ = ProjectTasksStorage.addTask(
                 workspacePath: workspacePath,
@@ -132,6 +165,7 @@ struct TasksListView: View {
     }
 
     private func cancelNewTask() {
+        recordHangEvent("tasks-cancel-new-task")
         newTaskDraft = ""
         newTaskDraftScreenshots = []
         taskScreenshotPreviewImage = nil
@@ -172,6 +206,10 @@ struct TasksListView: View {
 
     private func selectTasksTab(_ tab: TasksListTab) {
         guard selectedTasksTab != tab else { return }
+        recordHangEvent("tasks-select-tab", metadata: [
+            "from": selectedTasksTab.rawValue,
+            "to": tab.rawValue
+        ])
         if tab != .inProgress && tab != .backlog && isAddingNewTask {
             cancelNewTask()
         }
@@ -180,7 +218,7 @@ struct TasksListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if showHeader { header }
             tasksTabBar
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
@@ -208,6 +246,7 @@ struct TasksListView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             reloadTasks()
+            updateHangDiagnosticsSnapshot()
             // Handle Cmd+T when it fired before this view was in the hierarchy (trigger already true).
             if triggerAddNewTask.wrappedValue {
                 showNewTaskComposer(selecting: .inProgress)
@@ -215,6 +254,10 @@ struct TasksListView: View {
             }
         }
         .onChange(of: workspacePath) { _, _ in reloadTasks() }
+        .onChange(of: selectedTasksTab) { _, _ in updateHangDiagnosticsSnapshot() }
+        .onChange(of: tasks) { _, _ in updateHangDiagnosticsSnapshot() }
+        .onChange(of: deletedTasksList) { _, _ in updateHangDiagnosticsSnapshot() }
+        .onChange(of: linkedStatuses) { _, _ in updateHangDiagnosticsSnapshot() }
         .onChange(of: triggerAddNewTask.wrappedValue) { _, requested in
             if requested {
                 showNewTaskComposer(selecting: .inProgress)
@@ -293,6 +336,7 @@ struct TasksListView: View {
     @ViewBuilder
     private var inProgressContent: some View {
         newTaskButton
+            .padding(.bottom, CursorTheme.spaceXS)
         let isEmpty = inProgressTasks.isEmpty && !isAddingNewTask
         if isEmpty {
             emptyStateInProgress
@@ -311,9 +355,10 @@ struct TasksListView: View {
     private func inProgressSection(title: String, tasks sectionTasks: [ProjectTask]) -> some View {
         if !sectionTasks.isEmpty {
             let scopedTasks = sectionTasks.map { SectionScopedTaskRow(sectionID: title, task: $0) }
-            VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+            VStack(alignment: .leading, spacing: CursorTheme.gapSectionTitleToContent) {
                 HStack(spacing: CursorTheme.spaceXS) {
                     sectionStatusIcon(title: title)
+                        .frame(width: CursorTheme.fontIconList, height: CursorTheme.fontIconList)
                     Text(title)
                         .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
                         .foregroundStyle(
@@ -322,6 +367,7 @@ struct TasksListView: View {
                             : CursorTheme.textSecondary(for: colorScheme)
                         )
                 }
+                .frame(height: CursorTheme.fontIconList)
                 ForEach(scopedTasks) { item in
                     let task = item.task
                     let canMoveToBacklog = linkedStatuses[task.id] == nil || linkedStatuses[task.id] == AgentTaskState.none
@@ -336,6 +382,9 @@ struct TasksListView: View {
                     )
                 }
             }
+            .padding(.top, CursorTheme.spaceM)
+            .padding(.bottom, CursorTheme.gapBetweenSections)
+            .id(title)
         }
     }
 
@@ -352,9 +401,12 @@ struct TasksListView: View {
                     .font(.system(size: CursorTheme.fontIconList, weight: .semibold))
                     .foregroundStyle(CursorTheme.semanticError)
             case "Processing":
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: CursorTheme.fontIconList))
-                    .foregroundStyle(CursorTheme.spinnerBlue)
+                LightBlueSpinner(size: CursorTheme.fontIconList - 4)
+                    .transaction { t in
+                        // Restore rotation animation; parent ScrollView sets transaction.animation = nil.
+                        t.animation = .linear(duration: 0.8).repeatForever(autoreverses: false)
+                    }
+                    .drawingGroup() // Rasterize so rotation doesn't trigger layout when list updates
             case "Todo":
                 Image(systemName: "person")
                     .font(.system(size: CursorTheme.fontIconList - 2, weight: .medium))
@@ -510,7 +562,8 @@ struct TasksListView: View {
             stateTransitionIcon: stateTransitionIcon,
             onStateTransition: onStateTransition,
             onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil,
-            onContinueAgent: linkedStatuses[task.id] == .stopped ? { onContinueAgent(task) } : nil
+            onContinueAgent: linkedStatuses[task.id] == .stopped ? { onContinueAgent(task) } : nil,
+            onResetAgent: linkedStatuses[task.id] == .stopped ? { onResetAgent(task) } : nil
         )
     }
 
@@ -892,6 +945,8 @@ private struct TaskRowView: View {
     var onStopAgent: (() -> Void)? = nil
     /// When non-nil (stopped tasks), the row shows "Continue" which focuses the agent and sends "continue".
     var onContinueAgent: (() -> Void)? = nil
+    /// When non-nil (stopped tasks), the row shows "Reset agent" which closes the linked agent and starts a fresh one.
+    var onResetAgent: (() -> Void)? = nil
 
     private var isProcessing: Bool { agentTaskState == .processing }
     private var isStopped: Bool { agentTaskState == .stopped }
@@ -997,6 +1052,11 @@ private struct TaskRowView: View {
                                 onContinueAgent()
                             }
                         }
+                        if let onResetAgent {
+                            Button("Reset agent", systemImage: "arrow.counterclockwise") {
+                                onResetAgent()
+                            }
+                        }
                         Divider()
                     }
                     if !task.completed {
@@ -1046,6 +1106,11 @@ private struct TaskRowView: View {
                 if let onContinueAgent {
                     Button("Continue", systemImage: "play.fill") {
                         onContinueAgent()
+                    }
+                }
+                if let onResetAgent {
+                    Button("Reset agent", systemImage: "arrow.counterclockwise") {
+                        onResetAgent()
                     }
                 }
                 Divider()

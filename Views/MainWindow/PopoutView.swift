@@ -167,9 +167,11 @@ private struct PopoutTasksListContent: View {
     let onSendToAgent: (String, UUID?, [String], String) -> Void
     let onOpenLinkedAgent: (ProjectTask) -> Void
     let onContinueAgent: (ProjectTask) -> Void
+    let onResetAgent: (ProjectTask) -> Void
     let onStopAgent: (ProjectTask) -> Void
     let onTasksDidUpdate: () -> Void
     let onDismiss: () -> Void
+    var showHeader: Bool = true
 
     var body: some View {
         TasksListView(
@@ -180,13 +182,36 @@ private struct PopoutTasksListContent: View {
             onSendToAgent: onSendToAgent,
             onOpenLinkedAgent: onOpenLinkedAgent,
             onContinueAgent: onContinueAgent,
+            onResetAgent: onResetAgent,
             onStopAgent: onStopAgent,
             onTasksDidUpdate: onTasksDidUpdate,
-            onDismiss: onDismiss
+            onDismiss: onDismiss,
+            showHeader: showHeader
         )
         .id(tasksPath)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(12)
+    }
+}
+
+/// Sidebar logo: loads from bundle so we can fall back when asset is missing (avoids green placeholder). Uses original rendering so the logo art shows.
+private struct CursorPlusLogoView: View {
+    let height: CGFloat
+    let projectColor: Color
+
+    var body: some View {
+        if let nsImage = NSImage(named: "CursorPlusLogo") {
+            Image(nsImage: nsImage)
+                .resizable()
+                .renderingMode(.original)
+                .aspectRatio(contentMode: .fit)
+                .frame(height: height)
+        } else {
+            Image(nsImage: CursorAppIcon.load())
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: height)
+        }
     }
 }
 
@@ -277,10 +302,13 @@ struct PopoutView: View {
 
     /// Agent status linked to this task for sidebar and task list display.
     private func linkedTaskState(for tab: AgentTab) -> AgentTaskState? {
+        linkedTaskState(for: tab, taskStatesByID: taskStatesByID(for: tab.workspacePath))
+    }
+
+    private func linkedTaskState(for tab: AgentTab, taskStatesByID: [UUID: TaskState]) -> AgentTaskState? {
         guard let taskID = tab.linkedTaskID else { return nil }
-        let tasks = ProjectTasksStorage.tasks(workspacePath: tab.workspacePath)
-        guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
-        if task.taskState == .backlog { return .none }
+        guard let taskState = taskStatesByID[taskID] else { return nil }
+        if taskState == .backlog { return .none }
         if tab.isRunning { return .processing }
         if tab.turns.last?.displayState == .stopped { return .stopped }
         if tab.turns.last?.displayState == .completed { return .review }
@@ -288,44 +316,97 @@ struct PopoutView: View {
     }
 
     private func linkedTaskState(for savedTab: SavedAgentTab) -> AgentTaskState? {
+        linkedTaskState(for: savedTab, taskStatesByID: taskStatesByID(for: savedTab.workspacePath))
+    }
+
+    private func linkedTaskState(for savedTab: SavedAgentTab, taskStatesByID: [UUID: TaskState]) -> AgentTaskState? {
         guard let taskID = savedTab.linkedTaskID else { return nil }
-        let tasks = ProjectTasksStorage.tasks(workspacePath: savedTab.workspacePath)
-        guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
-        if task.taskState == .backlog { return .none }
+        guard let taskState = taskStatesByID[taskID] else { return nil }
+        if taskState == .backlog { return .none }
         if savedTab.restoredLastTurnState == .stopped { return .stopped }
         if savedTab.restoredLastTurnState == .completed { return .review }
         return .todo
     }
 
+    private func taskStatesByID(for workspacePath: String) -> [UUID: TaskState] {
+        Dictionary(uniqueKeysWithValues: ProjectTasksStorage.tasks(workspacePath: workspacePath).map { ($0.id, $0.taskState) })
+    }
+
     /// Agent status of a task in this workspace if any agent tab is linked to it.
     private func linkedTaskStateForTask(taskID: UUID, workspacePath: String) -> AgentTaskState? {
+        let taskStates = taskStatesByID(for: workspacePath)
         if let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) {
-            return linkedTaskState(for: tab)
+            return linkedTaskState(for: tab, taskStatesByID: taskStates)
         }
         guard let savedTab = tabManager.recentlyClosedTabs.reversed().first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) else {
             return nil
         }
-        return linkedTaskState(for: savedTab)
+        return linkedTaskState(for: savedTab, taskStatesByID: taskStates)
     }
 
     /// Builds [taskID: status] for the given workspace so the Tasks list has an explicit dependency on tab state and updates when linked tabs run/complete.
     private func linkedStatusesForWorkspace(_ workspacePath: String) -> [UUID: AgentTaskState] {
+        let taskStates = taskStatesByID(for: workspacePath)
         var result: [UUID: AgentTaskState] = [:]
         for savedTab in tabManager.recentlyClosedTabs where savedTab.workspacePath == workspacePath {
             guard let taskID = savedTab.linkedTaskID else { continue }
-            result[taskID] = linkedTaskState(for: savedTab)
+            result[taskID] = linkedTaskState(for: savedTab, taskStatesByID: taskStates)
         }
         for tab in tabManager.tabs where tab.workspacePath == workspacePath {
             guard let taskID = tab.linkedTaskID else { continue }
-            result[taskID] = linkedTaskState(for: tab)
+            result[taskID] = linkedTaskState(for: tab, taskStatesByID: taskStates)
         }
         return result
+    }
+
+    private func hangDiagnosticsSnapshot() -> [String: String] {
+        let currentPath = tabManager.activeProjectPath ?? currentWorkspacePath
+        let runningTabs = tabManager.tabs.filter(\.isRunning).count
+        var snapshot: [String: String] = [
+            "activeProjectPath": currentPath,
+            "openProjects": "\(tabManager.projects.count)",
+            "openAgentTabs": "\(tabManager.tabs.count)",
+            "recentlyClosedTaskTabs": "\(tabManager.recentlyClosedTabs.count)",
+            "runningAgentTabs": "\(runningTabs)",
+            "selectedAgentTab": tabManager.selectedTabID?.uuidString ?? "nil",
+            "selectedTasksPath": tabManager.selectedTasksViewPath ?? "nil",
+            "selectedTerminal": tabManager.selectedTerminalID?.uuidString ?? "nil"
+        ]
+
+        if let tasksPath = tabManager.selectedTasksViewPath {
+            let tasks = ProjectTasksStorage.tasks(workspacePath: tasksPath)
+            let linkedStatuses = linkedStatusesForWorkspace(tasksPath)
+            snapshot["tasksPath"] = tasksPath
+            snapshot["tasksTotal"] = "\(tasks.count)"
+            snapshot["tasksBacklog"] = "\(tasks.filter { $0.taskState == .backlog }.count)"
+            snapshot["tasksInProgress"] = "\(tasks.filter { $0.taskState == .inProgress }.count)"
+            snapshot["tasksCompleted"] = "\(tasks.filter { $0.taskState == .completed }.count)"
+            snapshot["tasksProcessing"] = "\(linkedStatuses.values.filter { $0 == .processing }.count)"
+            snapshot["tasksReview"] = "\(linkedStatuses.values.filter { $0 == .review }.count)"
+            snapshot["tasksStopped"] = "\(linkedStatuses.values.filter { $0 == .stopped }.count)"
+            snapshot["tasksTodo"] = "\(linkedStatuses.values.filter { $0 == .todo || $0 == .none }.count)"
+        }
+
+        return snapshot
+    }
+
+    private func updateHangDiagnosticsSnapshot() {
+        HangDiagnostics.shared.updateSnapshot(hangDiagnosticsSnapshot())
+    }
+
+    private func recordHangEvent(_ event: String, metadata: [String: String] = [:]) {
+        updateHangDiagnosticsSnapshot()
+        HangDiagnostics.shared.record(event, metadata: metadata)
     }
 
     private func showTasksComposer(workspacePath path: String?, startNewTask: Bool = true) {
         let resolved = (path ?? tabManager.activeProjectPath ?? currentWorkspacePath)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !resolved.isEmpty else { return }
+        recordHangEvent("show-tasks-composer", metadata: [
+            "workspacePath": resolved,
+            "startNewTask": startNewTask ? "true" : "false"
+        ])
         tabManager.addProject(path: resolved, select: true)
         if appState.isMainContentCollapsed {
             withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
@@ -367,8 +448,34 @@ struct PopoutView: View {
 
     /// Focuses the linked agent tab then sends the "continue" prompt.
     private func continueAgent(for task: ProjectTask, workspacePath: String) {
+        recordHangEvent("continue-agent", metadata: [
+            "workspacePath": workspacePath,
+            "taskID": task.id.uuidString
+        ])
         openLinkedAgent(for: task, workspacePath: workspacePath)
         sendContinueToLinkedConversation(task: task, workspacePath: workspacePath)
+    }
+
+    /// Unlinks and closes the current agent for the task, then starts a fresh agent with the task content.
+    private func resetAgent(for task: ProjectTask, workspacePath: String) {
+        recordHangEvent("reset-agent", metadata: [
+            "workspacePath": workspacePath,
+            "taskID": task.id.uuidString
+        ])
+        if let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) {
+            stopStreaming(for: tab)
+            tabManager.closeTab(tab.id)
+        }
+        ProjectTasksStorage.clearAgentTab(workspacePath: workspacePath, taskID: task.id)
+        appState.notifyTasksDidUpdate()
+        sendTaskToAgent(
+            prompt: task.content,
+            taskID: task.id,
+            screenshotPaths: task.screenshotPaths,
+            modelId: task.modelId,
+            workspacePath: workspacePath,
+            selectAgent: true
+        )
     }
 
     /// Sends a "continue" prompt to the conversation linked to the task so the user can restart the agent from the 3-dot menu.
@@ -379,6 +486,13 @@ struct PopoutView: View {
     }
 
     private func sendTaskToAgent(prompt: String, taskID: UUID, screenshotPaths: [String], modelId: String, workspacePath: String, selectAgent: Bool = false) {
+        recordHangEvent("queue-agent", metadata: [
+            "workspacePath": workspacePath,
+            "taskID": taskID.uuidString,
+            "promptLength": "\(prompt.count)",
+            "screenshots": "\(screenshotPaths.count)",
+            "selectAgent": selectAgent ? "true" : "false"
+        ])
         if let existingAgentTabID = ProjectTasksStorage.linkedAgentTabID(workspacePath: workspacePath, taskID: taskID),
            tabManager.tabs.contains(where: { $0.id == existingAgentTabID }) {
             if selectAgent {
@@ -424,6 +538,10 @@ struct PopoutView: View {
     }
 
     private func stopAgentForTask(_ task: ProjectTask, workspacePath: String) {
+        recordHangEvent("stop-agent", metadata: [
+            "workspacePath": workspacePath,
+            "taskID": task.id.uuidString
+        ])
         guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) else { return }
         stopStreaming(for: tab)
     }
@@ -449,9 +567,11 @@ struct PopoutView: View {
             },
             onOpenLinkedAgent: { task in openLinkedAgent(for: task, workspacePath: tasksPath) },
             onContinueAgent: { task in continueAgent(for: task, workspacePath: tasksPath) },
+            onResetAgent: { task in resetAgent(for: task, workspacePath: tasksPath) },
             onStopAgent: { task in stopAgentForTask(task, workspacePath: tasksPath) },
             onTasksDidUpdate: { appState.notifyTasksDidUpdate() },
-            onDismiss: { tabManager.hideTasksView() }
+            onDismiss: { tabManager.hideTasksView() },
+            showHeader: false
         )
     }
 
@@ -795,7 +915,7 @@ struct PopoutView: View {
                     Color.clear.frame(width: 0).clipped()
                 } else {
                     VStack(spacing: 0) {
-                        rightColumnTopBar
+                        mainColumnTitleRow
                         mainContentZStack
                     }
                     .frame(maxWidth: .infinity)
@@ -878,16 +998,20 @@ struct PopoutView: View {
             currentBranch = cur
             gitBranches = list
             tabManager.activeTab?.currentBranch = cur
+            updateHangDiagnosticsSnapshot()
         }
         .onChange(of: workspacePath) { _, _ in
             quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath)
+            updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectsRootPath) { _, _ in
             devFolders = loadDevFolders(rootPath: projectsRootPath)
             tabManager.setProjectsFromPaths(devFolders.map(\.path))
+            updateHangDiagnosticsSnapshot()
         }
         .onChange(of: selectedModel) { _, _ in
             sanitizeSelectedModel()
+            updateHangDiagnosticsSnapshot()
         }
         .onChange(of: tabManager.selectedTabID) { _, _ in
             let path = currentWorkspacePath
@@ -895,6 +1019,7 @@ struct PopoutView: View {
             currentBranch = cur
             gitBranches = list
             tabManager.activeTab?.currentBranch = cur
+            updateHangDiagnosticsSnapshot()
         }
         .onChange(of: tabManager.selectedProjectPath) { _, _ in
             let path = currentWorkspacePath
@@ -903,6 +1028,16 @@ struct PopoutView: View {
             currentBranch = cur
             gitBranches = list
             tabManager.activeTab?.currentBranch = cur
+            updateHangDiagnosticsSnapshot()
+        }
+        .onChange(of: tabManager.selectedTasksViewPath) { _, _ in
+            updateHangDiagnosticsSnapshot()
+        }
+        .onChange(of: tabManager.selectedTerminalID) { _, _ in
+            updateHangDiagnosticsSnapshot()
+        }
+        .onChange(of: appState.taskListRevision) { _, _ in
+            updateHangDiagnosticsSnapshot()
         }
         .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .shadow(color: Color.black.opacity(0.36), radius: 28, y: 16)
@@ -978,9 +1113,12 @@ struct PopoutView: View {
         #endif
     }
 
-    /// Logo + BETA/DEBUG in sidebar column; when sidebar on right, header is mirrored (expand/menu on leading edge).
+    /// Logo + BETA/DEBUG in sidebar column; when sidebar on right, header is mirrored (expand/menu on leading edge). Logo uses active project color.
     private var leftColumnHeader: some View {
         let expandChevron = isSidebarOnRight ? "chevron.left.2" : "chevron.right.2"
+        let projectColor = currentWorkspacePath.isEmpty
+            ? CursorTheme.textPrimary(for: colorScheme)
+            : CursorTheme.colorForWorkspace(path: currentWorkspacePath)
         return HStack(spacing: 14) {
             if isSidebarOnRight, isMainContentCollapsed {
                 IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
@@ -995,10 +1133,7 @@ struct PopoutView: View {
             }
             if isSidebarOnRight { Spacer(minLength: 0) }
 
-            Image("CursorPlusLogo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(height: isMainContentCollapsed ? 28 : 36)
+            CursorPlusLogoView(height: isMainContentCollapsed ? 28 : 36, projectColor: projectColor)
 
             if !isMainContentCollapsed {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1033,28 +1168,182 @@ struct PopoutView: View {
                 IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
             }
         }
-        .padding(.horizontal, Self.sidebarContentPadding)
-        .padding(.leading, isSidebarOnRight ? Self.sidebarContentPadding : 6)
-        .padding(.trailing, isSidebarOnRight ? 6 : Self.sidebarContentPadding)
-        .padding(.top, 16)
-        .padding(.bottom, 14)
+        .padding(.horizontal, Self.sidebarHeaderPadding)
+        .padding(.leading, isSidebarOnRight ? Self.sidebarHeaderPadding : 10)
+        .padding(.trailing, isSidebarOnRight ? 10 : Self.sidebarHeaderPadding)
+        .padding(.top, Self.sidebarHeaderVerticalPadding)
+        .padding(.bottom, Self.sidebarHeaderVerticalPadding)
     }
 
-    /// Top bar for main (agent) column when expanded: collapse, settings, minimise. Chevron direction depends on sidebar side.
-    private var rightColumnTopBar: some View {
+    /// Single title row: icon + header (e.g. Tasks / agent title) on the left, title bar buttons (collapse, sidebar, settings, minimise) on the right.
+    private var mainColumnTitleRow: some View {
         let collapseChevron = isSidebarOnRight ? "chevron.right.2" : "chevron.left.2"
-        return HStack(spacing: 0) {
+        return HStack(alignment: .center, spacing: 0) {
+            mainColumnTitleContent
             Spacer(minLength: 0)
             IconButton(icon: collapseChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Collapse")
+            IconButton(icon: isSidebarOnRight ? "sidebar.leading" : "sidebar.trailing", action: {
+                withAnimation(.easeInOut(duration: 0.2)) { isSidebarOnRight.toggle() }
+            }, help: isSidebarOnRight ? "Move sidebar to left" : "Move sidebar to right")
             IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
             IconButton(icon: "minus", action: dismiss, help: "Minimise")
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
-        .padding(.bottom, 14)
+        .padding(.leading, CursorTheme.paddingHeaderHorizontal)
+        .padding(.trailing, CursorTheme.spaceS)
+        .padding(.vertical, CursorTheme.paddingHeaderVertical)
+    }
+
+    @ViewBuilder
+    private var mainColumnTitleContent: some View {
+        if let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
+            tasksTitleContent(workspacePath: tasksPath)
+        } else if let dashboardPath = tabManager.selectedDashboardViewPath ?? dashboardMountedForPath, dashboardPath == selectedProjectPath {
+            previewTitleContent(workspacePath: dashboardPath)
+        } else if tabManager.selectedTerminalID != nil, let path = selectedProjectPath {
+            terminalTitleContent(workspacePath: path)
+        } else if let tab = tabManager.activeTab {
+            agentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func tasksTitleContent(workspacePath path: String) -> some View {
+        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+            Image(systemName: "checklist")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Tasks")
+                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .lineLimit(1)
+                HStack(spacing: CursorTheme.spaceXS) {
+                    Image(systemName: "folder")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func previewTitleContent(workspacePath path: String) -> some View {
+        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+            Image(systemName: "square.grid.2x2")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Preview")
+                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .lineLimit(1)
+                HStack(spacing: CursorTheme.spaceXS) {
+                    Image(systemName: "folder")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func terminalTitleContent(workspacePath path: String) -> some View {
+        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+            Image(systemName: "terminal")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Terminal")
+                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .lineLimit(1)
+                HStack(spacing: CursorTheme.spaceXS) {
+                    Image(systemName: "folder")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    Text((path as NSString).lastPathComponent)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func agentTitleContent(tab: AgentTab, expandedPromptTabID: Binding<UUID?>) -> some View {
+        let status = agentDisplayStatus(for: tab)
+        let fullPrompt = (tab.turns.first?.userPrompt ?? tab.prompt).trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasExpandablePrompt = !fullPrompt.isEmpty
+        let isExpanded = expandedPromptTabID.wrappedValue == tab.id
+        let displayTitle = (isExpanded && hasExpandablePrompt) ? userPromptDisplayText(from: fullPrompt) : tab.title
+        return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+            agentStatusIcon(tab: tab, status: status)
+                .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .center, spacing: CursorTheme.spaceXS) {
+                    Text(displayTitle)
+                        .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .textSelection(.enabled)
+                    if hasExpandablePrompt {
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if expandedPromptTabID.wrappedValue == tab.id {
+                                    expandedPromptTabID.wrappedValue = nil
+                                } else {
+                                    expandedPromptTabID.wrappedValue = tab.id
+                                }
+                            }
+                        }) {
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                                .contentShape(Rectangle())
+                                .frame(width: 24, height: 24)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isExpanded ? "Hide full prompt" : "Show full prompt")
+                    }
+                }
+                HStack(spacing: CursorTheme.spaceXS) {
+                    let projectColor = tab.workspacePath.isEmpty
+                        ? CursorTheme.textTertiary(for: colorScheme)
+                        : CursorTheme.colorForWorkspace(path: tab.workspacePath)
+                    Image(systemName: "folder")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                        .foregroundStyle(projectColor)
+                    Text((tab.workspacePath as NSString).lastPathComponent)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(projectColor)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private static let sidebarContentPadding: CGFloat = 10
+    private static let sidebarHeaderPadding: CGFloat = 16
+    private static let sidebarHeaderVerticalPadding: CGFloat = 18
 
     private var tabSidebar: some View {
         VStack(spacing: 6) {
@@ -1313,53 +1602,6 @@ struct PopoutView: View {
         return ("Ready", false, false, false, false)
     }
 
-    private func agentHeader(tab: AgentTab, fullPrompt: String, isExpanded: Bool, onToggleExpand: @escaping () -> Void) -> some View {
-        let status = agentDisplayStatus(for: tab)
-        let hasExpandablePrompt = !fullPrompt.isEmpty
-        let titleFont = Font.system(size: CursorTheme.fontTitle, weight: .semibold)
-        let titleColor = CursorTheme.textPrimary(for: colorScheme)
-        let displayTitle = (isExpanded && hasExpandablePrompt) ? userPromptDisplayText(from: fullPrompt) : tab.title
-        return HStack(alignment: .top, spacing: CursorTheme.spaceM) {
-            agentStatusIcon(tab: tab, status: status)
-                .frame(width: 32, height: 32)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .top, spacing: CursorTheme.spaceXS) {
-                    Text(displayTitle)
-                        .font(titleFont)
-                        .foregroundStyle(titleColor)
-                        .lineLimit(isExpanded ? nil : 1)
-                        .truncationMode(.tail)
-                        .textSelection(.enabled)
-                    if hasExpandablePrompt {
-                        Button(action: onToggleExpand) {
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                                .contentShape(Rectangle())
-                                .frame(width: 24, height: 24)
-                        }
-                        .buttonStyle(.plain)
-                        .help(isExpanded ? "Hide full prompt" : "Show full prompt")
-                    }
-                }
-                HStack(spacing: CursorTheme.spaceXS) {
-                    Image(systemName: "folder")
-                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    Text((tab.workspacePath as NSString).lastPathComponent)
-                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
-        .padding(.vertical, CursorTheme.paddingHeaderVertical)
-    }
-
     private func fullPromptAccordionContent(fullPrompt: String, workspacePath: String) -> some View {
         let displayText = userPromptDisplayText(from: fullPrompt)
         return VStack(alignment: .leading, spacing: 0) {
@@ -1384,7 +1626,7 @@ struct PopoutView: View {
     @ViewBuilder
     private func agentStatusIcon(tab: AgentTab, status: (label: String, isProcessing: Bool, isPendingReview: Bool, isStopped: Bool, isCompleted: Bool)) -> some View {
         if status.isProcessing {
-            LightBlueSpinner(size: CursorTheme.fontIconList)
+            LightBlueSpinner(size: CursorTheme.fontIconList - 4)
         } else if status.isStopped {
             Image(systemName: "square.fill")
                 .font(.system(size: CursorTheme.fontIconList - 2, weight: .semibold))
@@ -1408,15 +1650,9 @@ struct PopoutView: View {
         let fullPrompt = (tab.turns.first?.userPrompt ?? tab.prompt).trimmingCharacters(in: .whitespacesAndNewlines)
         let isExpanded = expandedPromptTabID.wrappedValue == tab.id
         return VStack(spacing: 0) {
-            agentHeader(tab: tab, fullPrompt: fullPrompt, isExpanded: isExpanded, onToggleExpand: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    if expandedPromptTabID.wrappedValue == tab.id {
-                        expandedPromptTabID.wrappedValue = nil
-                    } else {
-                        expandedPromptTabID.wrappedValue = tab.id
-                    }
-                }
-            })
+            if isExpanded && !fullPrompt.isEmpty {
+                fullPromptAccordionContent(fullPrompt: fullPrompt, workspacePath: tab.workspacePath)
+            }
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
 
@@ -2024,6 +2260,12 @@ struct PopoutView: View {
     private func sendPrompt(tab currentTab: AgentTab) {
         let trimmed = currentTab.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        recordHangEvent("send-prompt", metadata: [
+            "tabID": currentTab.id.uuidString,
+            "workspacePath": currentTab.workspacePath,
+            "linkedTaskID": currentTab.linkedTaskID?.uuidString ?? "nil",
+            "promptLength": "\(trimmed.count)"
+        ])
 
         updateTabTitle(for: trimmed, in: currentTab)
 
@@ -2152,6 +2394,11 @@ struct PopoutView: View {
 
     private func stopStreaming(for currentTab: AgentTab? = nil) {
         guard let tabToStop = currentTab ?? tab else { return }
+        recordHangEvent("stop-streaming", metadata: [
+            "tabID": tabToStop.id.uuidString,
+            "workspacePath": tabToStop.workspacePath,
+            "linkedTaskID": tabToStop.linkedTaskID?.uuidString ?? "nil"
+        ])
         let turnIndex: Int? = {
             if let turnID = tabToStop.activeTurnID,
                let idx = tabToStop.turns.firstIndex(where: { $0.id == turnID }) {
@@ -2181,6 +2428,12 @@ struct PopoutView: View {
 
     private func finishStreaming(for currentTab: AgentTab, runID: UUID, turnID: UUID, errorMessage: String? = nil) {
         guard currentTab.activeRunID == runID else { return }
+        recordHangEvent("finish-streaming", metadata: [
+            "tabID": currentTab.id.uuidString,
+            "workspacePath": currentTab.workspacePath,
+            "linkedTaskID": currentTab.linkedTaskID?.uuidString ?? "nil",
+            "hadError": errorMessage == nil ? "false" : "true"
+        ])
         if let index = currentTab.turns.firstIndex(where: { $0.id == turnID }) {
             currentTab.turns[index].isStreaming = false
             currentTab.turns[index].lastStreamPhase = nil

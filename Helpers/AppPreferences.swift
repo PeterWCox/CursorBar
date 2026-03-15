@@ -33,6 +33,8 @@ enum AppPreferences {
     static let preferredAppearanceKey = "preferredAppearance"
     /// Key for placing the agent tabs sidebar and logo on the right (mirrored layout). Persisted via UserDefaults.
     static let sidebarOnRightKey = "sidebarOnRight"
+    /// Key for forcing the agent CLI to allow commands without prompting (CLI -f / --force). Default: false.
+    static let agentForceAllowCommandsKey = "agentForceAllowCommands"
     /// Key for model IDs to hide from the model picker. Persisted via UserDefaults when used with @AppStorage.
     static let disabledModelIdsKey = "disabledModelIds"
     /// Default value: no models disabled, so all models are shown in the picker.
