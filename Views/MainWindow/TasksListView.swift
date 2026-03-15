@@ -50,6 +50,7 @@ struct TasksListView: View {
     @State private var newTaskPasteKeyMonitor: Any?
     /// Which top-level tab is selected.
     @State private var selectedTasksTab: TasksListTab = .inProgress
+    @State private var isNewTaskButtonHovered: Bool = false
 
     private static let completedRecentInterval: TimeInterval = 24 * 60 * 60
 
@@ -312,12 +313,26 @@ struct TasksListView: View {
             showNewTaskComposer()
         }) {
             Label("New task", systemImage: "plus.circle.fill")
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: CursorTheme.fontBody, weight: .medium))
                 .foregroundStyle(CursorTheme.brandBlue)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, CursorTheme.spaceS)
+        .onHover { isNewTaskButtonHovered = $0 }
+        .overlay(alignment: .top) {
+            if isNewTaskButtonHovered {
+                Text("⌘T")
+                    .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
+                    .padding(.vertical, CursorTheme.paddingBadgeVertical)
+                    .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.spaceXS))
+                    .overlay(RoundedRectangle(cornerRadius: CursorTheme.spaceXS).strokeBorder(CursorTheme.border(for: colorScheme), lineWidth: 1))
+                    .offset(y: -32)
+                    .padding(.top, CursorTheme.spaceS)
+            }
+        }
     }
 
     @ViewBuilder
