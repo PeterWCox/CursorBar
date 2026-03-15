@@ -1,16 +1,22 @@
 import SwiftUI
 
 // MARK: - Model selection menu
+// Styled like ActionButton.primary (surfaceMuted, textPrimary, border) for consistency.
 
-private let premiumSelectionTextColor = Color(red: 0.99, green: 0.91, blue: 0.62)
-private let premiumSelectionAccentColor = Color(red: 1.00, green: 0.83, blue: 0.33)
-private let premiumSelectionBadgeTextColor = Color(red: 1.00, green: 0.88, blue: 0.45)
-private let premiumSelectionBackgroundColor = Color(red: 0.19, green: 0.14, blue: 0.07)
-private let premiumSelectionBadgeBackgroundColor = Color(red: 0.38, green: 0.27, blue: 0.08)
-private let premiumSelectionBorderColor = Color(red: 0.93, green: 0.72, blue: 0.30)
-private let premiumSelectionShadowColor = Color(red: 0.93, green: 0.72, blue: 0.30)
+/// Red "!" in white circle — premium/alert indicator badge.
+fileprivate struct PremiumBadge: View {
+    var body: some View {
+        Text("!")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(.red)
+            .frame(width: 18, height: 18)
+            .background(Circle().strokeBorder(Color.white, lineWidth: 1.5))
+    }
+}
 
 struct ModelPickerView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var selectedModelId: String
     var models: [ModelOption]
     var onSelect: (String) -> Void
@@ -19,107 +25,90 @@ struct ModelPickerView: View {
         models.first { $0.id == selectedModelId } ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
     }
 
-    private func labelForeground(for model: ModelOption) -> Color {
-        if model.isPremium {
-            return premiumSelectionTextColor
-        }
-        return CursorTheme.textPrimary
-    }
-
-    private func labelBackground(for model: ModelOption) -> Color {
-        if model.isPremium {
-            return premiumSelectionBackgroundColor
-        }
-        return CursorTheme.surfaceMuted
-    }
-
-    private func labelBorderColor(for model: ModelOption) -> Color {
-        model.isPremium ? premiumSelectionBorderColor : CursorTheme.border
-    }
-
-    private func labelShadowColor(for model: ModelOption) -> Color {
-        model.isPremium ? premiumSelectionShadowColor.opacity(0.35) : .clear
-    }
-
     var body: some View {
         HStack(spacing: 8) {
-            HStack(spacing: 8) {
-                if selectedModel.isPremium {
-                    premiumIndicator
-                }
-                Menu {
-                    ForEach(models, id: \.id) { model in
-                        Button {
-                            onSelect(model.id)
-                        } label: {
-                            HStack(spacing: 8) {
-                                if model.id == selectedModelId {
-                                    Image(systemName: "checkmark")
-                                } else {
-                                    Image(systemName: model.isPremium ? "sparkles" : "circle")
-                                        .opacity(model.isPremium ? 0.9 : 0.2)
-                                }
+            if selectedModel.isPremium {
+                PremiumBadge()
+            }
+            Menu {
+                ForEach(models, id: \.id) { model in
+                    Button {
+                        onSelect(model.id)
+                    } label: {
+                        HStack(spacing: 8) {
+                            if model.id == selectedModelId {
+                                Image(systemName: "checkmark")
+                            } else {
+                                Image(systemName: model.isPremium ? "sparkles" : "circle")
+                                    .opacity(model.isPremium ? 0.9 : 0.2)
+                            }
 
-                                Text(model.label)
+                            Text(model.label)
 
-                                if model.isPremium {
-                                    Spacer(minLength: 12)
-                                    Text("Premium")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundStyle(premiumSelectionBadgeTextColor)
-                                }
+                            if model.isPremium {
+                                Spacer(minLength: 12)
+                                PremiumBadge()
                             }
                         }
                     }
-                } label: {
-                    pickerLabel(for: selectedModel)
                 }
-                .menuStyle(.borderlessButton)
-                .fixedSize(horizontal: true, vertical: false)
+            } label: {
+                pickerLabel(for: selectedModel)
             }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
         }
-    }
-
-    /// Red "!" with white outline/border when a premium (non-Auto) model is selected.
-    private var premiumIndicator: some View {
-        Text("!")
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(.red)
-            .frame(width: 18, height: 18)
-            .background(Circle().strokeBorder(Color.white, lineWidth: 1.5))
     }
 
     private func pickerLabel(for model: ModelOption) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: model.isPremium ? "sparkles" : "cpu")
-                .font(.system(size: model.isPremium ? 14 : 12, weight: .semibold))
-                .foregroundStyle(model.isPremium ? premiumSelectionAccentColor : labelForeground(for: model))
-                .symbolRenderingMode(model.isPremium ? .hierarchical : .monochrome)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
             Text(model.label)
                 .lineLimit(1)
-                .foregroundStyle(labelForeground(for: model))
-                .fontWeight(model.isPremium ? .semibold : .medium)
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                .fontWeight(.medium)
             if model.isPremium {
-                Text("Premium")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(premiumSelectionBadgeTextColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 4)
-                    .background(
-                        premiumSelectionBadgeBackgroundColor.opacity(0.9),
-                        in: Capsule()
-                    )
+                PremiumBadge()
             }
         }
         .font(.system(size: 12, weight: .medium))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(labelBackground(for: model), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(labelBorderColor(for: model), lineWidth: model.isPremium ? 1.5 : 1)
-        )
-        .shadow(color: labelShadowColor(for: model), radius: 12, y: 4)
+        .padding(.horizontal, CursorTheme.paddingCard)
+        .padding(.vertical, CursorTheme.spaceS)
+        .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
+        .overlay(Capsule().stroke(CursorTheme.border(for: colorScheme), lineWidth: 1))
+        .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+// MARK: - Read-only model chip (no dropdown)
+
+/// Displays the selected model as a chip when the agent cannot be changed (e.g. processing).
+/// Styled like ActionButton.primary for consistency.
+struct ModelChipView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let model: ModelOption
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: model.isPremium ? "sparkles" : "cpu")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            Text(model.label)
+                .lineLimit(1)
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                .fontWeight(.medium)
+            if model.isPremium {
+                PremiumBadge()
+            }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .padding(.horizontal, CursorTheme.paddingCard)
+        .padding(.vertical, CursorTheme.spaceS)
+        .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
+        .overlay(Capsule().stroke(CursorTheme.border(for: colorScheme), lineWidth: 1))
         .fixedSize(horizontal: true, vertical: false)
     }
 }

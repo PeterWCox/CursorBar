@@ -1,6 +1,6 @@
-# Cursor+ — OOP Structure
+# Cursor Metro — OOP Structure
 
-High-level object-oriented structure of the Cursor+ macOS app: entry point, state, models, views, services, and helpers. Use this to see how types are grouped and how the UI is composed.
+High-level object-oriented structure of the Cursor Metro macOS app: entry point, state, models, views, services, and helpers. Use this to see how types are grouped and how the UI is composed.
 
 ---
 

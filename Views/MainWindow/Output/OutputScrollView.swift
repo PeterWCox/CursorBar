@@ -57,6 +57,15 @@ struct OutputScrollView<Content: View>: View {
                     isAutoScrolling = false
                 }
             }
+            .onAppear {
+                // When we focus this agent (tab selected), start at bottom; if work is ongoing, existing requestAutoScroll will keep autoscroll.
+                isAutoScrolling = true
+                proxy.scrollTo("outputEnd", anchor: .bottom)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                    isAutoScrolling = false
+                }
+            }
         }
     }
 }

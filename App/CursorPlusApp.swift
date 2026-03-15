@@ -173,11 +173,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         deleteScreenshotCacheOlderThan(days: 20)
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        // Persist panel frame when user hides app (Cmd+H) or switches away so reopen restores current size.
+        if panel.isVisible {
+            PanelFrameStorage.save(panel.frame)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         let image = BrandStatusIcon.makeImage(size: 22)
-        image.accessibilityDescription = "Cursor+"
+        image.accessibilityDescription = "Cursor Metro"
 
         let menu = NSMenu()
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
@@ -187,14 +194,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         centerPanelItem.target = self
         menu.addItem(centerPanelItem)
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Quit Cursor+", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit Cursor Metro", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         let iconSize: CGFloat = 22
         let view = StatusItemView(frame: NSRect(x: 0, y: 0, width: iconSize, height: iconSize))
         view.image = image
-        view.toolTip = "Cursor+"
+        view.toolTip = "Cursor Metro"
         view.contextMenu = menu
         view.onLeftClick = { [weak self] in
             self?.togglePanel()
@@ -283,6 +290,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyCollapsedState(_ collapsed: Bool) {
         guard let panel = panel else { return }
         var style = panel.styleMask
+        let preserveTrailingEdge = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
         if collapsed {
             style.remove(.resizable)
             panel.styleMask = style
@@ -290,7 +298,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             savedExpandedPanelHeight = panel.frame.height
             panel.contentMinSize = NSSize(width: collapsedPanelWidth, height: collapsedPanelMinHeight)
             var frame = panel.frame
+            let trailingEdgeX = frame.maxX
             frame.size.width = collapsedPanelWidth
+            if preserveTrailingEdge {
+                frame.origin.x = trailingEdgeX - frame.width
+            }
             // Keep current height when collapsing; only width changes.
             panel.setFrame(frame, display: true, animate: true)
         } else {
@@ -298,7 +310,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.styleMask = style
             panel.contentMinSize = NSSize(width: minExpandedPanelWidth, height: 400)
             var frame = panel.frame
+            let trailingEdgeX = frame.maxX
             frame.size.width = max(minExpandedPanelWidth, savedExpandedPanelWidth)
+            if preserveTrailingEdge {
+                frame.origin.x = trailingEdgeX - frame.width
+            }
             if let h = savedExpandedPanelHeight, h >= 400 {
                 frame.size.height = h
             }

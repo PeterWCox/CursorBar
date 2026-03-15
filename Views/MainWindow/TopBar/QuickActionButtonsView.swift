@@ -15,7 +15,7 @@ struct QuickActionButtonsView: View {
     @State private var showAddSheet = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: CursorTheme.spaceS) {
             ForEach(commands) { cmd in
                 ActionButton(
                     title: cmd.title,

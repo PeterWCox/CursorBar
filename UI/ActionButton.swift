@@ -36,6 +36,7 @@ struct ActionButton: View {
             .foregroundStyle(foregroundColor)
             .padding(.horizontal, CursorTheme.paddingCard)
             .padding(.vertical, CursorTheme.spaceS)
+            .frame(minWidth: CursorTheme.actionButtonMinWidth, alignment: .center)
             .background(backgroundFill, in: Capsule())
             .overlay(Capsule().stroke(borderColor, lineWidth: 1))
         }

@@ -126,6 +126,8 @@ enum CursorTheme {
     static let paddingBadgeHorizontal: CGFloat = 5
     /// Small padding for badges and tags (vertical).
     static let paddingBadgeVertical: CGFloat = 2
+    /// Minimum width for capsule action buttons (Fix build, Commit & push, Add Task, etc.) so they stay consistent.
+    static let actionButtonMinWidth: CGFloat = 128
 
     // MARK: - Typography (use for font sizes to keep UI consistent)
 

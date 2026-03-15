@@ -280,19 +280,13 @@ final class AgentRunner {
         
         let process = Process()
         process.executableURL = URL(fileURLWithPath: agentPath)
-        let forceAllow = UserDefaults.standard.bool(forKey: AppPreferences.agentForceAllowCommandsKey)
         var args = [
+            "-f",
             "-p", prompt,
             "--workspace", workspacePath,
             "--output-format", "stream-json",
             "--stream-partial-output"
         ]
-        if forceAllow {
-            args.insert("-f", at: 0)
-        } else {
-            // Request sandbox so the CLI may prompt or restrict tool use when not forcing.
-            args += ["--sandbox", "enabled"]
-        }
         if let conversationId, !conversationId.isEmpty {
             args += ["--resume", conversationId]
         }

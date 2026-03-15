@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Popout header icon (top-left of panel): Cursor+ mark with teal accent
+// MARK: - Popout header icon (top-left of panel): Cursor Metro mark with teal accent
 
 struct BrandMark: View {
     var size: CGFloat = 52
@@ -51,7 +51,7 @@ struct BrandMark: View {
                 .foregroundStyle(CursorTheme.textPrimary)
                 .offset(x: size * 0.22, y: -size * 0.22)
 
-            // Teal plus (Cursor+)
+            // Teal plus (Cursor Metro)
             RoundedRectangle(cornerRadius: size * 0.02, style: .continuous)
                 .fill(CursorTheme.cursorPlusTeal)
                 .frame(width: size * 0.24, height: max(2, size * 0.06))

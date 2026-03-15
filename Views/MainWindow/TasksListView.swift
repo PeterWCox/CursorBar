@@ -12,12 +12,122 @@ enum TasksListTab: String, CaseIterable {
     case deleted = "Deleted"
 }
 
-private struct SectionScopedTaskRow: Identifiable {
+private struct SectionScopedTaskRow: Identifiable, Equatable {
     let sectionID: String
     let task: ProjectTask
 
     var id: String {
         "\(sectionID)-\(task.id.uuidString)"
+    }
+}
+
+private struct TasksTabCounts: Equatable {
+    let backlog: Int
+    let inProgress: Int
+    let completed: Int
+    let deleted: Int
+
+    func count(for tab: TasksListTab) -> Int {
+        switch tab {
+        case .backlog: return backlog
+        case .inProgress: return inProgress
+        case .completed: return completed
+        case .deleted: return deleted
+        }
+    }
+}
+
+/// One time-bucket group (title + tasks) for Equatable snapshot.
+private struct TimeBucketGroup: Equatable {
+    let title: String
+    let tasks: [ProjectTask]
+}
+
+/// Time-based section for Completed and Deleted tabs (Today, Yesterday, Last 7 Days, etc.).
+private enum TimeBucket: Int, CaseIterable {
+    case today = 0
+    case yesterday = 1
+    case last7Days = 2
+    case last30Days = 3
+    case older = 4
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .yesterday: return "Yesterday"
+        case .last7Days: return "Last 7 Days"
+        case .last30Days: return "Last 30 Days"
+        case .older: return "Older"
+        }
+    }
+
+    static func bucket(for date: Date, reference: Date = Date(), calendar: Calendar = .current) -> TimeBucket {
+        let startOfToday = calendar.startOfDay(for: reference)
+        guard let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: startOfToday),
+              let sevenDaysAgo = calendar.date(byAdding: .day, value: -7, to: startOfToday),
+              let thirtyDaysAgo = calendar.date(byAdding: .day, value: -30, to: startOfToday) else {
+            return .older
+        }
+        if date >= startOfToday { return .today }
+        if date >= startOfYesterday { return .yesterday }
+        if date >= sevenDaysAgo { return .last7Days }
+        if date >= thirtyDaysAgo { return .last30Days }
+        return .older
+    }
+}
+
+private struct TasksListSnapshot: Equatable {
+    let backlogTasks: [ProjectTask]
+    let reviewRows: [SectionScopedTaskRow]
+    let stoppedRows: [SectionScopedTaskRow]
+    let processingRows: [SectionScopedTaskRow]
+    let todoRows: [SectionScopedTaskRow]
+    let visibleCompletedTasks: [ProjectTask]
+    /// Completed tasks grouped by time bucket (Today, Yesterday, …), ordered newest first.
+    let completedGrouped: [TimeBucketGroup]
+    let deletedTasks: [ProjectTask]
+    /// Deleted tasks grouped by time bucket, ordered newest first.
+    let deletedGrouped: [TimeBucketGroup]
+    let counts: TasksTabCounts
+}
+
+private struct TasksTabBarView: View, Equatable {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let selectedTab: TasksListTab
+    let counts: TasksTabCounts
+    let onSelect: (TasksListTab) -> Void
+
+    static func == (lhs: TasksTabBarView, rhs: TasksTabBarView) -> Bool {
+        lhs.selectedTab == rhs.selectedTab && lhs.counts == rhs.counts
+    }
+
+    private func tabLabel(for tab: TasksListTab) -> String {
+        let c = counts.count(for: tab)
+        return c > 0 ? "\(tab.rawValue) (\(c))" : tab.rawValue
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(TasksListTab.allCases, id: \.self) { tab in
+                Button {
+                    onSelect(tab)
+                } label: {
+                    Text(tabLabel(for: tab))
+                        .font(.system(size: 13, weight: selectedTab == tab ? .semibold : .medium))
+                        .foregroundStyle(selectedTab == tab ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                        .padding(.horizontal, CursorTheme.spaceM)
+                        .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
+                }
+                .buttonStyle(.plain)
+                .background(selectedTab == tab ? CursorTheme.surfaceMuted(for: colorScheme) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
+        .padding(.vertical, CursorTheme.spaceXS)
+        .background(CursorTheme.chrome(for: colorScheme))
     }
 }
 
@@ -45,7 +155,10 @@ struct TasksListView: View {
     var onDismiss: () -> Void
     /// When false, the list does not show its own header (e.g. when the panel title row already shows "Tasks" + project).
     var showHeader: Bool = true
+    /// Launch setup agent or open Advanced for this project (Configure Setup button). When nil, Configure Setup is omitted.
+    var onLaunchSetupAgent: ((String) -> Void)? = nil
 
+    @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @State private var tasks: [ProjectTask] = []
     @State private var editingTask: ProjectTask?
     @State private var editingDraft: String = ""
@@ -67,9 +180,14 @@ struct TasksListView: View {
     @State private var newTaskPasteKeyMonitor: Any?
     /// Which top-level tab is selected.
     @State private var selectedTasksTab: TasksListTab = .inProgress
-    @State private var isNewTaskButtonHovered: Bool = false
+    /// True when Start Preview opened an external terminal window; Stop closes it.
+    @State private var previewRunningInExternalTerminal: Bool = false
 
     private static let completedRecentInterval: TimeInterval = 24 * 60 * 60
+
+    private var preferredTerminal: PreferredTerminalApp {
+        PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
+    }
 
     private func reloadTasks() {
         tasks = ProjectTasksStorage.tasks(workspacePath: workspacePath)
@@ -77,17 +195,18 @@ struct TasksListView: View {
     }
 
     private func hangDiagnosticsSnapshot() -> [String: String] {
-        [
+        let snapshot = taskSnapshot
+        return [
             "tasksWorkspacePath": workspacePath,
             "tasksSelectedTab": selectedTasksTab.rawValue,
-            "tasksBacklogCount": "\(backlogTasks.count)",
-            "tasksInProgressCount": "\(inProgressTasks.count)",
-            "tasksProcessingCount": "\(processingTasks.count)",
-            "tasksReviewCount": "\(reviewTasks.count)",
-            "tasksStoppedCount": "\(stoppedTasks.count)",
-            "tasksTodoCount": "\(todoTasks.count)",
-            "tasksCompletedCount": "\(completedTasks.count)",
-            "tasksDeletedCount": "\(deletedTasksList.count)",
+            "tasksBacklogCount": "\(snapshot.counts.backlog)",
+            "tasksInProgressCount": "\(snapshot.counts.inProgress)",
+            "tasksProcessingCount": "\(snapshot.processingRows.count)",
+            "tasksReviewCount": "\(snapshot.reviewRows.count)",
+            "tasksStoppedCount": "\(snapshot.stoppedRows.count)",
+            "tasksTodoCount": "\(snapshot.todoRows.count)",
+            "tasksCompletedCount": "\(snapshot.counts.completed)",
+            "tasksDeletedCount": "\(snapshot.counts.deleted)",
             "tasksIsAddingNew": isAddingNewTask ? "true" : "false"
         ]
     }
@@ -101,43 +220,73 @@ struct TasksListView: View {
         HangDiagnostics.shared.record(event, metadata: metadata)
     }
 
-    private var backlogTasks: [ProjectTask] {
-        tasks.filter { $0.taskState == .backlog }
+    private var taskSnapshot: TasksListSnapshot {
+        makeSnapshot()
     }
 
-    private var inProgressTasks: [ProjectTask] {
-        tasks.filter { $0.taskState == .inProgress }
-    }
-
-    private var reviewTasks: [ProjectTask] {
-        inProgressTasks.filter { linkedStatuses[$0.id] == .review }
-    }
-
-    private var stoppedTasks: [ProjectTask] {
-        inProgressTasks.filter { linkedStatuses[$0.id] == .stopped }
-    }
-
-    private var processingTasks: [ProjectTask] {
-        inProgressTasks.filter { linkedStatuses[$0.id] == .processing }
-    }
-
-    private var todoTasks: [ProjectTask] {
-        inProgressTasks.filter {
+    private func makeSnapshot(referenceDate: Date = Date()) -> TasksListSnapshot {
+        let backlogTasks = tasks.filter { $0.taskState == .backlog }
+        let inProgressTasks = tasks.filter { $0.taskState == .inProgress }
+        let completedTasks = tasks.filter { $0.taskState == .completed }
+        let reviewTasks = inProgressTasks.filter { linkedStatuses[$0.id] == .review }
+        let stoppedTasks = inProgressTasks.filter { linkedStatuses[$0.id] == .stopped }
+        let processingTasks = inProgressTasks.filter { linkedStatuses[$0.id] == .processing }
+        let todoTasks = inProgressTasks.filter {
             let state = linkedStatuses[$0.id]
             return state == nil || state == AgentTaskState.none || state == .todo
         }
-    }
-
-    private var completedTasks: [ProjectTask] {
-        tasks.filter { $0.taskState == .completed }
-    }
-
-    private var visibleCompletedTasks: [ProjectTask] {
-        let cutoff = Date().addingTimeInterval(-Self.completedRecentInterval)
-        let filtered = showOnlyRecentCompleted
+        let cutoff = referenceDate.addingTimeInterval(-Self.completedRecentInterval)
+        let visibleCompletedTasks = showOnlyRecentCompleted
             ? completedTasks.filter { ($0.completedAt ?? .distantPast) >= cutoff }
             : completedTasks
-        return filtered.sorted { ($0.completedAt ?? .distantPast) >= ($1.completedAt ?? .distantPast) }
+        let sortedVisibleCompletedTasks = visibleCompletedTasks
+            .sorted { ($0.completedAt ?? .distantPast) >= ($1.completedAt ?? .distantPast) }
+
+        let completedGrouped = Self.groupTasksByTimeBucket(
+            sortedVisibleCompletedTasks,
+            dateKeyPath: \.completedAt,
+            reference: referenceDate
+        )
+        let deletedGrouped = Self.groupTasksByTimeBucket(
+            deletedTasksList,
+            dateKeyPath: \.deletedAt,
+            reference: referenceDate
+        )
+
+        return TasksListSnapshot(
+            backlogTasks: backlogTasks,
+            reviewRows: reviewTasks.map { SectionScopedTaskRow(sectionID: "Review", task: $0) },
+            stoppedRows: stoppedTasks.map { SectionScopedTaskRow(sectionID: "Stopped", task: $0) },
+            processingRows: processingTasks.map { SectionScopedTaskRow(sectionID: "Processing", task: $0) },
+            todoRows: todoTasks.map { SectionScopedTaskRow(sectionID: "Todo", task: $0) },
+            visibleCompletedTasks: sortedVisibleCompletedTasks,
+            completedGrouped: completedGrouped,
+            deletedTasks: deletedTasksList,
+            deletedGrouped: deletedGrouped,
+            counts: TasksTabCounts(
+                backlog: backlogTasks.count,
+                inProgress: inProgressTasks.count,
+                completed: completedTasks.count,
+                deleted: deletedTasksList.count
+            )
+        )
+    }
+
+    private static func groupTasksByTimeBucket(
+        _ tasks: [ProjectTask],
+        dateKeyPath: KeyPath<ProjectTask, Date?>,
+        reference: Date
+    ) -> [TimeBucketGroup] {
+        let calendar = Calendar.current
+        var buckets: [TimeBucket: [ProjectTask]] = [:]
+        for task in tasks {
+            let date = task[keyPath: dateKeyPath] ?? .distantPast
+            let bucket = TimeBucket.bucket(for: date, reference: reference, calendar: calendar)
+            buckets[bucket, default: []].append(task)
+        }
+        return TimeBucket.allCases
+            .filter { (buckets[$0]?.count ?? 0) > 0 }
+            .map { TimeBucketGroup(title: $0.title, tasks: buckets[$0] ?? []) }
     }
 
     private func commitNewTask() {
@@ -217,9 +366,15 @@ struct TasksListView: View {
     }
 
     var body: some View {
+        let snapshot = taskSnapshot
         VStack(spacing: 0) {
             if showHeader { header }
-            tasksTabBar
+            TasksTabBarView(
+                selectedTab: selectedTasksTab,
+                counts: snapshot.counts,
+                onSelect: selectTasksTab
+            )
+            .equatable()
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
             ScrollViewReader { proxy in
@@ -228,7 +383,8 @@ struct TasksListView: View {
                         Color.clear
                             .frame(height: 0)
                             .id("tasksScrollTop")
-                        tabContent()
+                        tabContent(snapshot: snapshot)
+                            .id(selectedTasksTab)
                     }
                     .padding(CursorTheme.paddingPanel)
                 }
@@ -287,74 +443,112 @@ struct TasksListView: View {
         }
     }
 
-    private func taskCount(for tab: TasksListTab) -> Int {
-        switch tab {
-        case .backlog: return backlogTasks.count
-        case .inProgress: return inProgressTasks.count
-        case .completed: return completedTasks.count
-        case .deleted: return deletedTasksList.count
-        }
-    }
-
-    private var tasksTabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(TasksListTab.allCases, id: \.self) { tab in
-                Button {
-                    selectTasksTab(tab)
-                } label: {
-                    Text("\(tab.rawValue) (\(taskCount(for: tab)))")
-                        .font(.system(size: 13, weight: selectedTasksTab == tab ? .semibold : .medium))
-                        .foregroundStyle(selectedTasksTab == tab ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                        .padding(.horizontal, CursorTheme.spaceM)
-                        .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
-                }
-                .buttonStyle(.plain)
-                .background(selectedTasksTab == tab ? CursorTheme.surfaceMuted(for: colorScheme) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
-        .padding(.vertical, CursorTheme.spaceXS)
-        .background(CursorTheme.chrome(for: colorScheme))
-    }
-
     @ViewBuilder
-    private func tabContent() -> some View {
+    private func tabContent(snapshot: TasksListSnapshot) -> some View {
         switch selectedTasksTab {
         case .inProgress:
-            inProgressContent
+            inProgressContent(snapshot: snapshot)
         case .backlog:
-            backlogContent
+            backlogContent(snapshot: snapshot)
         case .completed:
-            completedContent
+            completedContent(snapshot: snapshot)
         case .deleted:
-            deletedContent
+            deletedContent(snapshot: snapshot)
         }
     }
 
     @ViewBuilder
-    private var inProgressContent: some View {
-        newTaskButton
-            .padding(.bottom, CursorTheme.spaceXS)
-        let isEmpty = inProgressTasks.isEmpty && !isAddingNewTask
+    private func inProgressContent(snapshot: TasksListSnapshot) -> some View {
+        previewButtonsBar
+            .padding(.bottom, CursorTheme.spaceS)
+        let isEmpty = snapshot.counts.inProgress == 0 && !isAddingNewTask
         if isEmpty {
             emptyStateInProgress
         } else {
             if isAddingNewTask {
                 newTaskRow
             }
-            inProgressSection(title: "Review", tasks: reviewTasks)
-            inProgressSection(title: "Stopped", tasks: stoppedTasks)
-            inProgressSection(title: "Processing", tasks: processingTasks)
-            inProgressSection(title: "Todo", tasks: todoTasks)
+            inProgressSection(title: "Todo", rows: snapshot.todoRows)
+            inProgressSection(title: "Processing", rows: snapshot.processingRows)
+            inProgressSection(title: "Review", rows: snapshot.reviewRows)
+            inProgressSection(title: "Stopped", rows: snapshot.stoppedRows)
         }
     }
 
+    /// Shared Add Task chip used in In Progress bar and Backlog (same as Fix build / Commit & push).
+    private var addTaskChip: some View {
+        ActionButton(
+            title: "Add Task",
+            icon: "plus.circle.fill",
+            action: { showNewTaskComposer() },
+            help: "Add task (⌘T)",
+            style: .primary
+        )
+    }
+
+    /// Start Preview / Stop / Open in Browser / Configure Setup (external terminal; window closes on Stop).
+    private var previewButtonsBar: some View {
+        let debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
+        let startupContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
+        let isConfigured = !startupContents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasPreviewURL = !debugURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(spacing: CursorTheme.spaceS) {
+            addTaskChip
+            Spacer(minLength: 0)
+            if previewRunningInExternalTerminal {
+                ActionButton(
+                    title: "Stop",
+                    icon: "stop.fill",
+                    action: {
+                        _ = closePreviewTerminalWindow(workspacePath: workspacePath)
+                        previewRunningInExternalTerminal = false
+                    },
+                    help: "Close the preview terminal window",
+                    style: .stop
+                )
+                if hasPreviewURL {
+                    ActionButton(
+                        title: "Open in Browser",
+                        icon: "safari",
+                        action: {
+                            guard let url = URL(string: debugURL.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+                            openURLInChrome(url)
+                        },
+                        help: "Open the preview URL in Chrome",
+                        style: .primary
+                    )
+                }
+            } else {
+                if isConfigured {
+                    ActionButton(
+                        title: "Start Preview",
+                        icon: "play.fill",
+                        action: {
+                            if launchStartupScriptInNewWindow(workspacePath: workspacePath, preferredTerminal: preferredTerminal) == nil {
+                                previewRunningInExternalTerminal = true
+                            }
+                        },
+                        help: "Run .metro/startup.sh in a new terminal window (closed when you tap Stop)",
+                        style: .play
+                    )
+                }
+                if let launch = onLaunchSetupAgent {
+                    ActionButton(
+                        title: isConfigured ? "Regenerate Setup" : "Configure Setup",
+                        icon: "gearshape",
+                        action: { launch(workspacePath) },
+                        help: isConfigured ? "Launch an agent to regenerate .metro/startup.sh and debug URL" : "Launch an agent to set up .metro/startup.sh and debug URL for this project",
+                        style: .accent
+                    )
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     @ViewBuilder
-    private func inProgressSection(title: String, tasks sectionTasks: [ProjectTask]) -> some View {
-        if !sectionTasks.isEmpty {
-            let scopedTasks = sectionTasks.map { SectionScopedTaskRow(sectionID: title, task: $0) }
+    private func inProgressSection(title: String, rows scopedTasks: [SectionScopedTaskRow]) -> some View {
+        if !scopedTasks.isEmpty {
             VStack(alignment: .leading, spacing: CursorTheme.gapSectionTitleToContent) {
                 HStack(spacing: CursorTheme.spaceXS) {
                     sectionStatusIcon(title: title)
@@ -389,6 +583,33 @@ struct TasksListView: View {
     }
 
     @ViewBuilder
+    private func timeBucketSection(
+        title: String,
+        tasks: [ProjectTask],
+        @ViewBuilder showTaskRow: @escaping (ProjectTask) -> some View
+    ) -> some View {
+        if !tasks.isEmpty {
+            VStack(alignment: .leading, spacing: CursorTheme.gapSectionTitleToContent) {
+                HStack(spacing: CursorTheme.spaceXS) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: CursorTheme.fontIconList))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    Text(title)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                }
+                .frame(height: CursorTheme.fontIconList)
+                ForEach(tasks) { task in
+                    showTaskRow(task)
+                }
+            }
+            .padding(.top, CursorTheme.spaceM)
+            .padding(.bottom, CursorTheme.gapBetweenSections)
+            .id("bucket-\(title)")
+        }
+    }
+
+    @ViewBuilder
     private func sectionStatusIcon(title: String) -> some View {
         Group {
             switch title {
@@ -402,11 +623,6 @@ struct TasksListView: View {
                     .foregroundStyle(CursorTheme.semanticError)
             case "Processing":
                 LightBlueSpinner(size: CursorTheme.fontIconList - 4)
-                    .transaction { t in
-                        // Restore rotation animation; parent ScrollView sets transaction.animation = nil.
-                        t.animation = .linear(duration: 0.8).repeatForever(autoreverses: false)
-                    }
-                    .drawingGroup() // Rasterize so rotation doesn't trigger layout when list updates
             case "Todo":
                 Image(systemName: "person")
                     .font(.system(size: CursorTheme.fontIconList - 2, weight: .medium))
@@ -419,44 +635,22 @@ struct TasksListView: View {
         }
     }
 
-    private var newTaskButton: some View {
-        Button(action: {
-            showNewTaskComposer()
-        }) {
-            Label("New task", systemImage: "plus.circle.fill")
-                .font(.system(size: CursorTheme.fontBody, weight: .medium))
-                .foregroundStyle(CursorTheme.brandBlue)
+    @ViewBuilder
+    private func backlogContent(snapshot: TasksListSnapshot) -> some View {
+        HStack(spacing: CursorTheme.spaceS) {
+            addTaskChip
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, CursorTheme.spaceS)
-        .onHover { isNewTaskButtonHovered = $0 }
-        .overlay(alignment: .top) {
-            if isNewTaskButtonHovered {
-                Text("⌘T")
-                    .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                    .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
-                    .padding(.vertical, CursorTheme.paddingBadgeVertical)
-                    .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.spaceXS))
-                    .overlay(RoundedRectangle(cornerRadius: CursorTheme.spaceXS).strokeBorder(CursorTheme.border(for: colorScheme), lineWidth: 1))
-                    .offset(y: -32)
-                    .padding(.top, CursorTheme.spaceS)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var backlogContent: some View {
-        newTaskButton
-        let isEmpty = backlogTasks.isEmpty && !isAddingNewTask
+        let isEmpty = snapshot.backlogTasks.isEmpty && !isAddingNewTask
         if isEmpty {
             emptyStateBacklog
         } else {
             if isAddingNewTask {
                 newTaskRow
             }
-            ForEach(backlogTasks) { task in
+            ForEach(snapshot.backlogTasks) { task in
                 taskRow(task, stateTransitionLabel: "Move to In Progress", stateTransitionIcon: "arrow.right.circle", onStateTransition: {
                     ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: task.id, taskState: .inProgress)
                     reloadTasks()
@@ -466,8 +660,8 @@ struct TasksListView: View {
     }
 
     @ViewBuilder
-    private var completedContent: some View {
-        if visibleCompletedTasks.isEmpty {
+    private func completedContent(snapshot: TasksListSnapshot) -> some View {
+        if snapshot.visibleCompletedTasks.isEmpty {
             emptyStateCompleted
         } else {
             HStack(spacing: 8) {
@@ -480,19 +674,19 @@ struct TasksListView: View {
                 .buttonStyle(.plain)
             }
             .padding(.bottom, CursorTheme.spaceXS)
-            ForEach(visibleCompletedTasks) { task in
-                taskRow(task)
+            ForEach(Array(snapshot.completedGrouped.enumerated()), id: \.offset) { _, group in
+                timeBucketSection(title: group.title, tasks: group.tasks) { taskRow($0) }
             }
         }
     }
 
     @ViewBuilder
-    private var deletedContent: some View {
-        if deletedTasksList.isEmpty {
+    private func deletedContent(snapshot: TasksListSnapshot) -> some View {
+        if snapshot.deletedTasks.isEmpty {
             emptyStateDeleted
         } else {
-            ForEach(deletedTasksList) { task in
-                deletedTaskRow(task)
+            ForEach(Array(snapshot.deletedGrouped.enumerated()), id: \.offset) { _, group in
+                timeBucketSection(title: group.title, tasks: group.tasks) { deletedTaskRow($0) }
             }
         }
     }
@@ -744,7 +938,7 @@ struct TasksListView: View {
                         .padding(.horizontal, -4)
                         .padding(.vertical, -4)
                     if newTaskDraft.isEmpty {
-                        Text("New task…")
+                        Text("Add task…")
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             .allowsHitTesting(false)
@@ -941,7 +1135,7 @@ private struct TaskRowView: View {
     var stateTransitionLabel: String? = nil
     var stateTransitionIcon: String = "arrow.right.circle"
     var onStateTransition: (() -> Void)? = nil
-    /// When non-nil (processing tasks), the row shows a 3-dot menu with a single "Stop agent" item.
+    /// When non-nil (processing tasks), the row shows a 3-dot menu with a single "Stop" item.
     var onStopAgent: (() -> Void)? = nil
     /// When non-nil (stopped tasks), the row shows "Continue" which focuses the agent and sends "continue".
     var onContinueAgent: (() -> Void)? = nil
@@ -954,84 +1148,27 @@ private struct TaskRowView: View {
     private var canDelegate: Bool { task.taskState == .inProgress && agentTaskState == .none }
     /// Stopped agents are not editable; only non-completed, non-processing, non-stopped tasks can be edited.
     private var canEdit: Bool { !task.completed && !isProcessing && !isStopped }
+    /// When true, show model picker; when false, show read-only chip (no dropdown).
+    private var canEditAgentModel: Bool { !isProcessing && !isStopped }
+    private var selectedModel: ModelOption {
+        models.first { $0.id == task.modelId } ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
+    }
 
-    var body: some View {
-        HStack(alignment: .top, spacing: CursorTheme.spaceS) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                if isEditing && !task.completed {
-                    TextEditor(text: $editDraft)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        .scrollContentBackground(.hidden)
-                        .lineSpacing(6)
-                        .padding(.vertical, CursorTheme.spaceXS)
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
-                        .focused(isEditorFocused)
-                        .onKeyPress { press in
-                            if press.key == .return {
-                                if NSEvent.modifierFlags.contains(.shift) {
-                                    return .ignored
-                                }
-                                onCommitEdit()
-                                return .handled
-                            }
-                            return .ignored
-                        }
-                        .onKeyPress(.escape) {
-                            onCancelEdit()
-                            return .handled
-                        }
-                    if !models.isEmpty {
-                        ModelPickerView(
-                            selectedModelId: task.modelId,
-                            models: models,
-                            onSelect: { onModelChange?($0) }
-                        )
-                        .disabled(isProcessing)
-                    }
-                } else {
-                    // Same line: task text | screenshots | (menu is in trailing HStack)
-                    HStack(alignment: .top, spacing: CursorTheme.spaceS) {
-                        Text(task.content)
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
-                            .strikethrough(task.completed)
-                            .multilineTextAlignment(.leading)
-                            .lineLimit(4)
-                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                if canOpenLinkedAgent {
-                                    onTap()
-                                }
-                            }
-                            .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
-                        if !task.screenshotPaths.isEmpty {
-                            TaskScreenshotStripView(
-                                workspacePath: workspacePath,
-                                paths: task.screenshotPaths,
-                                onPreview: { onPreviewScreenshot?($0) },
-                                onDelete: onDeleteScreenshot
-                            )
-                        }
-                    }
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                }
-                if !task.completed, !models.isEmpty, !isEditing {
-                    ModelPickerView(
-                        selectedModelId: task.modelId,
-                        models: models,
-                        onSelect: { onModelChange?($0) }
-                    )
-                    .disabled(isProcessing)
-                }
+    /// Trailing controls (screenshot strip + 3-dot menu) shown in an overlay so they sit exactly halfway down the card.
+    @ViewBuilder
+    private var trailingControls: some View {
+        HStack(spacing: CursorTheme.spaceS) {
+            if !task.screenshotPaths.isEmpty {
+                TaskScreenshotStripView(
+                    workspacePath: workspacePath,
+                    paths: task.screenshotPaths,
+                    onPreview: { onPreviewScreenshot?($0) },
+                    onDelete: onDeleteScreenshot
+                )
             }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-
             if isProcessing, let onStopAgent {
                 Menu {
-                    Button("Stop agent", systemImage: "stop.fill") {
+                    Button("Stop", systemImage: "stop.fill") {
                         onStopAgent()
                     }
                 } label: {
@@ -1092,12 +1229,94 @@ private struct TaskRowView: View {
                 .menuIndicator(.hidden)
             }
         }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: CursorTheme.spaceS) {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                if isEditing && !task.completed {
+                    TextEditor(text: $editDraft)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .scrollContentBackground(.hidden)
+                        .lineSpacing(6)
+                        .padding(.vertical, CursorTheme.spaceXS)
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
+                        .focused(isEditorFocused)
+                        .onKeyPress { press in
+                            if press.key == .return {
+                                if NSEvent.modifierFlags.contains(.shift) {
+                                    return .ignored
+                                }
+                                onCommitEdit()
+                                return .handled
+                            }
+                            return .ignored
+                        }
+                        .onKeyPress(.escape) {
+                            onCancelEdit()
+                            return .handled
+                        }
+                    if !models.isEmpty {
+                        Group {
+                            if canEditAgentModel {
+                                ModelPickerView(
+                                    selectedModelId: task.modelId,
+                                    models: models,
+                                    onSelect: { onModelChange?($0) }
+                                )
+                            } else {
+                                ModelChipView(model: selectedModel)
+                            }
+                        }
+                        .padding(.top, CursorTheme.spaceS)
+                    }
+                } else {
+                    // Task text only; screenshot strip and menu are in trailing overlay (vertically centered)
+                    Text(task.content)
+                        .font(.system(size: 14, weight: .regular))
+                        .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
+                        .strikethrough(task.completed)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if canOpenLinkedAgent {
+                                onTap()
+                            }
+                        }
+                        .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
+                }
+                if !task.completed, !models.isEmpty, !isEditing {
+                    Group {
+                        if canEditAgentModel {
+                            ModelPickerView(
+                                selectedModelId: task.modelId,
+                                models: models,
+                                onSelect: { onModelChange?($0) }
+                            )
+                        } else {
+                            ModelChipView(model: selectedModel)
+                        }
+                    }
+                    .padding(.top, CursorTheme.spaceS)
+                }
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 88)
+        }
         .padding(CursorTheme.paddingCard)
         .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
+        .overlay(alignment: .trailing) {
+            trailingControls
+                .padding(.trailing, CursorTheme.paddingCard)
+        }
         .contextMenu {
             if canOpenLinkedAgent {
                 Button("Open linked Agent", systemImage: "arrow.up.right") {

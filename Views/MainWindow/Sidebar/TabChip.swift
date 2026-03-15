@@ -7,17 +7,16 @@ private let spinnerLightBlue = CursorTheme.spinnerBlue
 
 struct LightBlueSpinner: View {
     var size: CGFloat = 14
-    @State private var rotation: Double = 0
 
     var body: some View {
-        Circle()
-            .trim(from: 0.15, to: 0.85)
-            .stroke(spinnerLightBlue, style: StrokeStyle(lineWidth: max(1.5, size / 8), lineCap: .round))
-            .frame(width: size, height: size)
-            .rotationEffect(.degrees(rotation))
-            .onAppear {
-                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) { rotation = 360 }
-            }
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: false)) { context in
+            let rotation = context.date.timeIntervalSinceReferenceDate.remainder(dividingBy: 0.8) / 0.8 * 360
+            Circle()
+                .trim(from: 0.15, to: 0.85)
+                .stroke(spinnerLightBlue, style: StrokeStyle(lineWidth: max(1.5, size / 8), lineCap: .round))
+                .frame(width: size, height: size)
+                .rotationEffect(.degrees(rotation))
+        }
     }
 }
 

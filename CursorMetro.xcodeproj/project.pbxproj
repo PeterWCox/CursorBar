@@ -54,7 +54,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A3000001 /* Cursor+.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cursor+.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A3000001 /* Cursor Metro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Cursor Metro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2000001 /* CursorPlusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CursorPlusApp.swift; sourceTree = "<group>"; };
 		A2000002 /* PopoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoutView.swift; sourceTree = "<group>"; };
 		A2000003 /* AgentRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRunner.swift; sourceTree = "<group>"; };
@@ -511,7 +511,7 @@
 					"-interposable",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.cursorplus.app;
-				PRODUCT_NAME = "Cursor+";
+				PRODUCT_NAME = "Cursor Metro";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -538,7 +538,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.cursorplus.app;
-				PRODUCT_NAME = "Cursor+";
+				PRODUCT_NAME = "Cursor Metro";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

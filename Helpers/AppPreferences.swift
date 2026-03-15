@@ -33,12 +33,14 @@ enum AppPreferences {
     static let preferredAppearanceKey = "preferredAppearance"
     /// Key for placing the agent tabs sidebar and logo on the right (mirrored layout). Persisted via UserDefaults.
     static let sidebarOnRightKey = "sidebarOnRight"
-    /// Key for forcing the agent CLI to allow commands without prompting (CLI -f / --force). Default: false.
-    static let agentForceAllowCommandsKey = "agentForceAllowCommands"
     /// Key for model IDs to hide from the model picker. Persisted via UserDefaults when used with @AppStorage.
     static let disabledModelIdsKey = "disabledModelIds"
     /// Default value: no models disabled, so all models are shown in the picker.
     static let defaultDisabledModelIdsRaw: String = ""
+    /// Key for project paths to hide from the agent sidebar. Persisted via UserDefaults when used with @AppStorage.
+    static let hiddenProjectPathsKey = "hiddenProjectPaths"
+    /// Default value: no projects hidden, so all projects are shown in the sidebar.
+    static let defaultHiddenProjectPathsRaw: String = ""
     /// Default appearance: follow system light/dark.
     static let defaultPreferredAppearance: String = PreferredAppearance.system.rawValue
 
@@ -74,5 +76,26 @@ enum AppPreferences {
             return allIds.subtracting(enabled)
         }
         return disabledModelIds(from: raw)
+    }
+
+    /// Parses the stored hidden project paths string (comma-separated, normalized) into a set.
+    static func hiddenProjectPaths(from raw: String) -> Set<String> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        return Set(trimmed.split(separator: ",").map { path in
+            String(path).trimmingCharacters(in: .whitespaces)
+        }.map(normalizedProjectPath).filter { !$0.isEmpty })
+    }
+
+    /// Serializes a set of hidden project paths to the stored string format (normalized).
+    static func rawFrom(hiddenPaths: Set<String>) -> String {
+        hiddenPaths.map(normalizedProjectPath).filter { !$0.isEmpty }.sorted().joined(separator: ",")
+    }
+
+    /// Normalizes a project path for storage and comparison (e.g. expand tilde).
+    static func normalizedProjectPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return (trimmed as NSString).expandingTildeInPath
     }
 }

@@ -15,11 +15,11 @@ struct KeyboardShortcutsContentView: View {
         ("App", [
             ShortcutRow(keys: ["⌘,"], action: "Open Settings"),
             ShortcutRow(keys: ["⌘0"], action: "Center popup (menu bar only)"),
-            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor+"),
+            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor Metro"),
             ShortcutRow(keys: ["⎋ Esc"], action: "Dismiss modal / Cancel"),
         ]),
         ("Tabs", [
-            ShortcutRow(keys: ["⌘T"], action: "New task"),
+            ShortcutRow(keys: ["⌘T"], action: "Add task"),
             ShortcutRow(keys: ["⌘G"], action: "Focus Git tab for current project"),
             ShortcutRow(keys: ["⌘O"], action: "Open in Browser (or set URL)"),
             ShortcutRow(keys: ["⌘."], action: "Open current project in Cursor"),
@@ -35,7 +35,7 @@ struct KeyboardShortcutsContentView: View {
             ShortcutRow(keys: ["⌘V"], action: "Paste (including screenshots)"),
         ]),
         ("Agent", [
-            ShortcutRow(keys: ["⌃C"], action: "Stop agent"),
+            ShortcutRow(keys: ["⌃C"], action: "Stop"),
         ]),
         ("Window", [
             ShortcutRow(keys: ["⌘B", "⌘S"], action: "Collapse/expand main content"),

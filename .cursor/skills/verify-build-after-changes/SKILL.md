@@ -1,6 +1,6 @@
 ---
 name: verify-build-after-changes
-description: Ensures the Cursor+ app still compiles after agent-made code changes. Use after editing Swift or other source files, refactoring, or applying fixes—run a build and fix any compile errors before considering the task done.
+description: Ensures the Cursor Metro app still compiles after agent-made code changes. Use after editing Swift or other source files, refactoring, or applying fixes—run a build and fix any compile errors before considering the task done.
 ---
 
 # Verify Build After Changes
@@ -41,4 +41,4 @@ To see only errors: append `| grep -E "error:|BUILD SUCCEEDED|BUILD FAILED"`.
 
 ## Reference
 
-- Full build options (Debug/Release, output paths): use the **build-cursorplus** skill when the user explicitly asks for a build or release.
+- Full build options (Debug/Release, output paths): use the **build-cursorplus** skill when the user explicitly asks for a build or release (skill refers to Cursor Metro).

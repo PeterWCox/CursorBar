@@ -18,11 +18,13 @@ struct DashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     var onDismiss: () -> Void
-    /// Remove this project from Cursor+ without deleting files on disk.
+    /// Remove this project from Cursor Metro without deleting files on disk.
     var onRemoveProject: () -> Void
     @Binding var selectedTab: DashboardTab
     /// When set, Regenerate Setup (and Configure Setup when not configured) launches an agent with a setup prompt instead of switching to Advanced. Call with workspace path.
     var onLaunchSetupAgent: ((String) -> Void)? = nil
+    /// When false, the view does not show its own header (e.g. when the panel title row already shows "Preview" + project).
+    var showHeader: Bool = true
 
     @State private var debugURL: String = ""
     @State private var startupScriptContents: String = ""
@@ -32,21 +34,22 @@ struct DashboardView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if showHeader { header }
             dashboardTabBar
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
-            if selectedTab == .preview {
-                previewContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView(.vertical, showsIndicators: true) {
-                    tabContent()
-                        .padding(CursorTheme.paddingPanel)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Preview tab and internal terminal commented out; preview buttons moved to Tasks → In Progress. Uncomment to restore.
+            // if selectedTab == .preview {
+            //     previewContent
+            //         .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // } else {
+            ScrollView(.vertical, showsIndicators: true) {
+                tabContent()
+                    .padding(CursorTheme.paddingPanel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -93,7 +96,8 @@ struct DashboardView: View {
 
     private var dashboardTabBar: some View {
         HStack(spacing: 0) {
-            ForEach(DashboardTab.allCases, id: \.self) { tab in
+            // Only show Advanced; Preview tab commented out (buttons moved to Tasks → In Progress)
+            ForEach([DashboardTab.settings], id: \.self) { tab in
                 Button {
                     selectedTab = tab
                 } label: {
@@ -117,14 +121,16 @@ struct DashboardView: View {
     @ViewBuilder
     private func tabContent() -> some View {
         switch selectedTab {
-        case .preview:
-            EmptyView()
+        // case .preview:
+        //     EmptyView()
         case .settings:
             settingsContent
+        case .preview:
+            EmptyView() // keep for enum exhaustiveness; tab bar hides .preview
         }
     }
 
-    // MARK: - Preview tab (terminal + Start Preview / Configure Setup)
+    // MARK: - Preview tab (terminal + Start Preview / Configure Setup) — commented out for later; use Tasks → In Progress + external terminal
 
     private static let defaultStartupScript = """
     #!/bin/bash
@@ -145,6 +151,7 @@ struct DashboardView: View {
     Detect the project type from the repo (package.json, etc.) and configure accordingly.
     """
 
+    #if false // Preview tab + internal terminal: restore by setting to true and uncommenting body branch + tab bar
     private var previewContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: CursorTheme.spaceS) {
@@ -153,7 +160,6 @@ struct DashboardView: View {
                 let hasPreviewURL = (debugURL.trimmingCharacters(in: .whitespacesAndNewlines)).isEmpty == false
 
                 if terminalRunning {
-                    // State: terminal running — Stop + Open in Browser
                     ActionButton(
                         title: "Stop",
                         icon: "stop.fill",
@@ -177,7 +183,6 @@ struct DashboardView: View {
                         )
                     }
                 } else {
-                    // State: terminal not running — Start (if configured) + Regenerate/Configure Setup
                     if isConfigured {
                         ActionButton(
                             title: "Start Preview",
@@ -232,6 +237,7 @@ struct DashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+    #endif
 
     // MARK: - Settings tab
 
@@ -283,10 +289,10 @@ struct DashboardView: View {
             }
 
             VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                Text("Remove from Cursor+")
+                Text("Remove from Cursor Metro")
                     .font(.system(size: CursorTheme.fontSecondary, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                Text("Remove this project from the sidebar and close its tabs in Cursor+. This does not delete the project folder or any files on disk.")
+                Text("Remove this project from the sidebar and close its tabs in Cursor Metro. This does not delete the project folder or any files on disk.")
                     .font(.system(size: CursorTheme.fontBodySmall, weight: .regular))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
@@ -298,7 +304,7 @@ struct DashboardView: View {
                         .foregroundStyle(CursorTheme.semanticError)
                 }
                 .buttonStyle(.plain)
-                .help("Remove this project from Cursor+ without deleting any files")
+                .help("Remove this project from Cursor Metro without deleting any files")
             }
             .padding(CursorTheme.paddingCard)
             .frame(maxWidth: .infinity, alignment: .leading)

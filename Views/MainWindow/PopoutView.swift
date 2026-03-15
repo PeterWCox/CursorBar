@@ -171,6 +171,7 @@ private struct PopoutTasksListContent: View {
     let onStopAgent: (ProjectTask) -> Void
     let onTasksDidUpdate: () -> Void
     let onDismiss: () -> Void
+    var onLaunchSetupAgent: ((String) -> Void)? = nil
     var showHeader: Bool = true
 
     var body: some View {
@@ -186,7 +187,8 @@ private struct PopoutTasksListContent: View {
             onStopAgent: onStopAgent,
             onTasksDidUpdate: onTasksDidUpdate,
             onDismiss: onDismiss,
-            showHeader: showHeader
+            showHeader: showHeader,
+            onLaunchSetupAgent: onLaunchSetupAgent
         )
         .id(tasksPath)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -228,6 +230,7 @@ struct PopoutView: View {
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
+    @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
@@ -247,19 +250,18 @@ struct PopoutView: View {
     @State private var screenshotPreviewURL: URL? = nil
     /// Workspace paths for groups that are collapsed in the sidebar (accordion).
     @State private var collapsedGroupPaths: Set<String> = []
-    /// When set, the queued follow-up with this ID is in edit mode; draft text is in editingFollowUpDraft.
-    @State private var editingFollowUpID: UUID? = nil
-    @State private var editingFollowUpDraft: String = ""
     /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
     @State private var tasksViewTriggerAddNew: Bool = false
-    @State private var dashboardTabsByWorkspacePath: [String: DashboardTab] = [:]
-    /// When set, the dashboard for this path stays mounted (hidden when not selected) so the Preview terminal persists when switching to Agent/Terminal and back.
-    @State private var dashboardMountedForPath: String? = nil
     @StateObject private var tasksViewShortcutCoordinator = TasksViewShortcutCoordinator()
     /// Tab whose agent header prompt accordion is expanded (show full prompt below title).
     @State private var expandedPromptTabID: UUID? = nil
+    /// How many of the most recent turns are mounted for each tab. `Int.max` means full history.
+    @State private var visibleTurnLimitsByTabID: [UUID: Int] = [:]
     /// When true, hide main agent content and show only title bar + tab sidebar (uses AppState so panel can resize).
     private var isMainContentCollapsed: Bool { appState.isMainContentCollapsed }
+
+    private static let defaultVisibleTurnLimit = 40
+    private static let visibleTurnPageSize = 30
 
     /// Active tab when there is at least one; otherwise nil (splash state).
     private var tab: AgentTab? { tabManager.activeTab }
@@ -287,6 +289,74 @@ struct PopoutView: View {
     private func openPreview(for workspacePath: String) {
         guard let url = previewURL(for: workspacePath) else { return }
         openURLInChrome(url)
+    }
+
+    private func visibleTurnLimit(for tab: AgentTab) -> Int {
+        if let storedLimit = visibleTurnLimitsByTabID[tab.id] {
+            return storedLimit
+        }
+
+        return tab.turns.count > Self.defaultVisibleTurnLimit
+            ? Self.defaultVisibleTurnLimit
+            : Int.max
+    }
+
+    private func displayedTurns(for tab: AgentTab) -> [ConversationTurn] {
+        let limit = visibleTurnLimit(for: tab)
+        guard limit != Int.max, tab.turns.count > limit else {
+            return tab.turns
+        }
+        return Array(tab.turns.suffix(limit))
+    }
+
+    private func hiddenTurnCount(for tab: AgentTab) -> Int {
+        max(0, tab.turns.count - displayedTurns(for: tab).count)
+    }
+
+    private func showOlderTurns(for tab: AgentTab) {
+        let currentLimit = visibleTurnLimit(for: tab)
+        let baseLimit = currentLimit == Int.max ? tab.turns.count : currentLimit
+        let nextLimit = min(tab.turns.count, baseLimit + Self.visibleTurnPageSize)
+        visibleTurnLimitsByTabID[tab.id] = nextLimit >= tab.turns.count ? Int.max : nextLimit
+    }
+
+    private func showAllTurns(for tab: AgentTab) {
+        visibleTurnLimitsByTabID[tab.id] = Int.max
+    }
+
+    private func conversationWindowBar(tab: AgentTab, hiddenTurnCount: Int, visibleTurnCount: Int) -> some View {
+        return Group {
+            if hiddenTurnCount > 0 {
+                HStack(alignment: .center, spacing: 10) {
+                    Text("Showing latest \(visibleTurnCount) of \(tab.turns.count) messages")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+
+                    Spacer(minLength: 0)
+
+                    Button("Show \(min(hiddenTurnCount, Self.visibleTurnPageSize)) older") {
+                        showOlderTurns(for: tab)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(CursorTheme.brandBlue)
+
+                    Button("Show all") {
+                        showAllTurns(for: tab)
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+            }
+        }
     }
 
 
@@ -571,29 +641,12 @@ struct PopoutView: View {
             onStopAgent: { task in stopAgentForTask(task, workspacePath: tasksPath) },
             onTasksDidUpdate: { appState.notifyTasksDidUpdate() },
             onDismiss: { tabManager.hideTasksView() },
-            showHeader: false
-        )
-    }
-
-    private func dashboardContent(dashboardPath: String) -> some View {
-        DashboardView(
-            workspacePath: dashboardPath,
-            onDismiss: { tabManager.hideDashboardView() },
-            onRemoveProject: {
-                removeProject(workspacePath: dashboardPath)
-            },
-            selectedTab: Binding(
-                get: { dashboardTabsByWorkspacePath[dashboardPath] ?? .preview },
-                set: { dashboardTabsByWorkspacePath[dashboardPath] = $0 }
-            ),
             onLaunchSetupAgent: { path in
                 _ = addNewAgentTab(initialPrompt: DashboardView.setupAgentPrompt, lastWorkspacePath: path)
                 tabManager.hideDashboardView()
-            }
+            },
+            showHeader: false
         )
-        .id(dashboardPath)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(12)
     }
 
     /// Removes a project (all tabs for that workspace path) from the sidebar. Stops any running agents first.
@@ -657,20 +710,6 @@ struct PopoutView: View {
         openProjectInCursor(path)
     }
 
-    private func focusDashboardTab(_ tab: DashboardTab) {
-        guard hasOpenProjects else {
-            addProject()
-            return
-        }
-        let path = currentWorkspacePath
-        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return }
-        dashboardTabsByWorkspacePath[path] = tab
-        tabManager.showDashboardView(workspacePath: path)
-        if appState.isMainContentCollapsed {
-            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-        }
-    }
-
     private var globalShortcutOverlay: some View {
         Group {
             hiddenShortcutButton("Settings", key: ",") {
@@ -685,7 +724,7 @@ struct PopoutView: View {
                 openCurrentProjectInCursor()
             }
 
-            hiddenShortcutButton("New Task", key: "t") {
+            hiddenShortcutButton("Add Task", key: "t") {
                 showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true)
             }
 
@@ -710,7 +749,7 @@ struct PopoutView: View {
 
             // Only claim Control+C when an agent tab is active so the terminal can receive it for SIGINT.
             if tabManager.activeTerminalTab == nil {
-                hiddenShortcutButton("Stop Agent", key: "c", modifiers: .control) {
+                hiddenShortcutButton("Stop", key: "c", modifiers: .control) {
                     if tabManager.activeTab?.isRunning == true {
                         stopStreaming()
                     }
@@ -830,22 +869,25 @@ struct PopoutView: View {
         return agentState == .processing || agentState == .review || agentState == .stopped
     }
 
-    /// Tabs grouped by workspace path, order preserved by first occurrence. Linked agent tabs only appear while their tasks are actively in progress.
+    /// Tabs grouped by workspace path, order preserved by first occurrence. Linked agent tabs only appear while their tasks are actively in progress. Projects hidden in Settings are excluded.
     private var tabGroups: [TabSidebarGroup] {
         _ = appState.taskListRevision
         let visibleTabs = tabManager.tabs.filter { isAgentTabVisibleInSidebar($0) }
         let groupedTabs = Dictionary(grouping: visibleTabs, by: \.workspacePath)
         let groupedTerminals = Dictionary(grouping: tabManager.terminalTabs, by: \.workspacePath)
-        return tabManager.projects.map { project in
-            let path = project.path
-            let displayName = appState.workspaceDisplayName(for: path)
-            return TabSidebarGroup(
-                path: path,
-                displayName: displayName.isEmpty ? "Project" : displayName,
-                tabs: groupedTabs[path] ?? [],
-                terminalTabs: groupedTerminals[path] ?? []
-            )
-        }
+        let hiddenPaths = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
+        return tabManager.projects
+            .filter { !hiddenPaths.contains(AppPreferences.normalizedProjectPath($0.path)) }
+            .map { project in
+                let path = project.path
+                let displayName = appState.workspaceDisplayName(for: path)
+                return TabSidebarGroup(
+                    path: path,
+                    displayName: displayName.isEmpty ? "Project" : displayName,
+                    tabs: groupedTabs[path] ?? [],
+                    terminalTabs: groupedTerminals[path] ?? []
+                )
+            }
     }
 
     @ViewBuilder
@@ -861,11 +903,6 @@ struct PopoutView: View {
             }
             if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
                 tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
-            }
-            if let dashboardPath = tabManager.selectedDashboardViewPath ?? dashboardMountedForPath, dashboardPath == selectedProjectPath {
-                dashboardContent(dashboardPath: dashboardPath)
-                    .opacity(tabManager.selectedDashboardViewPath != nil ? 1 : 0)
-                    .allowsHitTesting(tabManager.selectedDashboardViewPath != nil)
             }
             if tabManager.selectedTerminalID == nil {
                 agentOrEmptyContent
@@ -902,6 +939,7 @@ struct PopoutView: View {
             }
             .frame(width: effectiveSidebarWidth)
             .clipped()
+            .padding(isSidebarOnRight ? .leading : .trailing, CursorTheme.spaceS)
             let dividerView = Group {
                 if !isMainContentCollapsed {
                     Divider()
@@ -915,7 +953,7 @@ struct PopoutView: View {
                     Color.clear.frame(width: 0).clipped()
                 } else {
                     VStack(spacing: 0) {
-                        mainColumnTitleRow
+                        mainColumnHeaderArea
                         mainContentZStack
                     }
                     .frame(maxWidth: .infinity)
@@ -923,6 +961,7 @@ struct PopoutView: View {
             }
             .frame(width: agentWidth)
             .clipped()
+            .padding(isSidebarOnRight ? .trailing : .leading, CursorTheme.spaceS)
 
             HStack(alignment: .top, spacing: 0) {
                 if isSidebarOnRight {
@@ -936,6 +975,7 @@ struct PopoutView: View {
                 }
             }
             .clipped()
+            .frame(maxWidth: .infinity, alignment: isSidebarOnRight ? .trailing : .leading)
         }
         .frame(maxWidth: .infinity)
     }
@@ -946,18 +986,6 @@ struct PopoutView: View {
             .frame(minWidth: isMainContentCollapsed ? 260 : (sidebarWidth + 110), maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
             .preferredColorScheme(resolvedColorScheme)
             .background(CursorTheme.panelGradient(for: colorScheme))
-            .onChange(of: tabManager.selectedDashboardViewPath) { _, new in
-                if let path = new { dashboardMountedForPath = path }
-            }
-            .onChange(of: tabManager.selectedProjectPath) { _, _ in
-                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
-            }
-            .onChange(of: tabManager.selectedTabID) { _, _ in
-                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
-            }
-            .onChange(of: tabManager.selectedTerminalID) { _, _ in
-                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
-            }
     }
 
     private var bodyWithShortcuts: some View {
@@ -1120,20 +1148,7 @@ struct PopoutView: View {
             ? CursorTheme.textPrimary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: currentWorkspacePath)
         return HStack(spacing: 14) {
-            if isSidebarOnRight, isMainContentCollapsed {
-                IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
-                ThreeDotMenuButton(size: .medium, help: "More options") {
-                    Button(action: { appState.showSettingsSheet = true }) {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    Button(action: dismiss) {
-                        Label("Minimise", systemImage: "minus")
-                    }
-                }
-            }
-            if isSidebarOnRight { Spacer(minLength: 0) }
-
-            CursorPlusLogoView(height: isMainContentCollapsed ? 28 : 36, projectColor: projectColor)
+            CursorPlusLogoView(height: 36, projectColor: projectColor)
 
             if !isMainContentCollapsed {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1155,7 +1170,18 @@ struct PopoutView: View {
                 }
             }
 
-            if !isSidebarOnRight { Spacer(minLength: 0) }
+            Spacer(minLength: 0)
+            if isSidebarOnRight, isMainContentCollapsed {
+                IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
+                ThreeDotMenuButton(size: .medium, help: "More options") {
+                    Button(action: { appState.showSettingsSheet = true }) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    Button(action: dismiss) {
+                        Label("Minimise", systemImage: "minus")
+                    }
+                }
+            }
             if !isSidebarOnRight, isMainContentCollapsed {
                 ThreeDotMenuButton(size: .medium, help: "More options") {
                     Button(action: { appState.showSettingsSheet = true }) {
@@ -1168,9 +1194,9 @@ struct PopoutView: View {
                 IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
             }
         }
-        .padding(.horizontal, Self.sidebarHeaderPadding)
-        .padding(.leading, isSidebarOnRight ? Self.sidebarHeaderPadding : 10)
-        .padding(.trailing, isSidebarOnRight ? 10 : Self.sidebarHeaderPadding)
+        .padding(.horizontal, isSidebarOnRight ? 0 : Self.sidebarHeaderPadding)
+        .padding(.leading, isSidebarOnRight ? CursorTheme.spaceS : 10)
+        .padding(.trailing, isSidebarOnRight ? CursorTheme.spaceM : Self.sidebarHeaderPadding)
         .padding(.top, Self.sidebarHeaderVerticalPadding)
         .padding(.bottom, Self.sidebarHeaderVerticalPadding)
     }
@@ -1193,18 +1219,34 @@ struct PopoutView: View {
         .padding(.vertical, CursorTheme.paddingHeaderVertical)
     }
 
+    /// Header area: title row plus optional expanded agent prompt (so prompt shows as part of header, not a separate body).
+    @ViewBuilder
+    private var mainColumnHeaderArea: some View {
+        mainColumnTitleRow
+        if let tab = tabManager.activeTab, expandedPromptTabID == tab.id {
+            agentExpandedPromptInHeader(tab: tab)
+        }
+    }
+
     @ViewBuilder
     private var mainColumnTitleContent: some View {
         if let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
             tasksTitleContent(workspacePath: tasksPath)
-        } else if let dashboardPath = tabManager.selectedDashboardViewPath ?? dashboardMountedForPath, dashboardPath == selectedProjectPath {
-            previewTitleContent(workspacePath: dashboardPath)
         } else if tabManager.selectedTerminalID != nil, let path = selectedProjectPath {
             terminalTitleContent(workspacePath: path)
         } else if let tab = tabManager.activeTab {
             agentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
         } else {
             EmptyView()
+        }
+    }
+
+    private func agentExpandedPromptInHeader(tab: AgentTab) -> some View {
+        let fullPrompt = (tab.turns.first?.userPrompt ?? tab.prompt).trimmingCharacters(in: .whitespacesAndNewlines)
+        return Group {
+            if !fullPrompt.isEmpty {
+                fullPromptAccordionContent(fullPrompt: fullPrompt, workspacePath: tab.workspacePath)
+            }
         }
     }
 
@@ -1216,32 +1258,6 @@ struct PopoutView: View {
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tasks")
-                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                    .lineLimit(1)
-                HStack(spacing: CursorTheme.spaceXS) {
-                    Image(systemName: "folder")
-                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    private func previewTitleContent(workspacePath path: String) -> some View {
-        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .frame(width: 32, height: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Preview")
                     .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
                     .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                     .lineLimit(1)
@@ -1408,37 +1424,38 @@ struct PopoutView: View {
 
                             }
                             if !isCollapsed {
-                                let isPreviewSelected = tabManager.selectedDashboardViewPath == group.path
-                                Button {
-                                    dashboardTabsByWorkspacePath[group.path] = .preview
-                                    tabManager.showDashboardView(workspacePath: group.path)
-                                    if appState.isMainContentCollapsed {
-                                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "square.grid.2x2")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        Text("Preview")
-                                            .font(.system(size: 12, weight: isPreviewSelected ? .semibold : .medium))
-                                            .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        isPreviewSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isPreviewSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .help("Preview: terminal, Start Preview, Configure Setup")
+                                // Preview tab and internal terminal commented out; buttons moved to Tasks → In Progress; use external terminal (close on Stop). Uncomment to restore.
+                                // let isPreviewSelected = tabManager.selectedDashboardViewPath == group.path
+                                // Button {
+                                //     dashboardTabsByWorkspacePath[group.path] = .preview
+                                //     tabManager.showDashboardView(workspacePath: group.path)
+                                //     if appState.isMainContentCollapsed {
+                                //         withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+                                //     }
+                                // } label: {
+                                //     HStack(spacing: 6) {
+                                //         Image(systemName: "square.grid.2x2")
+                                //             .font(.system(size: 12))
+                                //             .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                //         Text("Preview")
+                                //             .font(.system(size: 12, weight: isPreviewSelected ? .semibold : .medium))
+                                //             .foregroundStyle(isPreviewSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                //             .lineLimit(1)
+                                //             .frame(maxWidth: .infinity, alignment: .leading)
+                                //     }
+                                //     .padding(.horizontal, 12)
+                                //     .padding(.vertical, 7)
+                                //     .background(
+                                //         isPreviewSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                                //         in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                //     )
+                                //     .overlay(
+                                //         RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                //             .stroke(isPreviewSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                                //     )
+                                // }
+                                // .buttonStyle(.plain)
+                                // .help("Preview: terminal, Start Preview, Configure Setup")
                                 let isTasksSelected = tabManager.selectedTasksViewPath == group.path
                                 Button {
                                     tabManager.showTasksView(workspacePath: group.path)
@@ -1608,12 +1625,12 @@ struct PopoutView: View {
             Text(displayText)
                 .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                 .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
                 .padding(CursorTheme.paddingCard)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
@@ -1647,12 +1664,7 @@ struct PopoutView: View {
     }
 
     private func agentAreaContent(tab: AgentTab, expandedPromptTabID: Binding<UUID?>) -> some View {
-        let fullPrompt = (tab.turns.first?.userPrompt ?? tab.prompt).trimmingCharacters(in: .whitespacesAndNewlines)
-        let isExpanded = expandedPromptTabID.wrappedValue == tab.id
         return VStack(spacing: 0) {
-            if isExpanded && !fullPrompt.isEmpty {
-                fullPromptAccordionContent(fullPrompt: fullPrompt, workspacePath: tab.workspacePath)
-            }
             Divider()
                 .background(CursorTheme.border(for: colorScheme))
 
@@ -1755,18 +1767,25 @@ struct PopoutView: View {
     // MARK: - Output card
 
     private func outputCard(tab: AgentTab) -> some View {
-        OutputScrollView(
+        let visibleTurns = displayedTurns(for: tab)
+        let hiddenTurnTotal = hiddenTurnCount(for: tab)
+        return OutputScrollView(
             tab: tab,
             scrollToken: tab.scrollToken,
             content: {
-                // VStack (not LazyVStack): LazyVStack in ScrollView can fail to re-layout when appending
-                // a new turn, so nothing renders until e.g. switching tabs. Conversation length is
-                // typically small; equatable + throttling keep redraw cost low.
+                // Keep the stack eager for reliable append/layout behavior, but mount only the most
+                // recent slice by default so long conversations do not keep every markdown view alive.
                 VStack(alignment: .leading, spacing: 18) {
                     if tab.turns.isEmpty {
                         emptyStateContent(tab: tab)
                     } else {
-                        ForEach(tab.turns) { turn in
+                        conversationWindowBar(
+                            tab: tab,
+                            hiddenTurnCount: hiddenTurnTotal,
+                            visibleTurnCount: visibleTurns.count
+                        )
+
+                        ForEach(visibleTurns) { turn in
                             ConversationTurnView(turn: turn, workspacePath: tab.workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
                                 .equatable()
                                 .id(turn.id)
@@ -1811,8 +1830,6 @@ struct PopoutView: View {
                     isRunning: tab.isRunning
                 )
             }
-
-            queuedFollowUpsView(tab: tab)
 
             ForEach(Array(attachedPaths.enumerated()), id: \.offset) { _, path in
                 ScreenshotCardView(
@@ -1962,45 +1979,38 @@ struct PopoutView: View {
         }
     }
 
+    @ViewBuilder
     private func sendStopButton(tab: AgentTab) -> some View {
-        Button(action: {
-            if tab.isRunning {
-                stopStreaming(for: tab)
-            } else {
-                submitOrQueuePrompt(tab: tab)
-            }
-        }) {
-            Group {
-                if tab.isRunning {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 10, weight: .black))
-                } else {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 12, weight: .bold))
-                }
-            }
-            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-            .frame(width: 28, height: 28)
-            .background {
-                if tab.isRunning {
-                    Circle().fill(CursorTheme.surfaceRaised(for: colorScheme))
-                } else {
-                    Circle().fill(CursorTheme.brandGradient)
-                }
-            }
-            .overlay(
-                Circle()
-                    .stroke(
-                        tab.isRunning
-                            ? CursorTheme.borderStrong(for: colorScheme)
-                            : CursorTheme.textPrimary(for: colorScheme).opacity(0.14),
-                        lineWidth: 1
+        if tab.isRunning {
+            Button(action: { interruptAndSend(tab: tab) }) {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(CursorTheme.semanticError))
+                    .overlay(
+                        Circle()
+                            .stroke(CursorTheme.semanticError.opacity(0.5), lineWidth: 1)
                     )
-            )
-            .opacity(tab.isRunning || canSend(tab: tab) ? 1 : 0.45)
+            }
+            .buttonStyle(.plain)
+            .help("Stop the agent and send the current message")
+        } else {
+            Button(action: { submitOrQueuePrompt(tab: tab) }) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(CursorTheme.brandGradient))
+                    .overlay(
+                        Circle()
+                            .stroke(CursorTheme.textPrimary(for: colorScheme).opacity(0.14), lineWidth: 1)
+                    )
+                    .opacity(canSend(tab: tab) ? 1 : 0.45)
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend(tab: tab))
         }
-        .buttonStyle(.plain)
-        .disabled(!tab.isRunning && !canSend(tab: tab))
     }
 
     private var composerHeight: CGFloat {
@@ -2026,122 +2036,28 @@ struct PopoutView: View {
         CursorTheme.border(for: colorScheme)
     }
 
-    @ViewBuilder
-    private func queuedFollowUpsView(tab: AgentTab) -> some View {
-        if !tab.followUpQueue.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(tab.followUpQueue) { item in
-                    HStack(spacing: 8) {
-                        if editingFollowUpID == item.id {
-                            TextField("Message", text: $editingFollowUpDraft, axis: .vertical)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                .lineLimit(2 ... 6)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .onSubmit { applyEditedFollowUp(itemID: item.id, tab: tab) }
-                            Button(action: {
-                                applyEditedFollowUp(itemID: item.id, tab: tab)
-                            }) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Save")
-                            Button(action: {
-                                editingFollowUpID = nil
-                                editingFollowUpDraft = ""
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Cancel")
-                        } else {
-                            Text(item.text)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                .lineLimit(2)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            Button(action: {
-                                sendQueuedFollowUpToNewTab(item, tab: tab)
-                            }) {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "arrow.up.right")
-                                        .font(.system(size: 13, weight: .semibold))
-                                    Text("Task Agent")
-                                        .font(.system(size: 12, weight: .medium))
-                                }
-                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(CursorTheme.surfaceRaised(for: colorScheme), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Create a linked task agent")
-                            Button(action: {
-                                editingFollowUpID = item.id
-                                editingFollowUpDraft = item.text
-                            }) {
-                                Image(systemName: "pencil")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Edit message")
-                            Button(action: {
-                                tab.followUpQueue.removeAll(where: { $0.id == item.id })
-                            }) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.8), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }
-            }
-        }
-    }
-
-    private func applyEditedFollowUp(itemID: UUID, tab: AgentTab) {
-        guard let idx = tab.followUpQueue.firstIndex(where: { $0.id == itemID }) else {
-            editingFollowUpID = nil
-            editingFollowUpDraft = ""
-            return
-        }
-        let trimmed = editingFollowUpDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            tab.followUpQueue.remove(at: idx)
-        } else {
-            let existing = tab.followUpQueue[idx]
-            tab.followUpQueue[idx] = QueuedFollowUp(id: existing.id, text: trimmed)
-        }
-        editingFollowUpID = nil
-        editingFollowUpDraft = ""
-    }
-
     private func canSend(tab: AgentTab) -> Bool {
         !tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Submit the current prompt: send immediately if idle, or queue as follow-up if agent is running.
+    /// Submit the current prompt: send immediately if idle, or interrupt (stop and send) if agent is running.
     private func submitOrQueuePrompt(tab: AgentTab) {
         let trimmed = tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         if tab.isRunning {
-            updateTabTitle(for: trimmed, in: tab)
-            tab.followUpQueue.append(QueuedFollowUp(text: trimmed))
-            tab.prompt = ""
-            tab.hasAttachedScreenshot = false
+            interruptAndSend(tab: tab)
             return
         }
         sendPrompt(tab: tab)
+    }
+
+    /// Stop the agent and send the current message (if any). Replaces staging messages while running.
+    private func interruptAndSend(tab: AgentTab) {
+        stopStreaming(for: tab)
+        let trimmed = tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            sendPrompt(tab: tab)
+        }
     }
 
     private static let compressPrompt = "Summarize our entire conversation so far into a single concise summary that preserves key context, decisions, and next steps. Reply with only that summary, no other text."
@@ -2237,22 +2153,6 @@ struct PopoutView: View {
         }
 
         tab.errorMessage = nil
-    }
-
-    private func sendQueuedFollowUpToNewTab(_ item: QueuedFollowUp, tab: AgentTab) {
-        let prompt = item.text
-        let workspacePath = tab.workspacePath
-        tab.followUpQueue.removeAll(where: { $0.id == item.id })
-        let modelId = tab.modelId ?? AvailableModels.autoID
-        let task = ProjectTasksStorage.addTask(workspacePath: workspacePath, content: prompt, modelId: modelId)
-        sendTaskToAgent(
-            prompt: prompt,
-            taskID: task.id,
-            screenshotPaths: task.screenshotPaths,
-            modelId: task.modelId,
-            workspacePath: workspacePath,
-            selectAgent: true
-        )
     }
 
     // MARK: - Streaming
@@ -2380,13 +2280,6 @@ struct PopoutView: View {
                 }
             }
 
-            Task { @MainActor in
-                if let first = currentTab.followUpQueue.first {
-                    currentTab.followUpQueue.removeFirst()
-                    currentTab.prompt = first.text
-                    sendPrompt(tab: currentTab)
-                }
-            }
         }
 
         currentTab.streamTask = task

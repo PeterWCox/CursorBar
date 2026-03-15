@@ -8,6 +8,7 @@ import Inject
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
     case general = "General"
+    case projects = "Projects"
     case models = "Models"
     case keyboardShortcuts = "Shortcuts"
     case about = "About"
@@ -17,6 +18,7 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "slider.horizontal.3"
+        case .projects: return "folder"
         case .models: return "cpu"
         case .keyboardShortcuts: return "command"
         case .about: return "info.circle"
@@ -108,6 +110,10 @@ struct SettingsModalView: View {
                 SettingsPaneContainer(title: SettingsPane.general.rawValue) {
                     GeneralSettingsPaneContent()
                 }
+            case .projects:
+                SettingsPaneContainer(title: SettingsPane.projects.rawValue) {
+                    ProjectsSettingsPaneContent()
+                }
             case .models:
                 SettingsPaneContainer(title: SettingsPane.models.rawValue) {
                     ModelsSettingsPaneContent()
@@ -153,7 +159,6 @@ private struct GeneralSettingsPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage(AppPreferences.sidebarOnRightKey) private var sidebarOnRight: Bool = false
-    @AppStorage(AppPreferences.agentForceAllowCommandsKey) private var agentForceAllowCommands: Bool = false
 
     private var resolvedProjectsRootPath: String {
         AppPreferences.resolvedProjectsRootPath(projectsRootPath)
@@ -161,22 +166,6 @@ private struct GeneralSettingsPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Agent")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-
-                Text("When off, we pass --sandbox enabled and do not use force allow; the CLI may prompt for terminal and tool use where it supports it. When on, we pass -f (force allow) and the agent does not ask. In streaming mode the CLI may not show approval prompts in all cases.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Toggle("Force allow agent commands (skip permission prompts)", isOn: $agentForceAllowCommands)
-                    .toggleStyle(.switch)
-            }
-
             VStack(alignment: .leading, spacing: 12) {
                 Text("Sidebar position")
                     .font(.system(size: 11, weight: .semibold))
@@ -269,6 +258,87 @@ private struct GeneralSettingsPaneContent: View {
         if panel.runModal() == .OK, let url = panel.url {
             projectsRootPath = url.path
         }
+    }
+}
+
+// MARK: - Projects pane (visibility toggles for agent sidebar)
+
+private struct ProjectsSettingsPaneContent: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject var appState: AppState
+    @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
+
+    private var hiddenPaths: Set<String> {
+        AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
+    }
+
+    private func isVisible(projectPath: String) -> Bool {
+        !hiddenPaths.contains(AppPreferences.normalizedProjectPath(projectPath))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Text("Choose which projects appear in the agent sidebar. Uncheck to hide a project from the sidebar; it remains in your workspace list.")
+                .font(.system(size: 14))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appState.tabManager.projects.isEmpty {
+                Text("No projects loaded. Add or open projects from the workspace picker; they will appear here.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .padding(.vertical, 8)
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(appState.tabManager.projects, id: \.path) { project in
+                        let path = project.path
+                        let displayName = appState.workspaceDisplayName(for: path)
+                        let normalized = AppPreferences.normalizedProjectPath(path)
+                        HStack(spacing: 12) {
+                            Image(systemName: "folder")
+                                .font(.system(size: 14))
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                .symbolRenderingMode(.hierarchical)
+                            Text(displayName.isEmpty ? (path as NSString).lastPathComponent : displayName)
+                                .font(.system(size: 14))
+                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Toggle("", isOn: Binding(
+                                get: { isVisible(projectPath: path) },
+                                set: { visible in
+                                    var hidden = hiddenPaths
+                                    if visible {
+                                        hidden.remove(normalized)
+                                    } else {
+                                        hidden.insert(normalized)
+                                    }
+                                    hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+
+                        if project.id != appState.tabManager.projects.last?.id {
+                            Divider()
+                                .background(CursorTheme.border(for: colorScheme))
+                                .padding(.leading, 12)
+                        }
+                    }
+                }
+                .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -379,7 +449,7 @@ private struct AboutPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Cursor+ is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
+            Text("Cursor Metro is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
                 .font(.system(size: 14))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)

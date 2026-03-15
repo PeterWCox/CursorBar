@@ -484,8 +484,8 @@ class TabManager: ObservableObject {
         } else {
             selectedTabID = nil
             selectedTerminalID = nil
-            selectedTasksViewPath = nil
-            selectedDashboardViewPath = path
+            selectedTasksViewPath = path
+            selectedDashboardViewPath = nil
         }
     }
 
@@ -777,7 +777,7 @@ class TabManager: ObservableObject {
         if let preferredProjectPath, validProjectPaths.contains(preferredProjectPath) {
             selectedProjectPath = preferredProjectPath
             if activeTab == nil, activeTerminalTab == nil, selectedTasksViewPath != preferredProjectPath {
-                selectedDashboardViewPath = preferredProjectPath
+                selectedTasksViewPath = preferredProjectPath
             }
             return
         }
@@ -787,7 +787,7 @@ class TabManager: ObservableObject {
         }
 
         if let path = selectedProjectPath, activeTab == nil, activeTerminalTab == nil, selectedTasksViewPath != path {
-            selectedDashboardViewPath = path
+            selectedTasksViewPath = path
         }
     }
 

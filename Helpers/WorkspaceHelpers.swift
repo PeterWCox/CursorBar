@@ -586,3 +586,83 @@ func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerm
         """)
     }
 }
+
+// MARK: - Preview in external terminal window (new window, close on Stop)
+
+/// Window title used for the preview terminal so we can close it on Stop.
+func previewWindowTitle(workspacePath: String) -> String {
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    let name = (root as NSString).lastPathComponent
+    return "Cursor Metro Preview - \(name)"
+}
+
+/// Launches the project's startup script in a **new** terminal window with a known title. Returns nil on success.
+/// Use closePreviewTerminalWindow(workspacePath:) when user taps Stop.
+func launchStartupScriptInNewWindow(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: root)
+    let scriptPath = scriptURL.path
+    guard FileManager.default.fileExists(atPath: scriptPath),
+          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: root),
+          !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return "No startup script configured for this project. Add script content in Tasks → In Progress (Configure Setup) or Advanced."
+    }
+
+    guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {
+        return "No supported terminal app is available. Install Terminal or iTerm."
+    }
+
+    let title = previewWindowTitle(workspacePath: workspacePath)
+    let titleEscaped = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    let quotedPath = singleQuotedShellValue(root)
+    let quotedScript = singleQuotedShellValue(scriptPath)
+    let command = "echo -ne \"\\033]0;\(titleEscaped)\\007\"; cd \(quotedPath) && /bin/bash \(quotedScript)"
+
+    switch terminal {
+    case .automatic:
+        return "No supported terminal app is available. Install Terminal or iTerm."
+    case .terminal:
+        // do script without "in front window" creates a new window
+        return runAppleScript("""
+        tell application id "com.apple.Terminal"
+            activate
+            do script "\(appleScriptEscaped(command))"
+        end tell
+        """)
+    case .iTerm:
+        return runAppleScript("""
+        tell application id "com.googlecode.iterm2"
+            activate
+            create window with default profile
+            tell current session of current tab of current window
+                write text "\(appleScriptEscaped(command))"
+            end tell
+        end tell
+        """)
+    }
+}
+
+/// Closes the preview terminal window for this project (by window/session title). Returns nil on success.
+func closePreviewTerminalWindow(workspacePath: String) -> String? {
+    let title = previewWindowTitle(workspacePath: workspacePath)
+    let titleEscaped = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    _ = runAppleScript("""
+        tell application id "com.apple.Terminal"
+            close (every window whose name is "\(titleEscaped)")
+        end tell
+        """)
+    // Also try iTerm in case user opened with iTerm
+    _ = runAppleScript("""
+        tell application id "com.googlecode.iterm2"
+            repeat with w in (every window)
+                try
+                    if name of current session of current tab of w contains "Cursor Metro Preview" then
+                        close w
+                        return
+                    end if
+                end try
+            end repeat
+        end tell
+        """)
+    return nil
+}
