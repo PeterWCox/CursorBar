@@ -157,6 +157,37 @@ private struct ObservedTabChip: View {
     }
 }
 
+// MARK: - Tasks list content wrapper (reduces type-checker load in PopoutView body)
+
+private struct PopoutTasksListContent: View {
+    let tasksPath: String
+    @Binding var triggerAddNewTask: Bool
+    let linkedStatuses: [UUID: AgentTaskState]
+    let models: [ModelOption]
+    let onSendToAgent: (String, UUID?, [String], String) -> Void
+    let onOpenLinkedAgent: (ProjectTask) -> Void
+    let onStopAgent: (ProjectTask) -> Void
+    let onTasksDidUpdate: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        TasksListView(
+            workspacePath: tasksPath,
+            triggerAddNewTask: $triggerAddNewTask,
+            linkedStatuses: linkedStatuses,
+            models: models,
+            onSendToAgent: onSendToAgent,
+            onOpenLinkedAgent: onOpenLinkedAgent,
+            onStopAgent: onStopAgent,
+            onTasksDidUpdate: onTasksDidUpdate,
+            onDismiss: onDismiss
+        )
+        .id(tasksPath)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(12)
+    }
+}
+
 // MARK: - Main popout panel view
 
 struct PopoutView: View {
@@ -194,6 +225,8 @@ struct PopoutView: View {
     /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
     @State private var tasksViewTriggerAddNew: Bool = false
     @State private var dashboardTabsByWorkspacePath: [String: DashboardTab] = [:]
+    /// When set, the dashboard for this path stays mounted (hidden when not selected) so the Preview terminal persists when switching to Agent/Terminal and back.
+    @State private var dashboardMountedForPath: String? = nil
     @StateObject private var tasksViewShortcutCoordinator = TasksViewShortcutCoordinator()
     /// Tab whose agent header prompt accordion is expanded (show full prompt below title).
     @State private var expandedPromptTabID: UUID? = nil
@@ -251,15 +284,34 @@ struct PopoutView: View {
         return .todo
     }
 
+    private func linkedTaskState(for savedTab: SavedAgentTab) -> AgentTaskState? {
+        guard let taskID = savedTab.linkedTaskID else { return nil }
+        let tasks = ProjectTasksStorage.tasks(workspacePath: savedTab.workspacePath)
+        guard let task = tasks.first(where: { $0.id == taskID }) else { return nil }
+        if task.taskState == .backlog { return .none }
+        if savedTab.restoredLastTurnState == .stopped { return .stopped }
+        if savedTab.restoredLastTurnState == .completed { return .review }
+        return .todo
+    }
+
     /// Agent status of a task in this workspace if any agent tab is linked to it.
     private func linkedTaskStateForTask(taskID: UUID, workspacePath: String) -> AgentTaskState? {
-        guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) else { return nil }
-        return linkedTaskState(for: tab)
+        if let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) {
+            return linkedTaskState(for: tab)
+        }
+        guard let savedTab = tabManager.recentlyClosedTabs.reversed().first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == taskID }) else {
+            return nil
+        }
+        return linkedTaskState(for: savedTab)
     }
 
     /// Builds [taskID: status] for the given workspace so the Tasks list has an explicit dependency on tab state and updates when linked tabs run/complete.
     private func linkedStatusesForWorkspace(_ workspacePath: String) -> [UUID: AgentTaskState] {
         var result: [UUID: AgentTaskState] = [:]
+        for savedTab in tabManager.recentlyClosedTabs where savedTab.workspacePath == workspacePath {
+            guard let taskID = savedTab.linkedTaskID else { continue }
+            result[taskID] = linkedTaskState(for: savedTab)
+        }
         for tab in tabManager.tabs where tab.workspacePath == workspacePath {
             guard let taskID = tab.linkedTaskID else { continue }
             result[taskID] = linkedTaskState(for: tab)
@@ -354,10 +406,15 @@ struct PopoutView: View {
         appState.notifyTasksDidUpdate()
     }
 
+    private func stopAgentForTask(_ task: ProjectTask, workspacePath: String) {
+        guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) else { return }
+        stopStreaming(for: tab)
+    }
+
     private func tasksListContent(tasksPath: String, triggerAddNewTask: Binding<Bool>) -> some View {
         let linkedStatuses = linkedStatusesForWorkspace(tasksPath)
-        return TasksListView(
-            workspacePath: tasksPath,
+        return PopoutTasksListContent(
+            tasksPath: tasksPath,
             triggerAddNewTask: triggerAddNewTask,
             linkedStatuses: linkedStatuses,
             models: modelPickerModels(including: nil),
@@ -372,17 +429,12 @@ struct PopoutView: View {
                         selectAgent: false
                     )
                 }
-                // Keep user on Tasks view; do not switch to the new agent tab
             },
-            onOpenLinkedAgent: { task in
-                openLinkedAgent(for: task, workspacePath: tasksPath)
-            },
+            onOpenLinkedAgent: { task in openLinkedAgent(for: task, workspacePath: tasksPath) },
+            onStopAgent: { task in stopAgentForTask(task, workspacePath: tasksPath) },
             onTasksDidUpdate: { appState.notifyTasksDidUpdate() },
             onDismiss: { tabManager.hideTasksView() }
         )
-        .id(tasksPath)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(12)
     }
 
     private func dashboardContent(dashboardPath: String) -> some View {
@@ -658,7 +710,45 @@ struct PopoutView: View {
         }
     }
 
-    var body: some View {
+    @ViewBuilder
+    private var mainContentZStack: some View {
+        ZStack {
+            if !tabManager.terminalTabs.isEmpty {
+                MultiTerminalHostView(
+                    tabs: tabManager.terminalTabs.map { ($0.id, $0.workspacePath) },
+                    selectedID: tabManager.selectedTerminalID
+                )
+                .id("multiTerminalHost")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
+                tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
+            }
+            if let dashboardPath = tabManager.selectedDashboardViewPath ?? dashboardMountedForPath, dashboardPath == selectedProjectPath {
+                dashboardContent(dashboardPath: dashboardPath)
+                    .opacity(tabManager.selectedDashboardViewPath != nil ? 1 : 0)
+                    .allowsHitTesting(tabManager.selectedDashboardViewPath != nil)
+            }
+            if tabManager.selectedTerminalID == nil {
+                agentOrEmptyContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var agentOrEmptyContent: some View {
+        if let active = tabManager.activeTab {
+            ObservedTabView(tab: active) { tab in
+                agentAreaContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
+            }
+        } else if hasOpenProjects, selectedProjectPath != nil {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            splashContentArea()
+        }
+    }
+
+    private var bodyContent: some View {
         VStack(spacing: 0) {
             topBar
                 .padding(.horizontal, 18)
@@ -669,89 +759,83 @@ struct PopoutView: View {
                         .fill(CursorTheme.border(for: colorScheme).opacity(0.9))
                         .frame(height: 1)
                 }
+            mainContentWithSidebar
+        }
+    }
 
-            // Agent tabs and projects sidebar always visible. When collapsed, only the main agent content is hidden; sidebar stays full width.
-            GeometryReader { geometry in
-                let contentWidth = max(0, geometry.size.width)
-                let effectiveSidebarWidth = sidebarWidth
-                let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - effectiveSidebarWidth)
-                HStack(alignment: .top, spacing: 0) {
-                    // Tab sidebar: always full width (projects + agent tabs visible even when collapsed).
-                    tabSidebar
-                        .frame(width: effectiveSidebarWidth)
-                        .clipped()
-
-                    // Agent window + composer: takes remaining width when expanded; 0 width when collapsed.
-                    // Terminal views are always kept in the hierarchy (hidden when not selected) so switching
-                    // back from Agent to Terminal preserves the shell session instead of starting a new process.
-                    Group {
-                        if isMainContentCollapsed {
-                            Color.clear
-                                .frame(width: 0)
-                                .clipped()
-                        } else {
-                            ZStack {
-                                ForEach(tabManager.terminalTabs) { tab in
-                                    EmbeddedTerminalView(
-                                        workspacePath: tab.workspacePath,
-                                        isSelected: tabManager.selectedTerminalID == tab.id
-                                    )
-                                        .id(tab.id)
-                                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        .opacity(tabManager.selectedTerminalID == tab.id ? 1 : 0)
-                                        .allowsHitTesting(tabManager.selectedTerminalID == tab.id)
-                                }
-                                if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
-                                    tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
-                                } else if tabManager.selectedDashboardViewPath != nil, let dashboardPath = tabManager.selectedDashboardViewPath, dashboardPath == selectedProjectPath {
-                                    dashboardContent(dashboardPath: dashboardPath)
-                                } else if tabManager.selectedTerminalID == nil {
-                                    if let active = tabManager.activeTab {
-                                        ObservedTabView(tab: active) { tab in
-                                            agentAreaContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
-                                        }
-                                    } else if hasOpenProjects, let projectPath = selectedProjectPath {
-                                        projectEmptyStateContent(projectPath: projectPath)
-                                    } else {
-                                        splashContentArea()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .frame(width: agentWidth)
+    @ViewBuilder
+    private var mainContentWithSidebar: some View {
+        GeometryReader { geometry in
+            let contentWidth = max(0, geometry.size.width)
+            let effectiveSidebarWidth = sidebarWidth
+            let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - effectiveSidebarWidth)
+            HStack(alignment: .top, spacing: 0) {
+                tabSidebar
+                    .frame(width: effectiveSidebarWidth)
                     .clipped()
+                Group {
+                    if isMainContentCollapsed {
+                        Color.clear.frame(width: 0).clipped()
+                    } else {
+                        mainContentZStack
+                    }
                 }
+                .frame(width: agentWidth)
                 .clipped()
             }
-            .frame(maxWidth: .infinity)
+            .clipped()
         }
-        .padding(16)
-        .frame(minWidth: isMainContentCollapsed ? 260 : (sidebarWidth + 110), maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
-        .preferredColorScheme(resolvedColorScheme)
-        .background(CursorTheme.panelGradient(for: colorScheme))
-        .onKeyPress(.tab) {
-            if isPromptFirstResponder?() == true {
-                return .ignored
+        .frame(maxWidth: .infinity)
+    }
+
+    private var bodyWithDashboardPersistence: some View {
+        bodyContent
+            .padding(16)
+            .frame(minWidth: isMainContentCollapsed ? 260 : (sidebarWidth + 110), maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
+            .preferredColorScheme(resolvedColorScheme)
+            .background(CursorTheme.panelGradient(for: colorScheme))
+            .onChange(of: tabManager.selectedDashboardViewPath) { _, new in
+                if let path = new { dashboardMountedForPath = path }
             }
-            focusPromptInput?()
-            return .handled
-        }
-        .background {
-            Button("") {
-                showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true)
+            .onChange(of: tabManager.selectedProjectPath) { _, _ in
+                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
             }
-            .keyboardShortcut("t", modifiers: .command)
-            .hidden()
-        }
-        .modifier(TasksViewShortcutMonitorModifier(
-            tabManager: tabManager,
-            selectedProjectPath: selectedProjectPath,
-            tasksViewTriggerAddNew: $tasksViewTriggerAddNew,
-            coordinator: tasksViewShortcutCoordinator,
-            requestShowTasksAndNewTask: Binding(get: { appState.requestShowTasksAndNewTask }, set: { appState.requestShowTasksAndNewTask = $0 }),
-            onRequestNewTask: { showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true) }
-        ))
+            .onChange(of: tabManager.selectedTabID) { _, _ in
+                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
+            }
+            .onChange(of: tabManager.selectedTerminalID) { _, _ in
+                if let mounted = dashboardMountedForPath, tabManager.activeProjectPath != mounted { dashboardMountedForPath = nil }
+            }
+    }
+
+    private var bodyWithShortcuts: some View {
+        bodyWithDashboardPersistence
+            .onKeyPress(.tab) {
+                if isPromptFirstResponder?() == true {
+                    return .ignored
+                }
+                focusPromptInput?()
+                return .handled
+            }
+            .background {
+                Button("") {
+                    showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true)
+                }
+                .keyboardShortcut("t", modifiers: .command)
+                .hidden()
+            }
+            .modifier(TasksViewShortcutMonitorModifier(
+                tabManager: tabManager,
+                selectedProjectPath: selectedProjectPath,
+                tasksViewTriggerAddNew: $tasksViewTriggerAddNew,
+                coordinator: tasksViewShortcutCoordinator,
+                requestShowTasksAndNewTask: Binding(get: { appState.requestShowTasksAndNewTask }, set: { appState.requestShowTasksAndNewTask = $0 }),
+                onRequestNewTask: { showTasksComposer(workspacePath: selectedProjectPath, startNewTask: true) }
+            ))
+    }
+
+    var body: some View {
+        bodyWithShortcuts
         .onAppear {
             sanitizeSelectedModel()
             devFolders = loadDevFolders(rootPath: projectsRootPath)
@@ -1141,78 +1225,6 @@ struct PopoutView: View {
                     .background(CursorTheme.brandBlue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .buttonStyle(.plain)
-            }
-            .padding(32)
-            Spacer(minLength: 40)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func projectEmptyStateContent(projectPath: String) -> some View {
-        let projectName = appState.workspaceDisplayName(for: projectPath).isEmpty
-            ? ((projectPath as NSString).lastPathComponent.isEmpty ? "Project" : (projectPath as NSString).lastPathComponent)
-            : appState.workspaceDisplayName(for: projectPath)
-        let branch = projectPath == currentWorkspacePath ? currentBranch : ""
-
-        return VStack(spacing: 0) {
-            Spacer(minLength: 40)
-            VStack(spacing: 24) {
-                ProjectIconView(path: projectPath)
-                    .frame(width: 56, height: 56)
-
-                VStack(spacing: 10) {
-                    Text(projectName)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        .multilineTextAlignment(.center)
-
-                    Text("This project is open, but it does not have any task-linked agent conversations yet.")
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 340)
-
-                    if !branch.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 12, weight: .medium))
-                            Text(branch)
-                                .font(.system(size: 13, weight: .medium))
-                                .italic()
-                        }
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    }
-                }
-
-                HStack(spacing: 12) {
-                    Button(action: {
-                        showTasksComposer(workspacePath: projectPath, startNewTask: true)
-                    }) {
-                        Label("New Task", systemImage: "checklist")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 13)
-                            .background(CursorTheme.brandBlue, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button(action: {
-                        openProjectInCursor(projectPath)
-                    }) {
-                        Label("Cursor", systemImage: "arrow.up.forward.app")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 13)
-.background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
             }
             .padding(32)
             Spacer(minLength: 40)
@@ -2090,8 +2102,15 @@ struct PopoutView: View {
 
     private func stopStreaming(for currentTab: AgentTab? = nil) {
         guard let tabToStop = currentTab ?? tab else { return }
-        if let turnID = tabToStop.activeTurnID,
-           let index = tabToStop.turns.firstIndex(where: { $0.id == turnID }) {
+        let turnIndex: Int? = {
+            if let turnID = tabToStop.activeTurnID,
+               let idx = tabToStop.turns.firstIndex(where: { $0.id == turnID }) {
+                return idx
+            }
+            // Fallback: mark last turn as stopped when activeTurnID is missing (e.g. stop during handoff)
+            return tabToStop.turns.indices.last
+        }()
+        if let index = turnIndex {
             tabToStop.turns[index].isStreaming = false
             tabToStop.turns[index].lastStreamPhase = nil
             tabToStop.turns[index].wasStopped = true
@@ -2222,8 +2241,12 @@ struct PopoutView: View {
     /// Notify SwiftUI that turns (or nested segment state) changed so the view refreshes.
     /// In-place mutations to turns/segments don't trigger @Published.
     private func notifyTurnsChanged(_ tab: AgentTab) {
-        Task { @MainActor in
+        if Thread.isMainThread {
             tab.objectWillChange.send()
+        } else {
+            DispatchQueue.main.async {
+                tab.objectWillChange.send()
+            }
         }
     }
 

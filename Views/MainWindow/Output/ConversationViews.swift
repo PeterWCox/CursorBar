@@ -34,7 +34,7 @@ private func toolCallStatusLabel(for status: ToolCallSegmentStatus) -> String {
     case .running: return "Running"
     case .completed: return "Done"
     case .failed: return "Failed"
-    case .stopped: return "Review"
+    case .stopped: return "Stopped"
     }
 }
 
@@ -43,7 +43,7 @@ private func toolCallTint(for status: ToolCallSegmentStatus) -> Color {
     case .running: return CursorTheme.brandBlue
     case .completed: return CursorTheme.textSecondary
     case .failed: return CursorTheme.semanticErrorTint
-    case .stopped: return CursorTheme.semanticReview
+    case .stopped: return CursorTheme.semanticError
     }
 }
 

@@ -90,6 +90,11 @@ extension ConversationTurn {
             return .stopped
         }
 
+        // Treat as stopped if any tool call in this turn was stopped (e.g. user stopped agent)
+        if segments.contains(where: { $0.toolCall?.status == .stopped }) {
+            return .stopped
+        }
+
         return .completed
     }
 }

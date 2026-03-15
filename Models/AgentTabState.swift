@@ -55,6 +55,35 @@ struct SavedAgentTab: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, title, workspacePath, currentBranch, prompt, turns, hasAttachedScreenshot, followUpQueue, linkedTaskID, cursorChatId, modelId
     }
+
+    /// Streaming work cannot survive an app relaunch, so restore persisted turns as settled state.
+    var restoredTurns: [ConversationTurn] {
+        turns.map { turn in
+            guard turn.isStreaming else { return turn }
+
+            var restored = turn
+            restored.isStreaming = false
+            restored.lastStreamPhase = nil
+
+            var didStopRunningTool = false
+            for index in restored.segments.indices {
+                if restored.segments[index].toolCall?.status == .running {
+                    restored.segments[index].toolCall?.status = .stopped
+                    didStopRunningTool = true
+                }
+            }
+
+            if didStopRunningTool {
+                restored.wasStopped = true
+            }
+
+            return restored
+        }
+    }
+
+    var restoredLastTurnState: ConversationTurnDisplayState? {
+        restoredTurns.last?.displayState
+    }
 }
 
 struct SavedTabState: Codable {
@@ -62,18 +91,21 @@ struct SavedTabState: Codable {
 
     var schemaVersion: Int
     var tabs: [SavedAgentTab]
+    var recentlyClosedTabs: [SavedAgentTab]
     var selectedTabID: UUID?
     var projects: [SavedProject]
     var selectedProjectPath: String?
 
     init(
         tabs: [SavedAgentTab],
+        recentlyClosedTabs: [SavedAgentTab],
         selectedTabID: UUID?,
         projects: [SavedProject],
         selectedProjectPath: String?
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.tabs = tabs
+        self.recentlyClosedTabs = recentlyClosedTabs
         self.selectedTabID = selectedTabID
         self.projects = projects
         self.selectedProjectPath = selectedProjectPath
@@ -82,6 +114,7 @@ struct SavedTabState: Codable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case tabs
+        case recentlyClosedTabs
         case selectedTabID
         case projects
         case selectedProjectPath
@@ -91,6 +124,7 @@ struct SavedTabState: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         tabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .tabs) ?? []
+        recentlyClosedTabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .recentlyClosedTabs) ?? []
         selectedTabID = try container.decodeIfPresent(UUID.self, forKey: .selectedTabID)
         projects = try container.decodeIfPresent([SavedProject].self, forKey: .projects) ?? []
         selectedProjectPath = try container.decodeIfPresent(String.self, forKey: .selectedProjectPath)
@@ -216,13 +250,13 @@ class AgentTab: ObservableObject, Identifiable {
         self.workspacePath = saved.workspacePath
         self.currentBranch = saved.currentBranch
         self.prompt = saved.prompt
-        self.turns = saved.turns
+        self.turns = saved.restoredTurns
         self.hasAttachedScreenshot = saved.hasAttachedScreenshot
         self.followUpQueue = saved.followUpQueue
         self.linkedTaskID = saved.linkedTaskID
         self.cursorChatId = saved.cursorChatId
         self.modelId = saved.modelId
-        self.cachedConversationCharacterCount = Self.conversationCharacterCount(for: saved.turns)
+        self.cachedConversationCharacterCount = Self.conversationCharacterCount(for: saved.restoredTurns)
     }
 
     func toSaved() -> SavedAgentTab {
@@ -258,6 +292,14 @@ struct ProjectState: Identifiable, Codable, Equatable {
 }
 
 class TabManager: ObservableObject {
+    private static let autosaveDelay: TimeInterval = 0.35
+
+    private struct LinkedTaskStatusSignature: Equatable {
+        let linkedTaskID: UUID
+        let isRunning: Bool
+        let lastTurnState: ConversationTurnDisplayState?
+    }
+
     @Published private(set) var projects: [ProjectState] = []
     @Published var tabs: [AgentTab] = []
     @Published var terminalTabs: [TerminalTab] = []
@@ -274,6 +316,9 @@ class TabManager: ObservableObject {
     /// No longer forwarding each tab's objectWillChange — only structural changes (tabs, selectedTabID) publish.
     /// Content and sidebar chips observe their specific AgentTab to avoid re-rendering the whole window when one tab streams.
     private var tabSubscriptions: [UUID: AnyCancellable] = [:]
+    private var linkedTaskStatusSignatures: [UUID: LinkedTaskStatusSignature] = [:]
+    private var persistenceSubscriptions = Set<AnyCancellable>()
+    private var pendingAutosaveWorkItem: DispatchWorkItem?
 
     init(loadedState: SavedTabState? = nil) {
         if let saved = loadedState {
@@ -281,18 +326,23 @@ class TabManager: ObservableObject {
                 .filter { $0.linkedTaskID != nil }
                 .map { AgentTab(from: $0) }
             let filteredTabs = restoredTabs.filter { TabManager.workspacePathExists($0.workspacePath) }
+            let restoredRecentlyClosedTabs = saved.recentlyClosedTabs
+                .filter { $0.linkedTaskID != nil }
+                .filter { TabManager.workspacePathExists($0.workspacePath) }
             let restoredProjects = saved.projects
                 .map { ProjectState(path: $0.path) }
                 .filter { TabManager.workspacePathExists($0.path) }
             let tabProjects = filteredTabs.map { ProjectState(path: $0.workspacePath) }
 
             tabs = filteredTabs
+            recentlyClosedTabs = restoredRecentlyClosedTabs
             projects = Self.mergeProjects(savedProjects: restoredProjects, tabProjects: tabProjects)
             selectedTabID = saved.selectedTabID
             selectedProjectPath = saved.selectedProjectPath
         }
         reconcileSelection()
         bindTabChanges()
+        configurePersistenceObservers()
     }
 
     /// True if the path exists and is a directory (project can be opened).
@@ -309,11 +359,52 @@ class TabManager: ObservableObject {
             tabs: tabs
                 .filter { $0.linkedTaskID != nil }
                 .map { $0.toSaved() },
+            recentlyClosedTabs: recentlyClosedTabs
+                .filter { $0.linkedTaskID != nil && Self.workspacePathExists($0.workspacePath) },
             selectedTabID: selectedTabID,
             projects: projects.map { SavedProject(path: $0.path) },
             selectedProjectPath: selectedProjectPath
         )
         TabManagerPersistence.save(state)
+    }
+
+    private func configurePersistenceObservers() {
+        $projects
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSaveState()
+            }
+            .store(in: &persistenceSubscriptions)
+
+        $tabs
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSaveState()
+            }
+            .store(in: &persistenceSubscriptions)
+
+        $selectedTabID
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSaveState()
+            }
+            .store(in: &persistenceSubscriptions)
+
+        $selectedProjectPath
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.scheduleSaveState()
+            }
+            .store(in: &persistenceSubscriptions)
+    }
+
+    private func scheduleSaveState() {
+        pendingAutosaveWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.saveState()
+        }
+        pendingAutosaveWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.autosaveDelay, execute: workItem)
     }
 
     /// Current agent tab, or nil when a terminal tab, tasks view, dashboard, or no tab is selected.
@@ -526,6 +617,7 @@ class TabManager: ObservableObject {
             let closedProjectPath = tabToClose.workspacePath
             tabs.remove(at: index)
             tabSubscriptions[id] = nil
+            linkedTaskStatusSignatures[id] = nil
             if wasSelected {
                 selectedDashboardViewPath = nil
                 if let replacement = tabs.first(where: { $0.workspacePath == closedProjectPath }) {
@@ -563,6 +655,7 @@ class TabManager: ObservableObject {
                 recentlyClosedTabs.removeFirst()
             }
             tabSubscriptions[tab.id] = nil
+            linkedTaskStatusSignatures[tab.id] = nil
         }
         let selectedProjectWasRemoved = selectedProjectPath == path
         tabs.removeAll { $0.workspacePath == path }
@@ -629,14 +722,30 @@ class TabManager: ObservableObject {
     /// so the task list can update "processing" / "done" badges without re-rendering the whole window on every stream chunk.
     private func observe(_ tab: AgentTab) {
         guard tabSubscriptions[tab.id] == nil else { return }
+        linkedTaskStatusSignatures[tab.id] = linkedTaskStatusSignature(for: tab)
         tabSubscriptions[tab.id] = tab.objectWillChange
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                if self.selectedTasksViewPath == tab.workspacePath, tab.linkedTaskID != nil {
+                self.scheduleSaveState()
+                let previousStatus = self.linkedTaskStatusSignatures[tab.id]
+                let currentStatus = self.linkedTaskStatusSignature(for: tab)
+                self.linkedTaskStatusSignatures[tab.id] = currentStatus
+                if self.selectedTasksViewPath == tab.workspacePath,
+                   previousStatus != currentStatus,
+                   currentStatus != nil {
                     self.objectWillChange.send()
                 }
             }
+    }
+
+    private func linkedTaskStatusSignature(for tab: AgentTab) -> LinkedTaskStatusSignature? {
+        guard let linkedTaskID = tab.linkedTaskID else { return nil }
+        return LinkedTaskStatusSignature(
+            linkedTaskID: linkedTaskID,
+            isRunning: tab.isRunning,
+            lastTurnState: tab.turns.last?.displayState
+        )
     }
 
     private func reconcileSelection(preferredProjectPath: String? = nil) {

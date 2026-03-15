@@ -25,6 +25,8 @@ struct TasksListView: View {
     var onSendToAgent: (String, UUID?, [String], String) -> Void
     /// Open the linked agent for a task when the row represents active or completed agent work.
     var onOpenLinkedAgent: (ProjectTask) -> Void = { _ in }
+    /// Stop the agent currently running for a task (from the Processing section).
+    var onStopAgent: (ProjectTask) -> Void = { _ in }
     /// Called when any task is updated (e.g. completed, edited) so the sidebar can refresh (e.g. hide agent tabs for completed tasks).
     var onTasksDidUpdate: () -> Void = { }
     var onDismiss: () -> Void
@@ -68,10 +70,11 @@ struct TasksListView: View {
     }
 
     private var reviewTasks: [ProjectTask] {
-        inProgressTasks.filter {
-            let state = linkedStatuses[$0.id]
-            return state == .review || state == .stopped
-        }
+        inProgressTasks.filter { linkedStatuses[$0.id] == .review }
+    }
+
+    private var stoppedTasks: [ProjectTask] {
+        inProgressTasks.filter { linkedStatuses[$0.id] == .stopped }
     }
 
     private var processingTasks: [ProjectTask] {
@@ -280,6 +283,7 @@ struct TasksListView: View {
                 newTaskRow
             }
             inProgressSection(title: "Review", tasks: reviewTasks)
+            inProgressSection(title: "Stopped", tasks: stoppedTasks)
             inProgressSection(title: "Processing", tasks: processingTasks)
             inProgressSection(title: "Todo", tasks: todoTasks)
         }
@@ -291,7 +295,11 @@ struct TasksListView: View {
             VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
                 Text(title)
                     .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
-                    .foregroundStyle(title == "Review" ? CursorTheme.semanticReview : CursorTheme.textSecondary(for: colorScheme))
+                    .foregroundStyle(
+                        title == "Review" ? CursorTheme.semanticReview
+                        : title == "Stopped" ? CursorTheme.semanticError
+                        : CursorTheme.textSecondary(for: colorScheme)
+                    )
                 ForEach(sectionTasks) { task in
                     let canMoveToBacklog = linkedStatuses[task.id] == nil || linkedStatuses[task.id] == .none
                     taskRow(
@@ -449,7 +457,8 @@ struct TasksListView: View {
             } : nil,
             stateTransitionLabel: stateTransitionLabel,
             stateTransitionIcon: stateTransitionIcon,
-            onStateTransition: onStateTransition
+            onStateTransition: onStateTransition,
+            onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil
         )
     }
 
@@ -743,6 +752,8 @@ private struct TaskRowView: View {
     var stateTransitionLabel: String? = nil
     var stateTransitionIcon: String = "arrow.right.circle"
     var onStateTransition: (() -> Void)? = nil
+    /// When non-nil (processing tasks), the row shows a 3-dot menu with a single "Stop agent" item.
+    var onStopAgent: (() -> Void)? = nil
 
     private var isProcessing: Bool { agentTaskState == .processing }
     private var canOpenLinkedAgent: Bool { agentTaskState != .none }
@@ -761,9 +772,9 @@ private struct TaskRowView: View {
                 .font(.system(size: 18))
                 .foregroundStyle(CursorTheme.semanticReview)
         } else if agentTaskState == .stopped {
-            Image(systemName: "clock.fill")
+            Image(systemName: "square.fill")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(CursorTheme.semanticReview)
+                .foregroundStyle(CursorTheme.semanticError)
         } else if agentTaskState == .todo {
             Image(systemName: "person")
                 .font(.system(size: 16, weight: .medium))
@@ -868,7 +879,19 @@ private struct TaskRowView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
 
-            if !isProcessing {
+            if isProcessing, let onStopAgent {
+                Menu {
+                    Button("Stop agent", systemImage: "stop.fill") {
+                        onStopAgent()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+            } else if !isProcessing {
                 Menu {
                     if canOpenLinkedAgent {
                         Button("Open linked Agent", systemImage: "arrow.up.right") {

@@ -184,7 +184,7 @@ enum ProjectTasksStorage {
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(file) else { return }
-        try? data.write(to: url)
+        try? data.write(to: url, options: .atomic)
     }
 
     /// Active tasks only (not deleted). Newest first so new tasks appear at top of In Review/Backlog.
