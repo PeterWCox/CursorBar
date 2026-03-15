@@ -113,14 +113,45 @@ struct EmbeddedTerminalView: NSViewRepresentable {
     }
 }
 
+// MARK: - Persistent terminal store (outlives SwiftUI view lifecycle)
+
+/// Holds terminal container views keyed by tab id so shell sessions survive when
+/// MultiTerminalHostView is recreated (e.g. on tab/project switch). Must be used from main thread.
+final class TerminalHostStore {
+    private var containers: [UUID: EmbeddedTerminalView.TerminalContainerView] = [:]
+
+    var containerIds: [UUID] { Array(containers.keys) }
+
+    func container(for id: UUID) -> EmbeddedTerminalView.TerminalContainerView? {
+        containers[id]
+    }
+
+    func setContainer(_ container: EmbeddedTerminalView.TerminalContainerView?, for id: UUID) {
+        if let container = container {
+            containers[id] = container
+        } else {
+            containers.removeValue(forKey: id)
+        }
+    }
+
+    func removeContainers(where predicate: (UUID) -> Bool) {
+        for id in containers.keys where predicate(id) {
+            containers[id]?.removeFromSuperview()
+            containers.removeValue(forKey: id)
+        }
+    }
+}
+
 // MARK: - Persistent multi-terminal host (keeps all shell sessions alive when switching tabs)
 
-/// Hosts one terminal session per tab in a single NSView so SwiftUI never tears down
-/// individual terminals when switching tabs. Use this for the main window's terminal tabs.
+/// Hosts one terminal session per tab in a single NSView. Uses TerminalHostStore so sessions
+/// persist when the view is recreated (e.g. switching to another terminal and back).
 struct MultiTerminalHostView: NSViewRepresentable {
     /// (id, workspacePath) for each tab. Order preserved.
     var tabs: [(id: UUID, workspacePath: String)]
     var selectedID: UUID?
+    /// Store that outlives this view; holds containers so shells survive view recreation.
+    var store: TerminalHostStore
 
     func makeNSView(context: Context) -> MultiTerminalHostContainerView {
         let host = MultiTerminalHostContainerView(frame: .zero)
@@ -136,16 +167,25 @@ struct MultiTerminalHostView: NSViewRepresentable {
     private func syncTerminals(host: MultiTerminalHostContainerView, context: Context) {
         let coordinator = context.coordinator
         let currentIDs = Set(tabs.map(\.id))
-        // Remove terminals for tabs that no longer exist
-        for id in coordinator.containers.keys where !currentIDs.contains(id) {
-            coordinator.containers[id]?.removeFromSuperview()
-            coordinator.containers.removeValue(forKey: id)
+        // Remove terminals for tabs that no longer exist (closed); remove from host and store
+        for id in store.containerIds where !currentIDs.contains(id) {
+            if let container = store.container(for: id) {
+                container.removeFromSuperview()
+                store.setContainer(nil, for: id)
+            }
         }
-        // Add or update terminals
+        // Add or update terminals: get from store or create, attach to host, show/hide by selection
         for item in tabs {
-            if coordinator.containers[item.id] == nil {
-                let container = makeTerminalContainer(workspacePath: item.workspacePath, initialCommand: nil, coordinator: coordinator)
-                coordinator.containers[item.id] = container
+            let container: EmbeddedTerminalView.TerminalContainerView
+            if let existing = store.container(for: item.id) {
+                container = existing
+                existing.embeddedTerminal?.processDelegate = coordinator
+            } else {
+                container = makeTerminalContainer(workspacePath: item.workspacePath, initialCommand: nil, coordinator: coordinator)
+                store.setContainer(container, for: item.id)
+            }
+            if container.superview !== host {
+                container.removeFromSuperview()
                 host.addSubview(container)
                 container.translatesAutoresizingMaskIntoConstraints = false
                 NSLayoutConstraint.activate([
@@ -155,12 +195,11 @@ struct MultiTerminalHostView: NSViewRepresentable {
                     container.bottomAnchor.constraint(equalTo: host.bottomAnchor),
                 ])
             }
-            let container = coordinator.containers[item.id]!
             let isSelected = item.id == selectedID
             container.isHidden = !isSelected
         }
         // Focus the selected terminal so it receives key events
-        if let selectedID, let container = coordinator.containers[selectedID] {
+        if let selectedID, let container = store.container(for: selectedID) {
             DispatchQueue.main.async {
                 guard host.window?.firstResponder !== container,
                       host.window?.firstResponder !== container.embeddedTerminal else { return }
@@ -229,7 +268,6 @@ struct MultiTerminalHostView: NSViewRepresentable {
     }
 
     class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
-        var containers: [UUID: EmbeddedTerminalView.TerminalContainerView] = [:]
         func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
         func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}

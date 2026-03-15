@@ -166,6 +166,7 @@ private struct PopoutTasksListContent: View {
     let models: [ModelOption]
     let onSendToAgent: (String, UUID?, [String], String) -> Void
     let onOpenLinkedAgent: (ProjectTask) -> Void
+    let onContinueAgent: (ProjectTask) -> Void
     let onStopAgent: (ProjectTask) -> Void
     let onTasksDidUpdate: () -> Void
     let onDismiss: () -> Void
@@ -178,6 +179,7 @@ private struct PopoutTasksListContent: View {
             models: models,
             onSendToAgent: onSendToAgent,
             onOpenLinkedAgent: onOpenLinkedAgent,
+            onContinueAgent: onContinueAgent,
             onStopAgent: onStopAgent,
             onTasksDidUpdate: onTasksDidUpdate,
             onDismiss: onDismiss
@@ -204,6 +206,7 @@ struct PopoutView: View {
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
+    @AppStorage(AppPreferences.sidebarOnRightKey) private var isSidebarOnRight: Bool = false
     @EnvironmentObject var tabManager: TabManager
 
     /// App always uses dark mode; theme picker is disabled.
@@ -343,6 +346,7 @@ struct PopoutView: View {
         }
     }
 
+    /// Focuses the agent tab linked to the task (reopens from recently closed if needed). Does not send a prompt.
     private func openLinkedAgent(for task: ProjectTask, workspacePath: String) {
         if let agentTabID = ProjectTasksStorage.linkedAgentTabID(workspacePath: workspacePath, taskID: task.id),
            tabManager.tabs.contains(where: { $0.id == agentTabID }) {
@@ -359,6 +363,19 @@ struct PopoutView: View {
         guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) else { return }
         ProjectTasksStorage.assignAgentTab(workspacePath: workspacePath, taskID: task.id, agentTabID: tab.id)
         selectLinkedAgentTab(tab.id)
+    }
+
+    /// Focuses the linked agent tab then sends the "continue" prompt.
+    private func continueAgent(for task: ProjectTask, workspacePath: String) {
+        openLinkedAgent(for: task, workspacePath: workspacePath)
+        sendContinueToLinkedConversation(task: task, workspacePath: workspacePath)
+    }
+
+    /// Sends a "continue" prompt to the conversation linked to the task so the user can restart the agent from the 3-dot menu.
+    private func sendContinueToLinkedConversation(task: ProjectTask, workspacePath: String) {
+        guard let tab = tabManager.tabs.first(where: { $0.workspacePath == workspacePath && $0.linkedTaskID == task.id }) else { return }
+        tab.prompt = "continue"
+        sendPrompt(tab: tab)
     }
 
     private func sendTaskToAgent(prompt: String, taskID: UUID, screenshotPaths: [String], modelId: String, workspacePath: String, selectAgent: Bool = false) {
@@ -431,6 +448,7 @@ struct PopoutView: View {
                 }
             },
             onOpenLinkedAgent: { task in openLinkedAgent(for: task, workspacePath: tasksPath) },
+            onContinueAgent: { task in continueAgent(for: task, workspacePath: tasksPath) },
             onStopAgent: { task in stopAgentForTask(task, workspacePath: tasksPath) },
             onTasksDidUpdate: { appState.notifyTasksDidUpdate() },
             onDismiss: { tabManager.hideTasksView() }
@@ -716,9 +734,9 @@ struct PopoutView: View {
             if !tabManager.terminalTabs.isEmpty {
                 MultiTerminalHostView(
                     tabs: tabManager.terminalTabs.map { ($0.id, $0.workspacePath) },
-                    selectedID: tabManager.selectedTerminalID
+                    selectedID: tabManager.selectedTerminalID,
+                    store: tabManager.terminalHostStore
                 )
-                .id("multiTerminalHost")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
@@ -749,18 +767,7 @@ struct PopoutView: View {
     }
 
     private var bodyContent: some View {
-        VStack(spacing: 0) {
-            topBar
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
-                .padding(.bottom, 14)
-                .overlay(alignment: .bottom) {
-                    Rectangle()
-                        .fill(CursorTheme.border(for: colorScheme).opacity(0.9))
-                        .frame(height: 1)
-                }
-            mainContentWithSidebar
-        }
+        mainContentWithSidebar
     }
 
     @ViewBuilder
@@ -768,20 +775,45 @@ struct PopoutView: View {
         GeometryReader { geometry in
             let contentWidth = max(0, geometry.size.width)
             let effectiveSidebarWidth = sidebarWidth
-            let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - effectiveSidebarWidth)
-            HStack(alignment: .top, spacing: 0) {
+            let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - effectiveSidebarWidth - 1) // 1 for divider
+            let sidebarColumn = VStack(spacing: 0) {
+                leftColumnHeader
                 tabSidebar
-                    .frame(width: effectiveSidebarWidth)
-                    .clipped()
-                Group {
-                    if isMainContentCollapsed {
-                        Color.clear.frame(width: 0).clipped()
-                    } else {
+            }
+            .frame(width: effectiveSidebarWidth)
+            .clipped()
+            let dividerView = Group {
+                if !isMainContentCollapsed {
+                    Divider()
+                        .frame(width: 1)
+                        .background(CursorTheme.border(for: colorScheme))
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            let mainColumn = Group {
+                if isMainContentCollapsed {
+                    Color.clear.frame(width: 0).clipped()
+                } else {
+                    VStack(spacing: 0) {
+                        rightColumnTopBar
                         mainContentZStack
                     }
+                    .frame(maxWidth: .infinity)
                 }
-                .frame(width: agentWidth)
-                .clipped()
+            }
+            .frame(width: agentWidth)
+            .clipped()
+
+            HStack(alignment: .top, spacing: 0) {
+                if isSidebarOnRight {
+                    mainColumn
+                    dividerView
+                    sidebarColumn
+                } else {
+                    sidebarColumn
+                    dividerView
+                    mainColumn
+                }
             }
             .clipped()
         }
@@ -946,9 +978,23 @@ struct PopoutView: View {
         #endif
     }
 
-    private var topBar: some View {
-        HStack(spacing: 14) {
-            // Logo: always show when expanded; when collapsed show only the logo (no BETA/DEBUG).
+    /// Logo + BETA/DEBUG in sidebar column; when sidebar on right, header is mirrored (expand/menu on leading edge).
+    private var leftColumnHeader: some View {
+        let expandChevron = isSidebarOnRight ? "chevron.left.2" : "chevron.right.2"
+        return HStack(spacing: 14) {
+            if isSidebarOnRight, isMainContentCollapsed {
+                IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
+                ThreeDotMenuButton(size: .medium, help: "More options") {
+                    Button(action: { appState.showSettingsSheet = true }) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    Button(action: dismiss) {
+                        Label("Minimise", systemImage: "minus")
+                    }
+                }
+            }
+            if isSidebarOnRight { Spacer(minLength: 0) }
+
             Image("CursorPlusLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -974,10 +1020,8 @@ struct PopoutView: View {
                 }
             }
 
-            Spacer(minLength: 0)
-
-            if isMainContentCollapsed {
-                // Collapsed: 3-dot menu then expand.
+            if !isSidebarOnRight { Spacer(minLength: 0) }
+            if !isSidebarOnRight, isMainContentCollapsed {
                 ThreeDotMenuButton(size: .medium, help: "More options") {
                     Button(action: { appState.showSettingsSheet = true }) {
                         Label("Settings", systemImage: "gearshape")
@@ -986,14 +1030,28 @@ struct PopoutView: View {
                         Label("Minimise", systemImage: "minus")
                     }
                 }
-
-                IconButton(icon: "chevron.right.2", action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
-            } else {
-                IconButton(icon: "chevron.left.2", action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Collapse")
-                IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
-                IconButton(icon: "minus", action: dismiss, help: "Minimise")
+                IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
             }
         }
+        .padding(.horizontal, Self.sidebarContentPadding)
+        .padding(.leading, isSidebarOnRight ? Self.sidebarContentPadding : 6)
+        .padding(.trailing, isSidebarOnRight ? 6 : Self.sidebarContentPadding)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
+    }
+
+    /// Top bar for main (agent) column when expanded: collapse, settings, minimise. Chevron direction depends on sidebar side.
+    private var rightColumnTopBar: some View {
+        let collapseChevron = isSidebarOnRight ? "chevron.right.2" : "chevron.left.2"
+        return HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            IconButton(icon: collapseChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Collapse")
+            IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
+            IconButton(icon: "minus", action: dismiss, help: "Minimise")
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 16)
+        .padding(.bottom, 14)
     }
 
     private static let sidebarContentPadding: CGFloat = 10
@@ -1275,22 +1333,14 @@ struct PopoutView: View {
                         .textSelection(.enabled)
                     if hasExpandablePrompt {
                         Button(action: onToggleExpand) {
-                            HStack(spacing: 4) {
-                                Text("…")
-                                    .font(titleFont)
-                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                                Text(isExpanded ? "Hide full prompt" : "Show full prompt")
-                                    .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 4)
-                            .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.8), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                                .contentShape(Rectangle())
+                                .frame(width: 24, height: 24)
                         }
                         .buttonStyle(.plain)
+                        .help(isExpanded ? "Hide full prompt" : "Show full prompt")
                     }
                 }
                 HStack(spacing: CursorTheme.spaceXS) {

@@ -319,6 +319,8 @@ class TabManager: ObservableObject {
     private var linkedTaskStatusSignatures: [UUID: LinkedTaskStatusSignature] = [:]
     private var persistenceSubscriptions = Set<AnyCancellable>()
     private var pendingAutosaveWorkItem: DispatchWorkItem?
+    /// Holds terminal container views so shell sessions survive MultiTerminalHostView recreation (e.g. tab/project switch).
+    let terminalHostStore = TerminalHostStore()
 
     init(loadedState: SavedTabState? = nil) {
         if let saved = loadedState {

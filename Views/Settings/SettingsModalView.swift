@@ -152,6 +152,7 @@ private struct SettingsPaneContainer<Content: View>: View {
 private struct GeneralSettingsPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+    @AppStorage(AppPreferences.sidebarOnRightKey) private var sidebarOnRight: Bool = false
 
     private var resolvedProjectsRootPath: String {
         AppPreferences.resolvedProjectsRootPath(projectsRootPath)
@@ -159,6 +160,26 @@ private struct GeneralSettingsPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Sidebar position")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+
+                Text("Show the agent tabs sidebar and logo on the left or right. Collapse with Cmd+S or Cmd+B.")
+                    .font(.system(size: 14))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Picker("", selection: $sidebarOnRight) {
+                    Text("Left").tag(false)
+                    Text("Right").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+            }
+
             VStack(alignment: .leading, spacing: 12) {
                 Text("Project picker root")
                         .font(.system(size: 11, weight: .semibold))

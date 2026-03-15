@@ -12,6 +12,15 @@ enum TasksListTab: String, CaseIterable {
     case deleted = "Deleted"
 }
 
+private struct SectionScopedTaskRow: Identifiable {
+    let sectionID: String
+    let task: ProjectTask
+
+    var id: String {
+        "\(sectionID)-\(task.id.uuidString)"
+    }
+}
+
 struct TasksListView: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
@@ -25,6 +34,8 @@ struct TasksListView: View {
     var onSendToAgent: (String, UUID?, [String], String) -> Void
     /// Open the linked agent for a task when the row represents active or completed agent work.
     var onOpenLinkedAgent: (ProjectTask) -> Void = { _ in }
+    /// Continue a stopped agent: focus its tab and send the "continue" prompt.
+    var onContinueAgent: (ProjectTask) -> Void = { _ in }
     /// Stop the agent currently running for a task (from the Processing section).
     var onStopAgent: (ProjectTask) -> Void = { _ in }
     /// Called when any task is updated (e.g. completed, edited) so the sidebar can refresh (e.g. hide agent tabs for completed tasks).
@@ -84,7 +95,7 @@ struct TasksListView: View {
     private var todoTasks: [ProjectTask] {
         inProgressTasks.filter {
             let state = linkedStatuses[$0.id]
-            return state == nil || state == .none || state == .todo
+            return state == nil || state == AgentTaskState.none || state == .todo
         }
     }
 
@@ -159,6 +170,14 @@ struct TasksListView: View {
         isAddingNewTask = true
     }
 
+    private func selectTasksTab(_ tab: TasksListTab) {
+        guard selectedTasksTab != tab else { return }
+        if tab != .inProgress && tab != .backlog && isAddingNewTask {
+            cancelNewTask()
+        }
+        selectedTasksTab = tab
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -180,6 +199,9 @@ struct TasksListView: View {
                     if showing {
                         proxy.scrollTo("tasksScrollTop", anchor: .top)
                     }
+                }
+                .transaction { transaction in
+                    transaction.animation = nil
                 }
             }
         }
@@ -235,11 +257,7 @@ struct TasksListView: View {
         HStack(spacing: 0) {
             ForEach(TasksListTab.allCases, id: \.self) { tab in
                 Button {
-                    selectedTasksTab = tab
-                    if tab != .inProgress && tab != .backlog && isAddingNewTask {
-                        isAddingNewTask = false
-                        cancelNewTask()
-                    }
+                    selectTasksTab(tab)
                 } label: {
                     Text("\(tab.rawValue) (\(taskCount(for: tab)))")
                         .font(.system(size: 13, weight: selectedTasksTab == tab ? .semibold : .medium))
@@ -292,16 +310,21 @@ struct TasksListView: View {
     @ViewBuilder
     private func inProgressSection(title: String, tasks sectionTasks: [ProjectTask]) -> some View {
         if !sectionTasks.isEmpty {
+            let scopedTasks = sectionTasks.map { SectionScopedTaskRow(sectionID: title, task: $0) }
             VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                Text(title)
-                    .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
-                    .foregroundStyle(
-                        title == "Review" ? CursorTheme.semanticReview
-                        : title == "Stopped" ? CursorTheme.semanticError
-                        : CursorTheme.textSecondary(for: colorScheme)
-                    )
-                ForEach(sectionTasks) { task in
-                    let canMoveToBacklog = linkedStatuses[task.id] == nil || linkedStatuses[task.id] == .none
+                HStack(spacing: CursorTheme.spaceXS) {
+                    sectionStatusIcon(title: title)
+                    Text(title)
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
+                        .foregroundStyle(
+                            title == "Review" ? CursorTheme.semanticReview
+                            : title == "Stopped" ? CursorTheme.semanticError
+                            : CursorTheme.textSecondary(for: colorScheme)
+                        )
+                }
+                ForEach(scopedTasks) { item in
+                    let task = item.task
+                    let canMoveToBacklog = linkedStatuses[task.id] == nil || linkedStatuses[task.id] == AgentTaskState.none
                     taskRow(
                         task,
                         stateTransitionLabel: canMoveToBacklog ? "Move to Backlog" : nil,
@@ -312,6 +335,34 @@ struct TasksListView: View {
                         } : nil
                     )
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionStatusIcon(title: String) -> some View {
+        Group {
+            switch title {
+            case "Review":
+                Image(systemName: "clock.fill")
+                    .font(.system(size: CursorTheme.fontIconList))
+                    .foregroundStyle(CursorTheme.semanticReview)
+            case "Stopped":
+                Image(systemName: "square.fill")
+                    .font(.system(size: CursorTheme.fontIconList, weight: .semibold))
+                    .foregroundStyle(CursorTheme.semanticError)
+            case "Processing":
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: CursorTheme.fontIconList))
+                    .foregroundStyle(CursorTheme.spinnerBlue)
+            case "Todo":
+                Image(systemName: "person")
+                    .font(.system(size: CursorTheme.fontIconList - 2, weight: .medium))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+            default:
+                Image(systemName: "circle")
+                    .font(.system(size: CursorTheme.fontIconList))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
             }
         }
     }
@@ -419,7 +470,7 @@ struct TasksListView: View {
             editDraft: $editingDraft,
             isEditorFocused: $isTaskEditorFocused,
             onTap: {
-                if let linkedState = linkedStatuses[task.id], linkedState != .none {
+                if let linkedState = linkedStatuses[task.id], linkedState != AgentTaskState.none {
                     onOpenLinkedAgent(task)
                 } else {
                     let content = task.content
@@ -458,7 +509,8 @@ struct TasksListView: View {
             stateTransitionLabel: stateTransitionLabel,
             stateTransitionIcon: stateTransitionIcon,
             onStateTransition: onStateTransition,
-            onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil
+            onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil,
+            onContinueAgent: linkedStatuses[task.id] == .stopped ? { onContinueAgent(task) } : nil
         )
     }
 
@@ -710,6 +762,7 @@ struct TasksListView: View {
 private struct TaskScreenshotThumbnailView: View {
     let workspacePath: String
     let screenshotPath: String
+    var size: CGSize = CGSize(width: 56, height: 56)
     var onTapPreview: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
@@ -720,11 +773,94 @@ private struct TaskScreenshotThumbnailView: View {
     var body: some View {
         ScreenshotThumbnailView(
             imageURL: imageURL,
-            size: CGSize(width: 56, height: 56),
+            size: size,
             cornerRadius: 6,
             onTapPreview: onTapPreview,
             onDelete: onDelete
         )
+    }
+}
+
+// MARK: - Inline screenshot strip: single thumb or pile + pill; prev/next when focused
+
+private struct TaskScreenshotStripView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let workspacePath: String
+    let paths: [String]
+    var onPreview: (String) -> Void = { _ in }
+    var onDelete: ((String) -> Void)? = nil
+
+    private static let thumbSize: CGSize = CGSize(width: 36, height: 36)
+    @State private var selectedIndex: Int = 0
+    @State private var isHovered: Bool = false
+
+    private var currentPath: String? {
+        guard !paths.isEmpty, paths.indices.contains(selectedIndex) else { return nil }
+        return paths[selectedIndex]
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if paths.isEmpty {
+            EmptyView()
+        } else if paths.count == 1, let path = paths.first {
+            TaskScreenshotThumbnailView(
+                workspacePath: workspacePath,
+                screenshotPath: path,
+                size: Self.thumbSize,
+                onTapPreview: { onPreview(path) },
+                onDelete: onDelete.map { cb in { cb(path) } }
+            )
+        } else {
+            // Multiple: pile + pill, prev/next when hovered
+            HStack(spacing: 2) {
+                if isHovered {
+                    Button {
+                        selectedIndex = (selectedIndex - 1 + paths.count) % paths.count
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                            .frame(width: 20, height: Self.thumbSize.height)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                ZStack(alignment: .bottomTrailing) {
+                    if let path = currentPath {
+                        TaskScreenshotThumbnailView(
+                            workspacePath: workspacePath,
+                            screenshotPath: path,
+                            size: Self.thumbSize,
+                            onTapPreview: { onPreview(path) },
+                            onDelete: nil
+                        )
+                    }
+                    Text("\(paths.count)")
+                        .font(.system(size: CursorTheme.fontTiny, weight: .semibold))
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
+                        .padding(.vertical, CursorTheme.paddingBadgeVertical)
+                        .background(CursorTheme.surfaceRaised(for: colorScheme), in: Capsule())
+                        .overlay(Capsule().strokeBorder(CursorTheme.border(for: colorScheme), lineWidth: 1))
+                        .offset(x: 4, y: 4)
+                }
+                .onTapGesture { if let p = currentPath { onPreview(p) } }
+                if isHovered {
+                    Button {
+                        selectedIndex = (selectedIndex + 1) % paths.count
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                            .frame(width: 20, height: Self.thumbSize.height)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .onHover { isHovered = $0 }
+        }
     }
 }
 
@@ -754,57 +890,19 @@ private struct TaskRowView: View {
     var onStateTransition: (() -> Void)? = nil
     /// When non-nil (processing tasks), the row shows a 3-dot menu with a single "Stop agent" item.
     var onStopAgent: (() -> Void)? = nil
+    /// When non-nil (stopped tasks), the row shows "Continue" which focuses the agent and sends "continue".
+    var onContinueAgent: (() -> Void)? = nil
 
     private var isProcessing: Bool { agentTaskState == .processing }
+    private var isStopped: Bool { agentTaskState == .stopped }
     private var canOpenLinkedAgent: Bool { agentTaskState != .none }
     private var canDelegate: Bool { task.taskState == .inProgress && agentTaskState == .none }
-
-    @ViewBuilder
-    private var leadingIcon: some View {
-        if agentTaskState == .processing {
-            LightBlueSpinner(size: 18)
-        } else if task.completed {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(CursorTheme.brandBlue)
-        } else if agentTaskState == .review {
-            Image(systemName: "clock.fill")
-                .font(.system(size: 18))
-                .foregroundStyle(CursorTheme.semanticReview)
-        } else if agentTaskState == .stopped {
-            Image(systemName: "square.fill")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(CursorTheme.semanticError)
-        } else if agentTaskState == .todo {
-            Image(systemName: "person")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-        } else {
-            Image(systemName: "circle")
-                .font(.system(size: 18))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-        }
-    }
+    /// Stopped agents are not editable; only non-completed, non-processing, non-stopped tasks can be edited.
+    private var canEdit: Bool { !task.completed && !isProcessing && !isStopped }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            // Leading icon: never used to complete. For Todo, Person icon = Delegate to agent (same as 3-dot menu).
-            Group {
-                if isProcessing {
-                    leadingIcon
-                } else if agentTaskState == .todo && canDelegate {
-                    Button(action: onSendToAgent) {
-                        leadingIcon
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isEditing)
-                    .help("Delegate to agent")
-                } else {
-                    leadingIcon
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .top, spacing: CursorTheme.spaceS) {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
                 if isEditing && !task.completed {
                     TextEditor(text: $editDraft)
                         .font(.system(size: 14, weight: .regular))
@@ -837,7 +935,8 @@ private struct TaskRowView: View {
                         .disabled(isProcessing)
                     }
                 } else {
-                    HStack(alignment: .top, spacing: 8) {
+                    // Same line: task text | screenshots | (menu is in trailing HStack)
+                    HStack(alignment: .top, spacing: CursorTheme.spaceS) {
                         Text(task.content)
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
@@ -853,20 +952,16 @@ private struct TaskRowView: View {
                                 }
                             }
                             .onTapGesture(count: 2) { if !task.completed, !isProcessing { onTap() } }
-                    }
-                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                }
-                if !task.screenshotPaths.isEmpty && !(isEditing && !task.completed) {
-                    HStack(alignment: .center, spacing: 6) {
-                        ForEach(task.screenshotPaths, id: \.self) { path in
-                            TaskScreenshotThumbnailView(
+                        if !task.screenshotPaths.isEmpty {
+                            TaskScreenshotStripView(
                                 workspacePath: workspacePath,
-                                screenshotPath: path,
-                                onTapPreview: { onPreviewScreenshot?(path) },
-                                onDelete: { onDeleteScreenshot?(path) }
+                                paths: task.screenshotPaths,
+                                onPreview: { onPreviewScreenshot?($0) },
+                                onDelete: onDeleteScreenshot
                             )
                         }
                     }
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 if !task.completed, !models.isEmpty, !isEditing {
                     ModelPickerView(
@@ -897,6 +992,11 @@ private struct TaskRowView: View {
                         Button("Open linked Agent", systemImage: "arrow.up.right") {
                             onTap()
                         }
+                        if let onContinueAgent {
+                            Button("Continue", systemImage: "play.fill") {
+                                onContinueAgent()
+                            }
+                        }
                         Divider()
                     }
                     if !task.completed {
@@ -905,8 +1005,10 @@ private struct TaskRowView: View {
                                 onSendToAgent()
                             }
                         }
-                        Button("Edit", systemImage: "pencil") {
-                            onTap()
+                        if canEdit {
+                            Button("Edit", systemImage: "pencil") {
+                                onTap()
+                            }
                         }
                         if let stateTransitionLabel, let onStateTransition {
                             Button(stateTransitionLabel, systemImage: stateTransitionIcon) {
@@ -941,6 +1043,11 @@ private struct TaskRowView: View {
                 Button("Open linked Agent", systemImage: "arrow.up.right") {
                     onTap()
                 }
+                if let onContinueAgent {
+                    Button("Continue", systemImage: "play.fill") {
+                        onContinueAgent()
+                    }
+                }
                 Divider()
             }
             if canDelegate {
@@ -950,10 +1057,12 @@ private struct TaskRowView: View {
                 .disabled(isProcessing)
             }
             if task.taskState != .completed {
-                Button("Edit", systemImage: "pencil") {
-                    onTap()
+                if canEdit {
+                    Button("Edit", systemImage: "pencil") {
+                        onTap()
+                    }
+                    .disabled(isProcessing)
                 }
-                .disabled(isProcessing)
                 if let stateTransitionLabel, let onStateTransition {
                     Button(stateTransitionLabel, systemImage: stateTransitionIcon) {
                         onStateTransition()
