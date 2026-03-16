@@ -262,6 +262,7 @@ struct PopoutView: View {
     @State private var gitBranches: [String] = []
     @State private var currentBranch: String = ""
     @State private var gitBranchSnapshotsByWorkspace: [String: GitBranchSnapshot] = [:]
+    @State private var quickActionSnapshotsByWorkspace: [String: [QuickActionCommand]] = [:]
     @State private var quickActionCommands: [QuickActionCommand] = []
     @State private var composerTextHeight: CGFloat = 24
     @State private var showCreateDebugScriptSheet: Bool = false
@@ -870,6 +871,30 @@ struct PopoutView: View {
         min(100, (messagesSentForUsage * 100) / AppLimits.includedAPIQuota)
     }
 
+    private func refreshQuickActions(for workspacePath: String, force: Bool = false) {
+        let normalizedPath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedPath.isEmpty else {
+            quickActionCommands = []
+            return
+        }
+
+        if let cached = quickActionSnapshotsByWorkspace[normalizedPath] {
+            quickActionCommands = cached
+            if !force {
+                return
+            }
+        }
+
+        Task.detached(priority: .utility) {
+            let commands = QuickActionStorage.commandsForWorkspace(workspacePath: normalizedPath)
+            await MainActor.run {
+                quickActionSnapshotsByWorkspace[normalizedPath] = commands
+                guard currentWorkspacePath == normalizedPath else { return }
+                quickActionCommands = commands
+            }
+        }
+    }
+
     private func refreshGitState(for workspacePath: String, force: Bool = false) {
         let normalizedPath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedPath.isEmpty else {
@@ -1075,12 +1100,12 @@ struct PopoutView: View {
             sanitizeSelectedModel()
             devFolders = loadDevFolders(rootPath: projectsRootPath)
             tabManager.setProjectsFromPaths(devFolders.map(\.path))
-            quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: currentWorkspacePath)
+            refreshQuickActions(for: currentWorkspacePath)
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: workspacePath) { _, _ in
-            quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: workspacePath)
+            refreshQuickActions(for: workspacePath, force: true)
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectsRootPath) { _, _ in
@@ -1098,7 +1123,7 @@ struct PopoutView: View {
         }
         .onChange(of: tabManager.selectedProjectPath) { _, _ in
             let path = currentWorkspacePath
-            quickActionCommands = QuickActionStorage.commandsForWorkspace(workspacePath: path)
+            refreshQuickActions(for: path)
             refreshGitState(for: path)
             updateHangDiagnosticsSnapshot()
         }
