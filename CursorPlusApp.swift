@@ -670,7 +670,6 @@ final class HangDiagnostics {
 class AppState: ObservableObject {
     @AppStorage("workspacePath") var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
-    @AppStorage(AppPreferences.selectedAgentProviderKey) var selectedAgentProviderRawValue: String = AgentProviders.defaultProviderID.rawValue
     @Published var showSettingsSheet: Bool = false
     /// Incremented when tasks are updated (e.g. completed) so the sidebar can hide agent tabs for completed tasks.
     @Published var taskListRevision: UUID = UUID()
@@ -685,14 +684,13 @@ class AppState: ObservableObject {
     @Published private(set) var openProjectCount: Int = 0
     /// Available agent models keyed by provider; falls back to provider defaults until loaded.
     @Published private var availableModelsByProvider: [AgentProviderID: [ModelOption]] = [
-        .cursor: AgentProviders.fallbackModels(for: .cursor),
-        .claudeCode: AgentProviders.fallbackModels(for: .claudeCode)
+        .cursor: AgentProviders.fallbackModels(for: .cursor)
     ]
     let tabManager: TabManager
     private var cancellables = Set<AnyCancellable>()
 
     var selectedAgentProviderID: AgentProviderID {
-        AgentProviders.resolvedProviderID(selectedAgentProviderRawValue)
+        .cursor
     }
 
     var availableModels: [ModelOption] {

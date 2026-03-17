@@ -95,7 +95,8 @@ struct ProjectTask: Identifiable, Codable, Equatable {
         } else {
             screenshotPaths = []
         }
-        providerID = try c.decodeIfPresent(AgentProviderID.self, forKey: .providerID) ?? .cursor
+        let rawProviderID = try c.decodeIfPresent(String.self, forKey: .providerID)
+        providerID = AgentProviders.resolvedProviderID(rawProviderID ?? AgentProviderID.cursor.rawValue)
         modelId = try c.decodeIfPresent(String.self, forKey: .modelId) ?? AvailableModels.autoID
         preDeletionTaskState = try c.decodeIfPresent(TaskState.self, forKey: .preDeletionTaskState)
         agentTabID = try c.decodeIfPresent(UUID.self, forKey: .agentTabID)

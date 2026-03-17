@@ -3,9 +3,9 @@ import Combine
 
 struct ProjectSettingsSnapshot: Equatable {
     var debugURL: String
-    var startupScriptContents: String
+    var startupScripts: [String]
 
-    static let empty = ProjectSettingsSnapshot(debugURL: "", startupScriptContents: "")
+    static let empty = ProjectSettingsSnapshot(debugURL: "", startupScripts: [])
 }
 
 @MainActor
@@ -42,7 +42,7 @@ final class ProjectSettingsStore: ObservableObject {
         guard !normalizedPath.isEmpty else { return }
         snapshotsByWorkspace[normalizedPath] = ProjectSettingsSnapshot(
             debugURL: ProjectSettingsStorage.getDebugURL(workspacePath: normalizedPath) ?? "",
-            startupScriptContents: ProjectSettingsStorage.getStartupScriptContents(workspacePath: normalizedPath) ?? ""
+            startupScripts: ProjectSettingsStorage.getStartupScripts(workspacePath: normalizedPath)
         )
     }
 
@@ -56,9 +56,8 @@ final class ProjectSettingsStore: ObservableObject {
         return value.isEmpty ? nil : value
     }
 
-    func startupScriptContents(for workspacePath: String) -> String? {
-        let value = snapshot(for: workspacePath).startupScriptContents
-        return value.isEmpty ? nil : value
+    func startupScripts(for workspacePath: String) -> [String] {
+        snapshot(for: workspacePath).startupScripts
     }
 
     func setDebugURL(workspacePath: String, _ value: String?) {
@@ -66,8 +65,8 @@ final class ProjectSettingsStore: ObservableObject {
         reload(workspacePath: workspacePath)
     }
 
-    func setStartupScriptContents(workspacePath: String, _ value: String?) {
-        ProjectSettingsStorage.setStartupScriptContents(workspacePath: workspacePath, value)
+    func setStartupScripts(workspacePath: String, _ scripts: [String]) {
+        ProjectSettingsStorage.setStartupScripts(workspacePath: workspacePath, scripts)
         reload(workspacePath: workspacePath)
     }
 

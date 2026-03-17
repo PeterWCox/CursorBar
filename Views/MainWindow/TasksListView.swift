@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 // MARK: - Tasks (todos) list for a project
 
@@ -100,8 +99,17 @@ private struct CollapsibleGroupingView<Content: View>: View {
     }
 }
 
+private struct DraftTaskScreenshot: Identifiable {
+    let id: UUID
+    let image: NSImage
+
+    init(id: UUID = UUID(), image: NSImage) {
+        self.id = id
+        self.image = image
+    }
+}
+
 struct TasksListView: View {
-    @EnvironmentObject private var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
     /// When set to true from outside (e.g. Cmd+T), show the add-new-task row and focus it.
@@ -132,8 +140,7 @@ struct TasksListView: View {
 
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @StateObject private var store = TasksListStore()
-    @FocusState private var isNewTaskFieldFocused: Bool
-    @FocusState private var isTaskEditorFocused: Bool
+    @State private var focusNewTaskField: (() -> Void)?
     /// URLs and paths for full-screen task screenshot preview (saved task screenshots). When non-empty, modal shows images side by side.
     @State private var taskScreenshotPreviewURLs: [URL] = []
     @State private var taskScreenshotPreviewPaths: [String] = []
@@ -143,9 +150,9 @@ struct TasksListView: View {
     /// In-memory image for full-screen preview (new-task draft screenshots before save).
     @State private var taskScreenshotPreviewImage: NSImage? = nil
     /// Draft screenshots for the new task row (paste before commit). Shown with same thumbnail + preview as existing tasks.
-    @State private var newTaskDraftScreenshots: [(id: UUID, image: NSImage)] = []
-    /// While the add-task row is visible, intercept Cmd+V for image paste without breaking normal text paste.
-    @State private var newTaskPasteKeyMonitor: Any?
+    @State private var newTaskDraftScreenshots: [DraftTaskScreenshot] = []
+    /// Draft screenshots while editing an existing task. Existing screenshots are loaded into memory and replaced on save.
+    @State private var editDraftScreenshots: [DraftTaskScreenshot] = []
 
     private var preferredTerminal: PreferredTerminalApp {
         PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
@@ -172,6 +179,43 @@ struct TasksListView: View {
         }
     }
 
+    private func loadDraftScreenshots(for task: ProjectTask) -> [DraftTaskScreenshot] {
+        task.screenshotPaths.compactMap { path in
+            let url = ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: path)
+            guard let image = NSImage(contentsOf: url) else { return nil }
+            return DraftTaskScreenshot(image: image)
+        }
+    }
+
+    private func appendScreenshot(to screenshots: inout [DraftTaskScreenshot], from pasteboard: NSPasteboard = .general) {
+        guard screenshots.count < AppLimits.maxScreenshots,
+              let image = SubmittableTextEditor.imageFromPasteboard(pasteboard) else {
+            return
+        }
+
+        screenshots.append(DraftTaskScreenshot(image: image))
+    }
+
+    private func pasteNewTaskScreenshot() {
+        appendScreenshot(to: &newTaskDraftScreenshots)
+    }
+
+    private func pasteEditScreenshot() {
+        appendScreenshot(to: &editDraftScreenshots)
+    }
+
+    private func beginEditing(_ task: ProjectTask) {
+        let content = task.content
+        let screenshots = loadDraftScreenshots(for: task)
+
+        DispatchQueue.main.async {
+            store.editingDraft = content
+            editDraftScreenshots = screenshots
+            taskScreenshotPreviewImage = nil
+            store.editingTask = task
+        }
+    }
+
     private func commitNewTask() {
         syncNewTaskModelSelection()
         store.commitNewTask(
@@ -179,33 +223,24 @@ struct TasksListView: View {
             providerID: newTaskProviderID
         )
         newTaskDraftScreenshots = []
-        isNewTaskFieldFocused = false
     }
 
     private func cancelNewTask() {
         store.cancelNewTask()
         newTaskDraftScreenshots = []
         taskScreenshotPreviewImage = nil
-        isNewTaskFieldFocused = false
     }
 
-    private func installNewTaskPasteMonitorIfNeeded() {
-        guard newTaskPasteKeyMonitor == nil else { return }
-        newTaskPasteKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isCommandV = modifiers.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "v"
-            guard isCommandV else { return event }
-            guard newTaskDraftScreenshots.count < AppLimits.maxScreenshots else { return event }
-            guard let image = SubmittableTextEditor.imageFromPasteboard(.general) else { return event }
-            newTaskDraftScreenshots.append((id: UUID(), image: image))
-            return nil
-        }
+    private func commitEdit() {
+        store.commitEdit(screenshotImages: editDraftScreenshots.map(\.image))
+        editDraftScreenshots = []
+        taskScreenshotPreviewImage = nil
     }
 
-    private func removeNewTaskPasteMonitor() {
-        guard let monitor = newTaskPasteKeyMonitor else { return }
-        NSEvent.removeMonitor(monitor)
-        newTaskPasteKeyMonitor = nil
+    private func cancelEdit() {
+        store.editingTask = nil
+        editDraftScreenshots = []
+        taskScreenshotPreviewImage = nil
     }
 
     private func showNewTaskComposer(selecting tab: TasksListTab? = nil) {
@@ -221,7 +256,6 @@ struct TasksListView: View {
         if wasAddingNewTask && !store.isAddingNewTask {
             newTaskDraftScreenshots = []
             taskScreenshotPreviewImage = nil
-            isNewTaskFieldFocused = false
         }
     }
 
@@ -277,9 +311,6 @@ struct TasksListView: View {
         .onChange(of: newTaskProviderID) { _, _ in
             syncNewTaskModelSelection()
         }
-        .onChange(of: appState.selectedAgentProviderID) { _, _ in
-            syncNewTaskModelSelection()
-        }
         .onChange(of: triggerAddNewTask.wrappedValue) { _, requested in
             if requested {
                 showNewTaskComposer(selecting: .inProgress)
@@ -288,13 +319,11 @@ struct TasksListView: View {
         }
         .onChange(of: store.isAddingNewTask) { _, showing in
             if showing {
-                isNewTaskFieldFocused = true
-                installNewTaskPasteMonitorIfNeeded()
-            } else {
-                removeNewTaskPasteMonitor()
+                DispatchQueue.main.async {
+                    focusNewTaskField?()
+                }
             }
         }
-        .onDisappear { removeNewTaskPasteMonitor() }
         .overlay {
             if !taskScreenshotPreviewURLs.isEmpty || taskScreenshotPreviewImage != nil {
                 ScreenshotPreviewModal(
@@ -369,8 +398,7 @@ struct TasksListView: View {
     /// Start Preview / Stop / Open in Browser / Configure Setup (external terminal; window closes on Stop).
     private var previewButtonsBar: some View {
         let debugURL = store.debugURL
-        let startupContents = store.startupScriptContents
-        let isConfigured = !startupContents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isConfigured = !store.startupScripts.isEmpty
         let hasPreviewURL = !debugURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return HStack(spacing: CursorTheme.spaceS) {
             addTaskChip
@@ -408,7 +436,7 @@ struct TasksListView: View {
                                 store.previewRunningInExternalTerminal = true
                             }
                         },
-                        help: "Run .metro/startup.sh in a new terminal window (closed when you tap Stop)",
+                        help: "Run each startup script in its own terminal window (closed when you tap Stop)",
                         style: .play
                     )
                 }
@@ -417,7 +445,7 @@ struct TasksListView: View {
                         title: isConfigured ? "Regenerate Setup" : "Configure Setup",
                         icon: "gearshape",
                         action: { launch(workspacePath) },
-                        help: isConfigured ? "Launch an agent to regenerate .metro/startup.sh and debug URL" : "Launch an agent to set up .metro/startup.sh and debug URL for this project",
+                        help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
                         style: .accent
                     )
                 }
@@ -599,10 +627,6 @@ struct TasksListView: View {
         }
     }
 
-    private func commitEdit() {
-        store.commitEdit()
-    }
-
     @ViewBuilder
     private func taskRow(
         _ task: ProjectTask,
@@ -617,22 +641,16 @@ struct TasksListView: View {
             agentTaskState: linkedStatuses[task.id] ?? .none,
             isEditing: store.editingTask?.id == task.id,
             editDraft: $store.editingDraft,
-            isEditorFocused: $isTaskEditorFocused,
+            editScreenshots: store.editingTask?.id == task.id ? editDraftScreenshots : [],
             onTap: {
                 if let linkedState = linkedStatuses[task.id], linkedState != AgentTaskState.none {
                     onOpenLinkedAgent(task)
                 } else {
-                    let content = task.content
-                    let taskToEdit = task
-                    // Defer so when triggered from context/menu the menu dismisses first and inline editor gets focus
-                    DispatchQueue.main.async {
-                        store.editingDraft = content
-                        store.editingTask = taskToEdit
-                    }
+                    beginEditing(task)
                 }
             },
             onCommitEdit: commitEdit,
-            onCancelEdit: { store.editingTask = nil },
+            onCancelEdit: cancelEdit,
             onToggleComplete: {
                 store.toggleTaskCompletion(task)
                 onTasksDidUpdate()
@@ -653,6 +671,17 @@ struct TasksListView: View {
             onDeleteScreenshot: !task.completed ? { path in
                 store.removeTaskScreenshot(taskID: task.id, screenshotPath: path)
             } : nil,
+            onPasteEditScreenshot: store.editingTask?.id == task.id ? pasteEditScreenshot : nil,
+            onPreviewEditScreenshot: { image in
+                taskScreenshotPreviewImage = image
+            },
+            onRemoveEditScreenshot: { screenshotID in
+                if let screenshot = editDraftScreenshots.first(where: { $0.id == screenshotID }),
+                   taskScreenshotPreviewImage === screenshot.image {
+                    taskScreenshotPreviewImage = nil
+                }
+                editDraftScreenshots.removeAll { $0.id == screenshotID }
+            },
             stateTransitionLabel: stateTransitionLabel,
             stateTransitionIcon: stateTransitionIcon,
             onStateTransition: onStateTransition,
@@ -814,19 +843,23 @@ struct TasksListView: View {
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
 
                 ZStack(alignment: .topLeading) {
-                    TextEditor(text: $store.newTaskDraft)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        .scrollContentBackground(.hidden)
-                        .scrollDisabled(true)
-                        .focused($isNewTaskFieldFocused)
-                        .onKeyPress { press in
-                            if press.key == .return && !NSEvent.modifierFlags.contains(.shift) {
-                                commitNewTask()
-                                return .handled
+                    SubmittableTextEditor(
+                        text: $store.newTaskDraft,
+                        isDisabled: false,
+                        onSubmit: commitNewTask,
+                        onPasteImage: pasteNewTaskScreenshot,
+                        onFocusRequested: { focus, _ in
+                            focusNewTaskField = focus
+                            if store.isAddingNewTask {
+                                DispatchQueue.main.async {
+                                    focus()
+                                }
                             }
-                            return .ignored
-                        }
+                        },
+                        colorScheme: colorScheme,
+                        font: NSFont.systemFont(ofSize: 14, weight: .regular),
+                        textContainerInset: NSSize(width: 0, height: 4)
+                    )
                         .onKeyPress(.escape) {
                             cancelNewTask()
                             return .handled
@@ -882,21 +915,6 @@ struct TasksListView: View {
             RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
-        .onPasteCommand(of: [.image, .png, .tiff]) { providers in
-            guard newTaskDraftScreenshots.count < AppLimits.maxScreenshots else { return }
-            for provider in providers {
-                guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) else { continue }
-                _ = provider.loadObject(ofClass: NSImage.self) { object, _ in
-                    guard let img = object as? NSImage else { return }
-                    DispatchQueue.main.async {
-                        if newTaskDraftScreenshots.count < AppLimits.maxScreenshots {
-                            newTaskDraftScreenshots.append((id: UUID(), image: img))
-                        }
-                    }
-                }
-                break
-            }
-        }
     }
 
 }
@@ -967,7 +985,7 @@ private struct TaskRowView: View {
     var agentTaskState: AgentTaskState = .none
     var isEditing: Bool = false
     @Binding var editDraft: String
-    var isEditorFocused: FocusState<Bool>.Binding
+    var editScreenshots: [DraftTaskScreenshot] = []
     let onTap: () -> Void
     let onCommitEdit: () -> Void
     let onCancelEdit: () -> Void
@@ -977,6 +995,9 @@ private struct TaskRowView: View {
     let onDelete: () -> Void
     var onPreviewScreenshot: (([String], String, ((String) -> Void)?) -> Void)? = nil
     var onDeleteScreenshot: ((String) -> Void)? = nil
+    var onPasteEditScreenshot: (() -> Void)? = nil
+    var onPreviewEditScreenshot: ((NSImage) -> Void)? = nil
+    var onRemoveEditScreenshot: ((UUID) -> Void)? = nil
     var stateTransitionLabel: String? = nil
     var stateTransitionIcon: String = "arrow.right.circle"
     var onStateTransition: (() -> Void)? = nil
@@ -1000,6 +1021,7 @@ private struct TaskRowView: View {
             ?? AgentProviders.fallbackModels(for: task.providerID).first
             ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
     }
+    @State private var focusEditor: (() -> Void)?
 
     /// Trailing controls (screenshot strip + 3-dot menu) shown in an overlay so they sit exactly halfway down the card.
     @ViewBuilder
@@ -1015,6 +1037,9 @@ private struct TaskRowView: View {
             }
             if isProcessing, let onStopAgent {
                 Menu {
+                    Button("Review", systemImage: "person") {
+                        onTap()
+                    }
                     Button("Stop", systemImage: "stop.fill") {
                         onStopAgent()
                     }
@@ -1028,7 +1053,7 @@ private struct TaskRowView: View {
             } else if !isProcessing {
                 Menu {
                     if canOpenLinkedAgent {
-                        Button("Open linked Agent", systemImage: "arrow.up.right") {
+                        Button("Review", systemImage: "person") {
                             onTap()
                         }
                         if let onContinueAgent {
@@ -1082,28 +1107,44 @@ private struct TaskRowView: View {
         HStack(alignment: .top, spacing: CursorTheme.spaceS) {
             VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
                 if isEditing && !task.completed {
-                    TextEditor(text: $editDraft)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        .scrollContentBackground(.hidden)
-                        .lineSpacing(6)
-                        .padding(.vertical, CursorTheme.spaceXS)
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
-                        .focused(isEditorFocused)
-                        .onKeyPress { press in
-                            if press.key == .return {
-                                if NSEvent.modifierFlags.contains(.shift) {
-                                    return .ignored
+                    SubmittableTextEditor(
+                        text: $editDraft,
+                        isDisabled: false,
+                        onSubmit: onCommitEdit,
+                        onPasteImage: onPasteEditScreenshot,
+                        onFocusRequested: { focus, _ in
+                            focusEditor = focus
+                            if isEditing {
+                                DispatchQueue.main.async {
+                                    focus()
                                 }
-                                onCommitEdit()
-                                return .handled
                             }
-                            return .ignored
-                        }
+                        },
+                        colorScheme: colorScheme,
+                        font: NSFont.systemFont(ofSize: 14, weight: .regular),
+                        textContainerInset: NSSize(width: 0, height: 4)
+                    )
+                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
                         .onKeyPress(.escape) {
                             onCancelEdit()
                             return .handled
                         }
+                    if !editScreenshots.isEmpty {
+                        HStack(alignment: .center, spacing: 6) {
+                            ForEach(editScreenshots) { item in
+                                ScreenshotThumbnailView(
+                                    image: item.image,
+                                    size: CGSize(width: 56, height: 56),
+                                    cornerRadius: 6,
+                                    onTapPreview: { onPreviewEditScreenshot?(item.image) },
+                                    onDelete: {
+                                        onRemoveEditScreenshot?(item.id)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.top, CursorTheme.spaceXS)
+                    }
                     if !models.isEmpty {
                         Group {
                             if canEditAgentModel {
@@ -1166,7 +1207,7 @@ private struct TaskRowView: View {
         }
         .contextMenu {
             if canOpenLinkedAgent {
-                Button("Open linked Agent", systemImage: "arrow.up.right") {
+                Button("Review", systemImage: "person") {
                     onTap()
                 }
                 if let onContinueAgent {
@@ -1210,6 +1251,12 @@ private struct TaskRowView: View {
                 onDelete()
             }
             .disabled(isProcessing)
+        }
+        .onChange(of: isEditing) { _, editing in
+            guard editing else { return }
+            DispatchQueue.main.async {
+                focusEditor?()
+            }
         }
     }
 

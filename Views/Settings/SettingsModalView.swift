@@ -65,19 +65,14 @@ struct SettingsModalView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Settings")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                Spacer()
-                Button("Close", action: { dismiss() })
-                    .keyboardShortcut(.cancelAction)
-                    .buttonStyle(DialogSecondaryButtonStyle())
-            }
-            Text("Changes apply automatically.")
-                .font(.system(size: 12))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+        HStack {
+            Text("Settings")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            Spacer()
+            Button("Close", action: { dismiss() })
+                .keyboardShortcut(.cancelAction)
+                .buttonStyle(DialogSecondaryButtonStyle())
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 20)
@@ -107,23 +102,23 @@ struct SettingsModalView: View {
         Group {
             switch selectedPane {
             case .general:
-                SettingsPaneContainer(title: SettingsPane.general.rawValue) {
+                SettingsPaneContainer {
                     GeneralSettingsPaneContent()
                 }
             case .projects:
-                SettingsPaneContainer(title: SettingsPane.projects.rawValue) {
+                SettingsPaneContainer {
                     ProjectsSettingsPaneContent()
                 }
             case .models:
-                SettingsPaneContainer(title: SettingsPane.models.rawValue) {
+                SettingsPaneContainer {
                     ModelsSettingsPaneContent()
                 }
             case .keyboardShortcuts:
-                SettingsPaneContainer(title: SettingsPane.keyboardShortcuts.rawValue) {
+                SettingsPaneContainer {
                     KeyboardShortcutsContentView()
                 }
             case .about:
-                SettingsPaneContainer(title: SettingsPane.about.rawValue) {
+                SettingsPaneContainer {
                     AboutPaneContent()
                 }
             }
@@ -132,23 +127,16 @@ struct SettingsModalView: View {
     }
 }
 
-// MARK: - Settings pane container (title + scroll + padding)
+// MARK: - Settings pane container (scroll + padding)
 
 private struct SettingsPaneContainer<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
-    let title: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 24) {
-                Text(title)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                content()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(24)
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(24)
         }
     }
 }
@@ -347,7 +335,6 @@ private struct ProjectsSettingsPaneContent: View {
 private struct ModelsSettingsPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
-    @AppStorage(AppPreferences.selectedAgentProviderKey) private var selectedAgentProviderRawValue: String = AgentProviders.defaultProviderID.rawValue
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
     @State private var modelSearchText: String = ""
     @State private var showAllModels: Bool = false
@@ -360,15 +347,15 @@ private struct ModelsSettingsPaneContent: View {
         AppPreferences.effectiveDisabledModelIds(
             allIds: allModelIds,
             raw: disabledModelIdsRaw,
-            defaultEnabledModelIds: AgentProviders.defaultEnabledModelIds(for: appState.selectedAgentProviderID),
-            defaultModelID: AgentProviders.defaultModelID(for: appState.selectedAgentProviderID)
+            defaultEnabledModelIds: AgentProviders.defaultEnabledModelIds(for: .cursor),
+            defaultModelID: AgentProviders.defaultModelID(for: .cursor)
         )
     }
 
     private var displayedModels: [ModelOption] {
         var list = showAllModels
             ? appState.availableModels
-            : appState.availableModels.filter { appState.isDefaultShown(modelId: $0.id, for: appState.selectedAgentProviderID) }
+            : appState.availableModels.filter { appState.isDefaultShown(modelId: $0.id, for: .cursor) }
         let search = modelSearchText.trimmingCharacters(in: .whitespaces).lowercased()
         if !search.isEmpty {
             list = list.filter {
@@ -380,27 +367,6 @@ private struct ModelsSettingsPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Agent provider")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-
-                Text("Choose which CLI powers new agents and determines the model list shown below.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Picker("", selection: $selectedAgentProviderRawValue) {
-                    ForEach(AgentProviderID.allCases) { providerID in
-                        Text(providerID.displayName).tag(providerID.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-            }
-
             // Search and refresh
             HStack(spacing: 8) {
                 TextField("Search models...", text: $modelSearchText)
@@ -466,12 +432,7 @@ private struct ModelsSettingsPaneContent: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
-            appState.loadModels(for: appState.selectedAgentProviderID)
-        }
-        .onChange(of: selectedAgentProviderRawValue) { _, _ in
-            showAllModels = false
-            modelSearchText = ""
-            appState.loadModels(for: appState.selectedAgentProviderID)
+            appState.loadModelsFromCLI()
         }
     }
 }
@@ -484,15 +445,15 @@ private struct AboutPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Cursor Metro is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
-                .font(.system(size: 14))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-
             Image("CursorMetroLogo")
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: 44)
+
+            Text("Cursor Metro is a native macOS menu bar app that works alongside Cursor. It gives you quick access to projects, composer, and Cursor features from the menu bar—open workspaces, jump into chat, or pop out the composer without switching apps.")
+                .font(.system(size: 14))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
 
             Text("GitHub")
                 .font(.system(size: 11, weight: .semibold))

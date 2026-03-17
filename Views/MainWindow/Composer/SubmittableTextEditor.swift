@@ -169,6 +169,10 @@ struct SubmittableTextEditor: NSViewRepresentable {
     var onFocusRequested: (((@escaping () -> Void), (@escaping () -> Bool)) -> Void)? = nil
     /// Pass from environment so editor text respects light/dark.
     var colorScheme: ColorScheme = .dark
+    /// Override for places that use body text instead of a monospaced composer font.
+    var font: NSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    /// Override for layouts that need tighter or looser text padding.
+    var textContainerInset: NSSize = NSSize(width: 4, height: 6)
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -178,9 +182,9 @@ struct SubmittableTextEditor: NSViewRepresentable {
             : NSColor.black.withAlphaComponent(0.88)
     }
 
-    private static func typingAttributes(for colorScheme: ColorScheme) -> [NSAttributedString.Key: Any] {
+    private static func typingAttributes(for colorScheme: ColorScheme, font: NSFont) -> [NSAttributedString.Key: Any] {
         [
-            .font: NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+            .font: font,
             .foregroundColor: textColor(for: colorScheme)
         ]
     }
@@ -191,8 +195,8 @@ struct SubmittableTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onPasteImage = onPasteImage
         textView.isRichText = false
-        textView.font = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
+        textView.font = font
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme, font: font)
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.textColor = Self.textColor(for: colorScheme)
@@ -200,7 +204,7 @@ struct SubmittableTextEditor: NSViewRepresentable {
         textView.isEditable = true
         textView.isSelectable = true
         textView.allowsUndo = true
-        textView.textContainerInset = NSSize(width: 4, height: 6)
+        textView.textContainerInset = textContainerInset
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
@@ -224,7 +228,9 @@ struct SubmittableTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         textView.textColor = Self.textColor(for: colorScheme)
         textView.insertionPointColor = Self.textColor(for: colorScheme)
-        textView.typingAttributes = Self.typingAttributes(for: colorScheme)
+        textView.font = font
+        textView.typingAttributes = Self.typingAttributes(for: colorScheme, font: font)
+        textView.textContainerInset = textContainerInset
         if textView.string != text {
             textView.string = text
         }
@@ -246,7 +252,8 @@ struct SubmittableTextEditor: NSViewRepresentable {
         }
     }
 
-    /// Extracts an image from the pasteboard using multiple methods (NSImage, file URL, raw PNG/TIFF).
+    /// Extracts an image from the pasteboard using multiple methods (NSImage, file URL, raw PNG/TIFF/JPEG).
+    /// macOS screenshots often put a file URL (public.file-url) on the pasteboard; we read that explicitly.
     static func imageFromPasteboard(_ pasteboard: NSPasteboard) -> NSImage? {
         if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil),
            let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
@@ -259,11 +266,28 @@ struct SubmittableTextEditor: NSViewRepresentable {
            let image = NSImage(contentsOf: url) {
             return image
         }
+        // macOS screenshot (and Finder "Copy") often puts file URL as data with type .fileURL; readObjects may not return it.
+        let fileURLType = NSPasteboard.PasteboardType.fileURL
+        if pasteboard.types?.contains(fileURLType) == true,
+           let data = pasteboard.data(forType: fileURLType),
+           let str = String(data: data, encoding: .utf8),
+           let url = URL(string: str.trimmingCharacters(in: .whitespacesAndNewlines)),
+           url.isFileURL,
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
         let imageTypes: [NSPasteboard.PasteboardType] = [.png, .tiff]
         for type in imageTypes {
             if let data = pasteboard.data(forType: type), let image = NSImage(data: data) {
                 return image
             }
+        }
+        // JPEG (e.g. some screenshots or copied images)
+        let jpegType = NSPasteboard.PasteboardType("public.jpeg")
+        if pasteboard.types?.contains(jpegType) == true,
+           let data = pasteboard.data(forType: jpegType),
+           let image = NSImage(data: data) {
+            return image
         }
         return nil
     }

@@ -534,132 +534,177 @@ func migrateCursormetroToMetroIfNeeded(workspacePath: String) {
     try? fm.moveItem(at: oldDir, to: newDir)
 }
 
-// MARK: - Startup script (run with bash in terminal)
+// MARK: - Startup scripts (from project.json; each run in its own terminal)
 
-/// Launches the project's startup script (`.metro/startup.sh`) with bash in the preferred terminal.
+/// If script is "startup.sh" or ".metro/startup.sh" and that file exists, returns its contents; otherwise returns script as-is.
+/// Handles configs where the agent wrongly put a filename in the scripts array instead of actual commands.
+private func resolveScriptForExecution(script: String, projectRoot: String) -> String {
+    let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed == "startup.sh" || trimmed == ".metro/startup.sh" else { return script }
+    let fileURL = URL(fileURLWithPath: projectRoot)
+        .appendingPathComponent(".metro")
+        .appendingPathComponent("startup.sh")
+    guard FileManager.default.fileExists(atPath: fileURL.path),
+          let data = try? Data(contentsOf: fileURL),
+          let contents = String(data: data, encoding: .utf8),
+          !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return script
+    }
+    return contents.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// Builds a shell command that runs one script string from the project's scripts array (cwd = project root).
+private func commandForScript(script: String, projectRoot: String) -> String {
+    let resolved = resolveScriptForExecution(script: script, projectRoot: projectRoot)
+    let quotedPath = singleQuotedShellValue(projectRoot)
+    let quotedScript = singleQuotedShellValue(resolved)
+    return "cd \(quotedPath) && /bin/bash -c \(quotedScript)"
+}
+
+/// Launches each of the project's startup scripts in the preferred terminal (first in front window, rest in new tabs).
 /// Returns an error message on failure, nil on success.
 func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
     let root = projectRootForTerminal(workspacePath: workspacePath)
-    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: root)
-    let scriptPath = scriptURL.path
-    guard FileManager.default.fileExists(atPath: scriptPath),
-          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: root),
-          !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return "No startup script configured for this project. Add script content in Preview → Advanced (startup.sh)."
+    let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
+    guard !scripts.isEmpty else {
+        return "No startup scripts configured. Add scripts in Preview → Advanced (project.json scripts array)."
     }
 
     guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {
         return "No supported terminal app is available. Install Terminal or iTerm."
     }
 
-    let quotedPath = singleQuotedShellValue(root)
-    let quotedScript = singleQuotedShellValue(scriptPath)
-    let command = "cd \(quotedPath) && /bin/bash \(quotedScript)"
-
-    switch terminal {
-    case .automatic:
-        return "No supported terminal app is available. Install Terminal or iTerm."
-    case .terminal:
-        return runAppleScript("""
-        tell application id "com.apple.Terminal"
-            activate
-            if (count of windows) = 0 then
-                do script "\(appleScriptEscaped(command))"
-            else
-                do script "\(appleScriptEscaped(command))" in front window
-            end if
-        end tell
-        """)
-    case .iTerm:
-        return runAppleScript("""
-        tell application id "com.googlecode.iterm2"
-            activate
-            if (count of windows) = 0 then
-                create window with default profile
-            end if
-            tell current window
-                create tab with default profile
-                tell current session of current tab
-                    write text "\(appleScriptEscaped(command))"
+    for (index, script) in scripts.enumerated() {
+        let command = commandForScript(script: script, projectRoot: root)
+        let useNewTab = index > 0
+        switch terminal {
+        case .automatic:
+            return "No supported terminal app is available. Install Terminal or iTerm."
+        case .terminal:
+            if useNewTab {
+                let err = runAppleScript("""
+                    tell application id "com.apple.Terminal"
+                        activate
+                        tell front window to do script "\(appleScriptEscaped(command))"
+                    end tell
+                    """)
+                if let e = err { return e }
+            } else {
+                let err = runAppleScript("""
+                    tell application id "com.apple.Terminal"
+                        activate
+                        if (count of windows) = 0 then
+                            do script "\(appleScriptEscaped(command))"
+                        else
+                            do script "\(appleScriptEscaped(command))" in front window
+                        end if
+                    end tell
+                    """)
+                if let e = err { return e }
+            }
+        case .iTerm:
+            let err = runAppleScript("""
+                tell application id "com.googlecode.iterm2"
+                    activate
+                    if (count of windows) = 0 then
+                        create window with default profile
+                    end if
+                    tell current window
+                        create tab with default profile
+                        tell current session of current tab
+                            write text "\(appleScriptEscaped(command))"
+                        end tell
+                    end tell
                 end tell
-            end tell
-        end tell
-        """)
+                """)
+            if let e = err { return e }
+        }
     }
+    return nil
 }
 
-// MARK: - Preview in external terminal window (new window, close on Stop)
+// MARK: - Preview in external terminal windows (one per script, close all on Stop)
 
-/// Window title used for the preview terminal so we can close it on Stop.
-func previewWindowTitle(workspacePath: String) -> String {
+/// Title prefix for preview terminal windows (used to close all preview windows for this project).
+func previewWindowTitlePrefix(workspacePath: String) -> String {
     let root = projectRootForTerminal(workspacePath: workspacePath)
     let name = (root as NSString).lastPathComponent
     return "Cursor Metro Preview - \(name)"
 }
 
-/// Launches the project's startup script in a **new** terminal window with a known title. Returns nil on success.
-/// Use closePreviewTerminalWindow(workspacePath:) when user taps Stop.
+/// Window title for one preview terminal (scriptIndex is 0-based; display as 1-based in title).
+func previewWindowTitle(workspacePath: String, scriptIndex: Int) -> String {
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
+    let suffix = scripts.count > 1 ? " - \(scriptIndex + 1)" : ""
+    return previewWindowTitlePrefix(workspacePath: workspacePath) + suffix
+}
+
+/// Launches each of the project's startup scripts in a **new** terminal window (one window per script). Returns nil on success.
+/// Use closePreviewTerminalWindow(workspacePath:) when user taps Stop to close all preview windows for this project.
 func launchStartupScriptInNewWindow(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
     let root = projectRootForTerminal(workspacePath: workspacePath)
-    let scriptURL = ProjectSettingsStorage.startupScriptFileURL(workspacePath: root)
-    let scriptPath = scriptURL.path
-    guard FileManager.default.fileExists(atPath: scriptPath),
-          let contents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: root),
-          !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return "No startup script configured for this project. Add script content in Tasks → In Progress (Configure Setup) or Advanced."
+    let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
+    guard !scripts.isEmpty else {
+        return "No startup scripts configured. Add scripts in Tasks → In Progress (Configure Setup) or Advanced."
     }
 
     guard let terminal = resolvedTerminalApp(for: preferredTerminal) else {
         return "No supported terminal app is available. Install Terminal or iTerm."
     }
 
-    let title = previewWindowTitle(workspacePath: workspacePath)
-    let titleEscaped = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-    let quotedPath = singleQuotedShellValue(root)
-    let quotedScript = singleQuotedShellValue(scriptPath)
-    let command = "echo -ne \"\\033]0;\(titleEscaped)\\007\"; cd \(quotedPath) && /bin/bash \(quotedScript)"
+    for (index, script) in scripts.enumerated() {
+        let title = previewWindowTitle(workspacePath: workspacePath, scriptIndex: index)
+        let titleEscaped = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        let command = commandForScript(script: script, projectRoot: root)
+        let commandWithTitle = "echo -ne \"\\033]0;\(titleEscaped)\\007\"; \(command)"
 
-    switch terminal {
-    case .automatic:
-        return "No supported terminal app is available. Install Terminal or iTerm."
-    case .terminal:
-        // do script without "in front window" creates a new window
-        return runAppleScript("""
-        tell application id "com.apple.Terminal"
-            activate
-            do script "\(appleScriptEscaped(command))"
-        end tell
-        """)
-    case .iTerm:
-        return runAppleScript("""
-        tell application id "com.googlecode.iterm2"
-            activate
-            create window with default profile
-            tell current session of current tab of current window
-                write text "\(appleScriptEscaped(command))"
-            end tell
-        end tell
-        """)
+        switch terminal {
+        case .automatic:
+            return "No supported terminal app is available. Install Terminal or iTerm."
+        case .terminal:
+            if let err = runAppleScript("""
+                tell application id "com.apple.Terminal"
+                    activate
+                    do script "\(appleScriptEscaped(commandWithTitle))"
+                end tell
+                """) {
+                return err
+            }
+        case .iTerm:
+            if let err = runAppleScript("""
+                tell application id "com.googlecode.iterm2"
+                    activate
+                    create window with default profile
+                    tell current session of current tab of current window
+                        write text "\(appleScriptEscaped(commandWithTitle))"
+                    end tell
+                end tell
+                """) {
+                return err
+            }
+        }
     }
+    return nil
 }
 
-/// Closes the preview terminal window for this project (by window/session title). Returns nil on success.
+/// Closes all preview terminal windows for this project (by window/session title prefix). Returns nil on success.
 func closePreviewTerminalWindow(workspacePath: String) -> String? {
-    let title = previewWindowTitle(workspacePath: workspacePath)
-    let titleEscaped = title.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    let prefix = previewWindowTitlePrefix(workspacePath: workspacePath)
+    let prefixEscaped = prefix.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     _ = runAppleScript("""
         tell application id "com.apple.Terminal"
-            close (every window whose name is "\(titleEscaped)")
+            repeat with w in (every window whose name starts with "\(prefixEscaped)")
+                close w
+            end repeat
         end tell
         """)
-    // Also try iTerm in case user opened with iTerm
     _ = runAppleScript("""
         tell application id "com.googlecode.iterm2"
             repeat with w in (every window)
                 try
-                    if name of current session of current tab of w contains "Cursor Metro Preview" then
+                    if name of current session of current tab of w starts with "\(prefixEscaped)" then
                         close w
-                        return
                     end if
                 end try
             end repeat

@@ -18,7 +18,7 @@ Only the 3-dot menu is shown; one item:
 
 | Label | Icon |
 |-------|------|
-| Open linked Agent | `arrow.up.right` |
+| Review | `person` |
 | Continue | `play.fill` |
 | Reset agent | `arrow.counterclockwise` |
 
@@ -32,7 +32,7 @@ Same agent block as above:
 
 | Label | Icon |
 |-------|------|
-| Open linked Agent | `arrow.up.right` |
+| Review | `person` |
 | Continue | `play.fill` |
 | Reset agent | `arrow.counterclockwise` |
 
@@ -86,7 +86,7 @@ Separate row type; its own 3-dot and context menu:
 | State | Menu focus |
 |-------|------------|
 | **Processing** | Stop only |
-| **Stopped / linked agent** | Open agent, Continue, Reset agent |
+| **Stopped / linked agent** | Review, Continue, Reset agent |
 | **In progress (no agent)** | Delegate, Edit, Backlog, Complete, Delete |
 | **Backlog** | Delegate, Edit, Move to In Progress, Complete, Delete |
 | **Completed** | Mark as not done, Delete |

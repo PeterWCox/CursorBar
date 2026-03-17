@@ -51,7 +51,8 @@ struct SavedAgentTab: Codable {
         hasAttachedScreenshot = try c.decode(Bool.self, forKey: .hasAttachedScreenshot)
         followUpQueue = try c.decode([QueuedFollowUp].self, forKey: .followUpQueue)
         linkedTaskID = try c.decodeIfPresent(UUID.self, forKey: .linkedTaskID)
-        providerID = try c.decodeIfPresent(AgentProviderID.self, forKey: .providerID) ?? .cursor
+        let rawProviderID = try c.decodeIfPresent(String.self, forKey: .providerID)
+        providerID = AgentProviders.resolvedProviderID(rawProviderID ?? AgentProviderID.cursor.rawValue)
         conversationID = try c.decodeIfPresent(String.self, forKey: .conversationID)
             ?? c.decodeIfPresent(String.self, forKey: .cursorChatId)
         modelId = try c.decodeIfPresent(String.self, forKey: .modelId)

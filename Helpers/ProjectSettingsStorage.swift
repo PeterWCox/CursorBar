@@ -5,8 +5,10 @@ import Foundation
 
 private struct ProjectSettingsFile: Codable {
     var debugUrl: String?
-    /// Deprecated: startup script is now stored in .metro/startup.sh. Kept for decoding old project.json.
+    /// Deprecated: startup script is now in scripts array. Kept for decoding old project.json.
     var startupScript: String?
+    /// Commands to run when starting preview; each entry is run in its own terminal (e.g. ["npm run backend", "npm run frontend"]).
+    var scripts: [String]?
     /// Instructions for the agent when debugging (e.g. "when the terminal is opened" context). Used when creating a debug agent from Preview.
     var debugInstructions: String?
 }
@@ -14,7 +16,6 @@ private struct ProjectSettingsFile: Codable {
 enum ProjectSettingsStorage {
     static let didChangeNotification = Notification.Name("ProjectSettingsStorageDidChange")
     private static var cachedSettingsByWorkspace: [String: ProjectSettingsFile] = [:]
-    private static var cachedStartupScriptsByWorkspace: [String: String?] = [:]
 
     private static func normalizedWorkspacePath(_ workspacePath: String) -> String {
         workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -53,7 +54,7 @@ enum ProjectSettingsStorage {
             save(workspacePath: workspacePath, legacy)
             return legacy
         }
-        let empty = ProjectSettingsFile(debugUrl: nil, startupScript: nil, debugInstructions: nil)
+        let empty = ProjectSettingsFile(debugUrl: nil, startupScript: nil, scripts: nil, debugInstructions: nil)
         cachedSettingsByWorkspace[normalizedPath] = empty
         return empty
     }
@@ -87,46 +88,42 @@ enum ProjectSettingsStorage {
         save(workspacePath: workspacePath, existing)
     }
 
-    // MARK: - Startup script (.metro/startup.sh; run with bash)
+    // MARK: - Startup scripts (array in project.json; each run in its own terminal)
 
-    /// URL of the fixed startup script file (`.metro/startup.sh`).
-    static func startupScriptFileURL(workspacePath: String) -> URL {
-        URL(fileURLWithPath: workspacePath)
+    /// Returns the array of script commands from `.metro/project.json`. Migrates from legacy startupScript or `.metro/startup.sh` if needed.
+    static func getStartupScripts(workspacePath: String) -> [String] {
+        var file = load(workspacePath: workspacePath)
+        if let scripts = file.scripts, !scripts.isEmpty {
+            return scripts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        }
+        // Migrate from legacy startupScript in project.json
+        if let legacy = file.startupScript?.trimmingCharacters(in: .whitespacesAndNewlines), !legacy.isEmpty {
+            file.scripts = [legacy]
+            file.startupScript = nil
+            save(workspacePath: workspacePath, file)
+            return [legacy]
+        }
+        // Migrate from .metro/startup.sh
+        let scriptURL = URL(fileURLWithPath: workspacePath)
             .appendingPathComponent(".metro")
             .appendingPathComponent("startup.sh")
+        if let data = try? Data(contentsOf: scriptURL),
+           let contents = String(data: data, encoding: .utf8),
+           !contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let trimmed = contents.trimmingCharacters(in: .whitespacesAndNewlines)
+            file.scripts = [trimmed]
+            save(workspacePath: workspacePath, file)
+            return [trimmed]
+        }
+        return []
     }
 
-    /// Reads the contents of `.metro/startup.sh`. Returns nil if file does not exist.
-    static func getStartupScriptContents(workspacePath: String) -> String? {
-        let normalizedPath = normalizedWorkspacePath(workspacePath)
-        if let cached = cachedStartupScriptsByWorkspace[normalizedPath] {
-            return cached
-        }
-
-        let url = startupScriptFileURL(workspacePath: workspacePath)
-        guard let data = try? Data(contentsOf: url) else {
-            cachedStartupScriptsByWorkspace[normalizedPath] = nil
-            return nil
-        }
-        let contents = String(data: data, encoding: .utf8)
-        cachedStartupScriptsByWorkspace[normalizedPath] = contents
-        return contents
-    }
-
-    /// Writes the contents of `.metro/startup.sh`. Creates `.metro` directory if needed.
-    static func setStartupScriptContents(workspacePath: String, _ value: String?) {
-        let url = startupScriptFileURL(workspacePath: workspacePath)
-        let dir = url.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let content = value ?? ""
-        try? content.write(to: url, atomically: true, encoding: .utf8)
-        let normalizedPath = normalizedWorkspacePath(workspacePath)
-        cachedStartupScriptsByWorkspace[normalizedPath] = content
-        NotificationCenter.default.post(
-            name: didChangeNotification,
-            object: nil,
-            userInfo: ["workspacePath": normalizedPath]
-        )
+    /// Saves the scripts array to `.metro/project.json`. Does not write any .sh file.
+    static func setStartupScripts(workspacePath: String, _ scripts: [String]) {
+        var file = load(workspacePath: workspacePath)
+        let trimmed = scripts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        file.scripts = trimmed.isEmpty ? nil : trimmed
+        save(workspacePath: workspacePath, file)
     }
 
     // MARK: - Debug instructions (prefilled when creating debug agent from Preview)

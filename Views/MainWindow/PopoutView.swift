@@ -20,11 +20,11 @@ private final class TasksViewShortcutCoordinator: ObservableObject {
 private let projectSetupAgentPrompt = """
 Set up Cursor Metro for this project from scratch.
 
-1) Create or overwrite .metro/startup.sh with a script that builds and runs the app. Use #!/bin/bash and make the script executable.
+1) Create or update .metro/project.json with a "scripts" array. Each element must be a **shell command** to run (e.g. "npm run dev", "npm run backend"), NOT a filename. Do not put "startup.sh" or any file path in the scripts array. Do not create or reference .metro/startup.sh. Example: {"scripts": ["npm run dev"]} or {"scripts": ["npm run backend", "npm run frontend"]} for multiple terminals.
 
-Important: The script is always run with the shell's current working directory set to the **project root** (the directory that contains .metro), NOT inside .metro. Write the script as if it runs in the project root: use commands like `npm run dev` if package.json is in the project root, or `cd budget && npm run dev` (or whatever the app subfolder is) if the app lives in a subfolder. Do not cd into .metro or assume the script runs from .metro.
+Commands are run with the shell's current working directory set to the **project root** (the directory that contains .metro). Use commands like `npm run dev` if package.json is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into .metro.
 
-2) If this is a web app, create or update .metro/project.json with a "debugUrl" field set to the URL where the app is served (e.g. http://localhost:3000).
+2) If this is a web app, add or update the "debugUrl" field in .metro/project.json with the URL where the app is served (e.g. http://localhost:3000).
 
 Detect the project type from the repo (package.json, etc.) and configure accordingly.
 """
@@ -235,80 +235,12 @@ private struct CursorMetroLogoView: View {
         }
     }
 }
-
-/// Sidebar logo for the Claude provider. Tries to load a "ClaudeMetroLogo" asset first; falls back to a programmatic rendering.
-private struct ClaudeMetroLogoView: View {
-    let height: CGFloat
-
-    var body: some View {
-        if let nsImage = NSImage(named: "ClaudeMetroLogo") {
-            Image(nsImage: nsImage)
-                .resizable()
-                .renderingMode(.original)
-                .aspectRatio(contentMode: .fit)
-                .frame(height: height)
-        } else {
-            HStack(spacing: height * 0.22) {
-                // Anthropic-style icon: three upward-radiating lines
-                AnthropicIconShape()
-                    .fill(.white)
-                    .frame(width: height * 0.72, height: height * 0.72)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("CLAUDE")
-                        .font(.system(size: height * 0.38, weight: .bold, design: .default))
-                        .foregroundStyle(.white)
-                        .tracking(0.5)
-                    Text("Metro")
-                        .font(.system(size: height * 0.24, weight: .regular, design: .default))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-            }
-        }
-    }
-}
-
-/// Simplified Anthropic logo mark: three thick rounded rays emanating upward from a base, forming a stylised "A" silhouette.
-private struct AnthropicIconShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let w = rect.width
-        let h = rect.height
-        let rayW = w * 0.18
-        let rayR = rayW / 2
-
-        // Left ray (tilted left)
-        func addRay(_ path: inout Path, cx: CGFloat, topY: CGFloat, botY: CGFloat) {
-            path.move(to: CGPoint(x: cx - rayR, y: botY))
-            path.addLine(to: CGPoint(x: cx - rayR, y: topY + rayR))
-            path.addArc(center: CGPoint(x: cx, y: topY + rayR), radius: rayR, startAngle: .degrees(180), endAngle: .degrees(0), clockwise: false)
-            path.addLine(to: CGPoint(x: cx + rayR, y: botY))
-            path.closeSubpath()
-        }
-
-        // Left ray
-        addRay(&p, cx: w * 0.22, topY: h * 0.05, botY: h * 0.88)
-        // Centre ray
-        addRay(&p, cx: w * 0.5, topY: h * 0.0, botY: h * 0.88)
-        // Right ray
-        addRay(&p, cx: w * 0.78, topY: h * 0.05, botY: h * 0.88)
-
-        return p
-    }
-}
-
-/// Routes to the correct sidebar logo based on the active agent provider.
 private struct SidebarLogoView: View {
     let height: CGFloat
     let projectColor: Color
-    let providerID: AgentProviderID
 
     var body: some View {
-        switch providerID {
-        case .claudeCode:
-            ClaudeMetroLogoView(height: height)
-        case .cursor:
-            CursorMetroLogoView(height: height, projectColor: projectColor)
-        }
+        CursorMetroLogoView(height: height, projectColor: projectColor)
     }
 }
 
@@ -1249,11 +1181,6 @@ struct PopoutView: View {
             sanitizeSelectedModel()
             updateHangDiagnosticsSnapshot()
         }
-        .onChange(of: appState.selectedAgentProviderID) { _, providerID in
-            appState.loadModels(for: providerID)
-            sanitizeSelectedModel()
-            updateHangDiagnosticsSnapshot()
-        }
         .onChange(of: tabManager.selectedTabID) { _, _ in
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
@@ -1362,7 +1289,7 @@ struct PopoutView: View {
             ? CursorTheme.textPrimary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: currentWorkspacePath)
         return HStack(spacing: 14) {
-            SidebarLogoView(height: 36, projectColor: projectColor, providerID: appState.selectedAgentProviderID)
+            SidebarLogoView(height: 36, projectColor: projectColor)
 
             if !isMainContentCollapsed {
                 VStack(alignment: .leading, spacing: 4) {

@@ -167,7 +167,7 @@ final class AgentSessionStore: ObservableObject {
             do {
                 let provider = AgentProviders.provider(for: currentTab.providerID)
 
-                if currentTab.conversationID == nil, currentTab.providerID != .claudeCode {
+                if currentTab.conversationID == nil {
                     let chatId = try provider.createConversation()
                     guard currentTab.activeRunID == runID else { return }
                     currentTab.conversationID = chatId
@@ -217,8 +217,6 @@ final class AgentSessionStore: ObservableObject {
                 for try await chunk in stream {
                     guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID, !Task.isCancelled else { return }
                     switch chunk {
-                    case .conversationIDUpdated(let conversationID):
-                        currentTab.conversationID = conversationID
                     case .thinkingDelta(let text):
                         thinkingBuffer += text
                         scheduleFlush()
@@ -300,13 +298,9 @@ final class AgentSessionStore: ObservableObject {
                     currentTab.pendingCompressRunID = nil
 
                     do {
-                        if currentTab.providerID == .claudeCode {
-                            currentTab.conversationID = nil
-                        } else {
-                            let provider = AgentProviders.provider(for: currentTab.providerID)
-                            let newId = try provider.createConversation()
-                            currentTab.conversationID = newId
-                        }
+                        let provider = AgentProviders.provider(for: currentTab.providerID)
+                        let newId = try provider.createConversation()
+                        currentTab.conversationID = newId
                         currentTab.turns = []
                         currentTab.cachedConversationCharacterCount = 0
                         currentTab.prompt = summary

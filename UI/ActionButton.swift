@@ -78,6 +78,59 @@ struct ActionButton: View {
     }
 }
 
+// MARK: - Previews (playground for tweaking ActionButton)
+
+#Preview("ActionButton – all styles") {
+    ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("With icon").font(.headline)
+            HStack(spacing: 8) {
+                ActionButton(title: "Primary", icon: "star.fill", action: {}, style: .primary)
+                ActionButton(title: "Secondary", icon: "star", action: {}, style: .secondary)
+                ActionButton(title: "Play", icon: "play.fill", action: {}, style: .play)
+                ActionButton(title: "Stop", icon: "stop.fill", action: {}, style: .stop)
+                ActionButton(title: "Debug", icon: "ladybug.fill", action: {}, style: .debug)
+                ActionButton(title: "Accent", icon: "wand.and.stars", action: {}, style: .accent)
+            }
+            .lineLimit(1)
+
+            Text("Text only").font(.headline)
+            HStack(spacing: 8) {
+                ActionButton(title: "Save", action: {}, style: .primary)
+                ActionButton(title: "Cancel", action: {}, style: .secondary)
+            }
+
+            Text("Disabled").font(.headline)
+            HStack(spacing: 8) {
+                ActionButton(title: "Disabled", icon: "hand.raised", action: {}, isDisabled: true, style: .primary)
+                ActionButton(title: "Disabled play", icon: "play.fill", action: {}, isDisabled: true, style: .play)
+            }
+
+            Text("With help tooltip").font(.headline)
+            ActionButton(title: "Hover for help", icon: "questionmark.circle", action: {}, help: "This is the tooltip", style: .primary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .frame(width: 700, height: 400)
+}
+
+#Preview("ActionButton – dark") {
+    ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
+                ActionButton(title: "Primary", icon: "star.fill", action: {}, style: .primary)
+                ActionButton(title: "Play", icon: "play.fill", action: {}, style: .play)
+                ActionButton(title: "Accent", icon: "wand.and.stars", action: {}, style: .accent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .frame(width: 400, height: 200)
+    .preferredColorScheme(.dark)
+}
+
 // MARK: - Optional tooltip (apply .help only when non-empty)
 
 private struct OptionalHelpModifier: ViewModifier {

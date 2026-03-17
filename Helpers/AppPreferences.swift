@@ -31,7 +31,6 @@ enum AppPreferences {
     static let projectsRootPathKey = "projectsRootPath"
     static let preferredTerminalAppKey = "preferredTerminalApp"
     static let preferredAppearanceKey = "preferredAppearance"
-    static let selectedAgentProviderKey = "selectedAgentProvider"
     /// Key for placing the agent tabs sidebar and logo on the right (mirrored layout). Persisted via UserDefaults.
     static let sidebarOnRightKey = "sidebarOnRight"
     /// Key for model IDs to hide from the model picker. Persisted via UserDefaults when used with @AppStorage.

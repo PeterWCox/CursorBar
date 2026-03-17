@@ -12,7 +12,6 @@ struct SettingsView: View {
     @EnvironmentObject private var projectSettingsStore: ProjectSettingsStore
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
-    @AppStorage(AppPreferences.selectedAgentProviderKey) private var selectedAgentProviderRawValue: String = AgentProviders.defaultProviderID.rawValue
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
 
@@ -31,7 +30,7 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Startup script (startup.sh)")
+                    Text("Startup scripts (one per line)")
                     TextEditor(text: $startupScriptContents)
                         .font(.system(size: 12))
                         .frame(minHeight: 60, maxHeight: 100)
@@ -43,7 +42,7 @@ struct SettingsView: View {
             } header: {
                 Text("Project settings")
             } footer: {
-                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup script is stored in .metro/startup.sh and run with bash (use \"Run startup script\" in the composer menu).")
+                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup scripts are in .metro/project.json (scripts array). Start Preview runs each line in its own terminal (e.g. backend + frontend).")
             }
 
             Section {
@@ -89,30 +88,18 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Agent provider:", selection: $selectedAgentProviderRawValue) {
-                    ForEach(AgentProviderID.allCases) { provider in
-                        Text(provider.displayName).tag(provider.rawValue)
-                    }
-                }
-            } header: {
-                Text("Agent")
-            } footer: {
-                Text("New agents use the selected provider, and the model list below updates to match that CLI.")
-            }
-
-            Section {
                 HStack(spacing: 8) {
                     Button("Select all") {
                         disabledModelIdsRaw = AppPreferences.defaultDisabledModelIdsRaw
                     }
                     .buttonStyle(.bordered)
                     Button("Deselect all") {
-                        let allIds = Set(appState.availableModels(for: appState.selectedAgentProviderID).map(\.id))
+                        let allIds = Set(appState.availableModels.map(\.id))
                         disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: allIds)
                     }
                     .buttonStyle(.bordered)
                 }
-                ForEach(appState.availableModels(for: appState.selectedAgentProviderID), id: \.id) { model in
+                ForEach(appState.availableModels, id: \.id) { model in
                     Toggle(model.label, isOn: Binding(
                         get: { !AppPreferences.disabledModelIds(from: disabledModelIdsRaw).contains(model.id) },
                         set: { enabled in
@@ -145,25 +132,26 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 480, height: 420)
         .onAppear {
-            appState.loadModels(for: appState.selectedAgentProviderID)
+            appState.loadModelsFromCLI()
             reloadCommands()
             let snapshot = projectSettingsStore.snapshot(for: workspacePath)
             debugURL = snapshot.debugURL
-            startupScriptContents = snapshot.startupScriptContents
+            startupScriptContents = snapshot.startupScripts.joined(separator: "\n")
         }
         .onChange(of: workspacePath) { _, _ in
             reloadCommands()
             let snapshot = projectSettingsStore.snapshot(for: workspacePath)
             debugURL = snapshot.debugURL
-            startupScriptContents = snapshot.startupScriptContents
+            startupScriptContents = snapshot.startupScripts.joined(separator: "\n")
         }
         .onDisappear {
             let trimmedUrl = debugURL.trimmingCharacters(in: .whitespacesAndNewlines)
             projectSettingsStore.setDebugURL(workspacePath: workspacePath, trimmedUrl.isEmpty ? nil : trimmedUrl)
-            projectSettingsStore.setStartupScriptContents(workspacePath: workspacePath, startupScriptContents.isEmpty ? nil : startupScriptContents)
-        }
-        .onChange(of: selectedAgentProviderRawValue) { _, _ in
-            appState.loadModels(for: appState.selectedAgentProviderID)
+            let scripts = startupScriptContents
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            projectSettingsStore.setStartupScripts(workspacePath: workspacePath, scripts)
         }
         .sheet(item: $editingCommand) { cmd in
             QuickActionEditSheet(workspacePath: workspacePath, existing: cmd) { updated in

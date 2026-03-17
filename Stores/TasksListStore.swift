@@ -106,7 +106,7 @@ final class TasksListStore: ObservableObject {
     @Published private(set) var workspacePath: String = ""
     @Published private(set) var snapshot: TasksListSnapshot = .empty
     @Published private(set) var debugURL: String = ""
-    @Published private(set) var startupScriptContents: String = ""
+    @Published private(set) var startupScripts: [String] = []
 
     @Published var editingTask: ProjectTask?
     @Published var editingDraft: String = ""
@@ -185,7 +185,7 @@ final class TasksListStore: ObservableObject {
     func reloadSettings() {
         guard !workspacePath.isEmpty else { return }
         debugURL = ProjectSettingsStorage.getDebugURL(workspacePath: workspacePath) ?? ""
-        startupScriptContents = ProjectSettingsStorage.getStartupScriptContents(workspacePath: workspacePath) ?? ""
+        startupScripts = ProjectSettingsStorage.getStartupScripts(workspacePath: workspacePath)
     }
 
     func setShowOnlyRecentCompleted(_ enabled: Bool) {
@@ -262,10 +262,11 @@ final class TasksListStore: ObservableObject {
         selectedTasksTab = tab
     }
 
-    func commitEdit() {
+    func commitEdit(screenshotImages: [NSImage]) {
         let trimmed = editingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, let id = editingTask?.id, !workspacePath.isEmpty {
             ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: id, content: trimmed)
+            ProjectTasksStorage.updateTaskScreenshots(workspacePath: workspacePath, id: id, images: screenshotImages)
             reload()
         }
         editingTask = nil
