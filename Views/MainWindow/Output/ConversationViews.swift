@@ -259,16 +259,17 @@ struct ConversationSegmentView: View, Equatable {
 // MARK: - User message content (text + inline screenshots, no "[Screenshot attached: ...]" text)
 
 private struct UserMessageContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let prompt: String
     let workspacePath: String
-    @Binding var screenshotPreviewURL: URL?
+    let onPreviewScreenshots: ([String], String) -> Void
     private let displayText: String
     private let paths: [String]
 
-    init(prompt: String, workspacePath: String, screenshotPreviewURL: Binding<URL?>) {
+    init(prompt: String, workspacePath: String, onPreviewScreenshots: @escaping ([String], String) -> Void) {
         self.prompt = prompt
         self.workspacePath = workspacePath
-        _screenshotPreviewURL = screenshotPreviewURL
+        self.onPreviewScreenshots = onPreviewScreenshots
         displayText = userPromptDisplayText(from: prompt)
         paths = screenshotPaths(from: prompt)
     }
@@ -283,42 +284,60 @@ private struct UserMessageContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
-            ForEach(paths, id: \.self) { path in
-                UserMessageScreenshotView(path: path, workspacePath: workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
+            if let firstPath = paths.first {
+                UserMessageScreenshotSummaryView(
+                    path: firstPath,
+                    workspacePath: workspacePath,
+                    screenshotCount: paths.count,
+                    onOpenPreview: { onPreviewScreenshots(paths, firstPath) }
+                )
             }
         }
     }
 }
 
-private struct UserMessageScreenshotView: View {
+private struct UserMessageScreenshotSummaryView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let path: String
     let workspacePath: String
-    @Binding var screenshotPreviewURL: URL?
+    let screenshotCount: Int
+    let onOpenPreview: () -> Void
 
     private var imageURL: URL {
         screenshotFileURL(path: path, workspacePath: workspacePath)
     }
 
-    @State private var loadedImage: NSImage?
+    private var loadedImage: NSImage? {
+        ImageAssetCache.shared.screenshot(for: imageURL)
+    }
+
+    private var badgeText: String {
+        screenshotCount > 99 ? "99+" : "\(screenshotCount)"
+    }
 
     var body: some View {
-        Group {
-            if let nsImage = loadedImage {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: 200, maxHeight: 200)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        if let nsImage = loadedImage {
+            ScreenshotThumbnailView(
+                image: nsImage,
+                size: CGSize(width: 42, height: 42),
+                cornerRadius: CursorTheme.spaceS,
+                onTapPreview: onOpenPreview
+            )
+            .overlay(alignment: .topTrailing) {
+                Text(badgeText)
+                    .font(.system(size: CursorTheme.fontCaption, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
+                    .padding(.vertical, CursorTheme.paddingBadgeVertical)
+                    .background(CursorTheme.surface(for: colorScheme), in: Capsule())
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(CursorTheme.border, lineWidth: 1)
+                        Capsule()
+                            .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
                     )
-                    .onTapGesture { screenshotPreviewURL = imageURL }
-                    .contentShape(Rectangle())
+                    .padding(CursorTheme.spaceXS)
             }
-        }
-        .task(id: imageURL.path) {
-            loadedImage = ImageAssetCache.shared.screenshot(for: imageURL)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(screenshotCount) screenshots attached")
         }
     }
 }
@@ -328,7 +347,7 @@ private struct UserMessageScreenshotView: View {
 struct ConversationTurnView: View, Equatable {
     let turn: ConversationTurn
     var workspacePath: String = ""
-    @Binding var screenshotPreviewURL: URL?
+    var onPreviewScreenshots: ([String], String) -> Void = { _, _ in }
 
     @State private var showCopiedFeedback = false
 
@@ -343,7 +362,11 @@ struct ConversationTurnView: View, Equatable {
         VStack(alignment: .leading, spacing: 12) {
             Group {
                 if !workspacePath.isEmpty {
-                    UserMessageContentView(prompt: turn.userPrompt, workspacePath: workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
+                    UserMessageContentView(
+                        prompt: turn.userPrompt,
+                        workspacePath: workspacePath,
+                        onPreviewScreenshots: onPreviewScreenshots
+                    )
                 } else {
                     Text(turn.userPrompt)
                         .font(.system(size: 14, weight: .medium))

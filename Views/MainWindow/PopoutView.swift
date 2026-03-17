@@ -293,7 +293,8 @@ struct PopoutView: View {
     @State private var showCreateDebugScriptSheet: Bool = false
     /// When set, show "Are you sure?" before closing this tab (agent still processing).
     @State private var closeTabConfirmationTabID: UUID? = nil
-    @State private var screenshotPreviewURL: URL? = nil
+    @State private var screenshotPreviewURLs: [URL] = []
+    @State private var screenshotPreviewIndex: Int = 0
     /// Workspace paths for groups that are collapsed in the sidebar (accordion).
     @State private var collapsedGroupPaths: Set<String> = []
     /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
@@ -331,6 +332,13 @@ struct PopoutView: View {
             return nil
         }
         return URL(string: urlString)
+    }
+
+    private func showScreenshotPreview(paths: [String], selectedPath: String, workspacePath: String) {
+        let urls = paths.map { screenshotFileURL(path: $0, workspacePath: workspacePath) }
+        guard !urls.isEmpty else { return }
+        screenshotPreviewURLs = urls
+        screenshotPreviewIndex = max(0, paths.firstIndex(of: selectedPath) ?? 0)
     }
 
     private func openPreview(for workspacePath: String) {
@@ -1265,10 +1273,15 @@ struct PopoutView: View {
             Text("This agent is still processing. Closing will cancel the current run. Are you sure you want to close this tab?")
         }
         .overlay {
-            if let url = screenshotPreviewURL {
-                ScreenshotPreviewModal(imageURL: url, isPresented: Binding(
+            if !screenshotPreviewURLs.isEmpty {
+                ScreenshotPreviewModal(imageURLs: screenshotPreviewURLs, initialIndex: screenshotPreviewIndex, isPresented: Binding(
                     get: { true },
-                    set: { if !$0 { screenshotPreviewURL = nil } }
+                    set: {
+                        if !$0 {
+                            screenshotPreviewURLs = []
+                            screenshotPreviewIndex = 0
+                        }
+                    }
                 ))
             }
         }
@@ -1870,7 +1883,13 @@ struct PopoutView: View {
                     )
 
                     ForEach(visibleTurns) { turn in
-                        ConversationTurnView(turn: turn, workspacePath: tab.workspacePath, screenshotPreviewURL: $screenshotPreviewURL)
+                        ConversationTurnView(
+                            turn: turn,
+                            workspacePath: tab.workspacePath,
+                            onPreviewScreenshots: { paths, selectedPath in
+                                showScreenshotPreview(paths: paths, selectedPath: selectedPath, workspacePath: tab.workspacePath)
+                            }
+                        )
                             .equatable()
                             .id(turn.id)
                     }
@@ -1920,7 +1939,9 @@ struct PopoutView: View {
                                 path: path,
                                 workspacePath: tab.workspacePath,
                                 onDelete: { deleteScreenshot(path: path, tab: tab) },
-                                onTapPreview: { screenshotPreviewURL = screenshotFileURL(path: path, workspacePath: tab.workspacePath) }
+                                onTapPreview: {
+                                    showScreenshotPreview(paths: attachedPaths, selectedPath: path, workspacePath: tab.workspacePath)
+                                }
                             )
                         }
                     }
