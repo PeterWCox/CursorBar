@@ -15,7 +15,7 @@ struct KeyboardShortcutsContentView: View {
         ("App", [
             ShortcutRow(keys: ["⌘,"], action: "Open Settings"),
             ShortcutRow(keys: ["⌘0"], action: "Center popup (menu bar only)"),
-            ShortcutRow(keys: ["⌘Q"], action: "Quit Cursor Metro"),
+            ShortcutRow(keys: ["⌘Q"], action: "Quit"),
             ShortcutRow(keys: ["⎋ Esc"], action: "Dismiss modal / Cancel"),
         ]),
         ("Tabs", [

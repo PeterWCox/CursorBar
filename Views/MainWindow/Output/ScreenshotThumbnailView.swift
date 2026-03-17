@@ -75,6 +75,10 @@ struct ScreenshotThumbnailView: View {
         image ?? displayImage
     }
 
+    private var showsPreviewAffordance: Bool {
+        onTapPreview != nil
+    }
+
     var body: some View {
         Group {
             if let nsImage = resolvedImage {
@@ -88,10 +92,18 @@ struct ScreenshotThumbnailView: View {
                             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                         )
-                        .overlay(ScreenshotExpandPreviewOverlay(cornerRadius: cornerRadius, cornerFrameSize: min(size.width, size.height) * 0.36))
+                        .overlay {
+                            if showsPreviewAffordance {
+                                ScreenshotExpandPreviewOverlay(
+                                    cornerRadius: cornerRadius,
+                                    cornerFrameSize: min(size.width, size.height) * 0.36
+                                )
+                            }
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            onTapPreview?()
+                            guard let onTapPreview else { return }
+                            onTapPreview()
                         }
 
                     if onDelete != nil {

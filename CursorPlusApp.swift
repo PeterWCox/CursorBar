@@ -199,7 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         centerPanelItem.target = self
         menu.addItem(centerPanelItem)
         menu.addItem(NSMenuItem.separator())
-        let quitItem = NSMenuItem(title: "Quit Cursor Metro", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 

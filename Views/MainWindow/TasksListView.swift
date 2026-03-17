@@ -102,10 +102,17 @@ private struct CollapsibleGroupingView<Content: View>: View {
 private struct DraftTaskScreenshot: Identifiable {
     let id: UUID
     let image: NSImage
+    let pngData: Data
 
-    init(id: UUID = UUID(), image: NSImage) {
+    init(id: UUID = UUID(), image: NSImage, pngData: Data) {
         self.id = id
         self.image = image
+        self.pngData = pngData
+    }
+
+    init?(id: UUID = UUID(), pngData: Data) {
+        guard let image = NSImage(data: pngData) else { return nil }
+        self.init(id: id, image: image, pngData: pngData)
     }
 }
 
@@ -182,20 +189,20 @@ struct TasksListView: View {
     private func loadDraftScreenshots(for task: ProjectTask) -> [DraftTaskScreenshot] {
         task.screenshotPaths.compactMap { path in
             let url = ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: path)
-            guard let image = NSImage(contentsOf: url) else { return nil }
-            return DraftTaskScreenshot(image: image)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return DraftTaskScreenshot(pngData: data)
         }
     }
 
-    private func materializedScreenshot(from image: NSImage) -> NSImage? {
+    private func materializedScreenshot(from image: NSImage) -> DraftTaskScreenshot? {
         guard let tiffData = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffData),
               let pngData = bitmap.representation(using: .png, properties: [:]),
-              let stableImage = NSImage(data: pngData) else {
+              let screenshot = DraftTaskScreenshot(pngData: pngData) else {
             return nil
         }
 
-        return stableImage
+        return screenshot
     }
 
     private func appendScreenshot(to screenshots: inout [DraftTaskScreenshot], from pasteboard: NSPasteboard = .general) {
@@ -205,7 +212,7 @@ struct TasksListView: View {
             return
         }
 
-        screenshots.append(DraftTaskScreenshot(image: image))
+        screenshots.append(image)
     }
 
     private func pasteNewTaskScreenshot() {
@@ -231,7 +238,7 @@ struct TasksListView: View {
     private func commitNewTask() {
         syncNewTaskModelSelection()
         store.commitNewTask(
-            screenshotImages: newTaskDraftScreenshots.map(\.image),
+            screenshotData: newTaskDraftScreenshots.map(\.pngData),
             providerID: newTaskProviderID
         )
         newTaskDraftScreenshots = []
@@ -244,7 +251,7 @@ struct TasksListView: View {
     }
 
     private func commitEdit() {
-        store.commitEdit(screenshotImages: editDraftScreenshots.map(\.image))
+        store.commitEdit(screenshotData: editDraftScreenshots.map(\.pngData))
         editDraftScreenshots = []
         taskScreenshotPreviewImage = nil
     }
@@ -269,6 +276,17 @@ struct TasksListView: View {
             newTaskDraftScreenshots = []
             taskScreenshotPreviewImage = nil
         }
+    }
+
+    private func delegateTask(_ task: ProjectTask) {
+        let persistedTask = ProjectTasksStorage.task(workspacePath: workspacePath, id: task.id) ?? task
+        onSendToAgent(
+            persistedTask.content,
+            persistedTask.id,
+            persistedTask.screenshotPaths,
+            persistedTask.providerID,
+            persistedTask.modelId
+        )
     }
 
     var body: some View {
@@ -583,16 +601,6 @@ struct TasksListView: View {
             emptyStateCompleted
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: CursorTheme.spaceS) {
-                    Spacer(minLength: 0)
-                    Button(action: { store.setShowOnlyRecentCompleted(!store.showOnlyRecentCompleted) }) {
-                        Text(store.showOnlyRecentCompleted ? "Show all" : "Last 24 hours")
-                            .font(.system(size: CursorTheme.fontSmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.brandBlue)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.bottom, CursorTheme.spaceS)
                 ForEach(snapshot.completedGrouped) { group in
                     CollapsibleGroupingView(
                         title: group.title,
@@ -667,7 +675,7 @@ struct TasksListView: View {
                 store.toggleTaskCompletion(task)
                 onTasksDidUpdate()
             },
-            onSendToAgent: { onSendToAgent(task.content, task.id, task.screenshotPaths, task.providerID, task.modelId) },
+            onSendToAgent: { delegateTask(task) },
             onModelChange: { newId in
                 store.updateTaskModel(task, modelId: newId)
             },
@@ -771,10 +779,10 @@ struct TasksListView: View {
                 HStack(spacing: CursorTheme.spaceXS) {
                     Image(systemName: "folder")
                         .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(CursorTheme.colorForWorkspace(path: workspacePath))
                     Text((store.workspacePath as NSString).lastPathComponent)
                         .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(CursorTheme.colorForWorkspace(path: workspacePath))
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -960,11 +968,10 @@ private struct TaskScreenshotThumbnailView: View {
 private struct TaskScreenshotStripView: View {
     let workspacePath: String
     let paths: [String]
+    var thumbnailSize: CGSize = CGSize(width: 36, height: 36)
     /// Called with (all paths, selected path) so expanded preview can show side-by-side.
     var onPreview: ([String], String) -> Void = { _, _ in }
     var onDelete: ((String) -> Void)? = nil
-
-    private static let thumbSize: CGSize = CGSize(width: 36, height: 36)
 
     @ViewBuilder
     var body: some View {
@@ -976,7 +983,7 @@ private struct TaskScreenshotStripView: View {
                     TaskScreenshotThumbnailView(
                         workspacePath: workspacePath,
                         screenshotPath: path,
-                        size: Self.thumbSize,
+                        size: thumbnailSize,
                         onTapPreview: { onPreview(paths, path) },
                         onDelete: onDelete.map { cb in { cb(path) } }
                     )
@@ -986,10 +993,58 @@ private struct TaskScreenshotStripView: View {
     }
 }
 
+private struct TaskScreenshotSummaryView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let workspacePath: String
+    let screenshotPath: String
+    let screenshotCount: Int
+    var thumbnailSize: CGSize = TaskRowView.inlineScreenshotSize
+
+    private var imageURL: URL {
+        ProjectTasksStorage.taskScreenshotFileURL(
+            workspacePath: workspacePath,
+            screenshotPath: screenshotPath
+        )
+    }
+
+    private var previewImage: NSImage? {
+        ImageAssetCache.shared.screenshot(for: imageURL)
+    }
+
+    private var badgeText: String {
+        screenshotCount > 99 ? "99+" : "\(screenshotCount)"
+    }
+
+    var body: some View {
+        ScreenshotThumbnailView(
+            image: previewImage,
+            size: thumbnailSize,
+            cornerRadius: CursorTheme.spaceS
+        )
+        .overlay(alignment: .topTrailing) {
+            Text(badgeText)
+                .font(.system(size: CursorTheme.fontCaption, weight: .semibold))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
+                .padding(.vertical, CursorTheme.paddingBadgeVertical)
+                .background(CursorTheme.surface(for: colorScheme), in: Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
+                )
+                .padding(CursorTheme.spaceXS)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(screenshotCount) screenshots attached")
+    }
+}
+
 // MARK: - Task row
 
 private struct TaskRowView: View {
     @Environment(\.colorScheme) private var colorScheme
+    static let inlineScreenshotSize = CGSize(width: 56, height: 56)
     let task: ProjectTask
     let workspacePath: String
     var models: [ModelOption] = []
@@ -1024,8 +1079,10 @@ private struct TaskRowView: View {
     private var isStopped: Bool { agentTaskState == .stopped }
     private var canOpenLinkedAgent: Bool { agentTaskState != .none }
     private var canDelegate: Bool { task.taskState == .inProgress && agentTaskState == .none }
-    /// Stopped agents are not editable; only non-completed, non-processing, non-stopped tasks can be edited.
-    private var canEdit: Bool { !task.completed && !isProcessing && !isStopped }
+    /// Only tasks in the Todo section (in progress with no linked agent or agent in todo state) are editable.
+    private var canEdit: Bool {
+        !task.completed && task.taskState == .inProgress && (agentTaskState == .none || agentTaskState == .todo)
+    }
     /// When true, show model picker; when false, show read-only chip (no dropdown).
     private var canEditAgentModel: Bool { !isProcessing && !isStopped }
     private var selectedModel: ModelOption {
@@ -1035,18 +1092,10 @@ private struct TaskRowView: View {
     }
     @State private var focusEditor: (() -> Void)?
 
-    /// Trailing controls (screenshot strip + 3-dot menu) shown in an overlay so they sit exactly halfway down the card.
+    /// Trailing menu shown in an overlay so it sits exactly halfway down the card.
     @ViewBuilder
     private var trailingControls: some View {
         HStack(spacing: CursorTheme.spaceS) {
-            if !task.screenshotPaths.isEmpty {
-                TaskScreenshotStripView(
-                    workspacePath: workspacePath,
-                    paths: task.screenshotPaths,
-                    onPreview: { paths, selected in onPreviewScreenshot?(paths, selected, onDeleteScreenshot) },
-                    onDelete: onDeleteScreenshot
-                )
-            }
             if isProcessing, let onStopAgent {
                 Menu {
                     Button("Review", systemImage: "person") {
@@ -1189,6 +1238,15 @@ private struct TaskRowView: View {
                         }
                         .onTapGesture(count: 2) { if !task.completed { onTap() } }
                 }
+                if !isEditing, let firstScreenshotPath = task.screenshotPaths.first {
+                    TaskScreenshotSummaryView(
+                        workspacePath: workspacePath,
+                        screenshotPath: firstScreenshotPath,
+                        screenshotCount: task.screenshotPaths.count,
+                        thumbnailSize: Self.inlineScreenshotSize
+                    )
+                    .padding(.top, CursorTheme.spaceXS)
+                }
                 if !task.completed, !models.isEmpty, !isEditing {
                     Group {
                         if canEditAgentModel {
@@ -1205,7 +1263,7 @@ private struct TaskRowView: View {
                 }
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, 88)
+            .padding(.trailing, 40)
         }
         .padding(CursorTheme.paddingCard)
         .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
@@ -1273,3 +1331,320 @@ private struct TaskRowView: View {
     }
 
 }
+
+#if DEBUG
+private struct TasksPreviewWorkspace {
+    let path: String
+    let linkedStatuses: [UUID: AgentTaskState]
+    let editableTask: ProjectTask
+    let multiScreenshotTask: ProjectTask
+    let singleScreenshotTask: ProjectTask
+    let plainTask: ProjectTask
+}
+
+private enum TasksStorybookData {
+    static let models: [ModelOption] = [
+        ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false),
+        ModelOption(id: "gpt-5.4-medium", label: "GPT-5.4", isPremium: true),
+        ModelOption(id: "composer-1.5", label: "Composer 1.5", isPremium: true)
+    ]
+
+    static let workspace: TasksPreviewWorkspace = makeWorkspace()
+
+    static func makeDraftScreenshots() -> [DraftTaskScreenshot] {
+        [
+            draftScreenshot(color: .systemRed),
+            draftScreenshot(color: .systemOrange),
+            draftScreenshot(color: .systemBlue)
+        ].compactMap { $0 }
+    }
+
+    private static func makeWorkspace() -> TasksPreviewWorkspace {
+        let workspaceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CursorMetroTaskPreviews-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: workspaceURL, withIntermediateDirectories: true)
+
+        let todo = ProjectTasksStorage.addTask(
+            workspacePath: workspaceURL.path,
+            content: "Audit the spacing and hierarchy in the account settings screen.",
+            screenshotData: [makePNGData(color: .systemRed), makePNGData(color: .systemOrange)].compactMap { $0 },
+            providerID: .cursor,
+            modelId: AvailableModels.autoID,
+            taskState: .inProgress
+        )
+        let processing = ProjectTasksStorage.addTask(
+            workspacePath: workspaceURL.path,
+            content: "Check the startup logs and verify the preview server is healthy.",
+            screenshotData: [],
+            providerID: .cursor,
+            modelId: AvailableModels.autoID,
+            taskState: .inProgress
+        )
+        let review = ProjectTasksStorage.addTask(
+            workspacePath: workspaceURL.path,
+            content: "Confirm that the new onboarding panel matches the approved mock.",
+            screenshotData: [makePNGData(color: .systemBlue)].compactMap { $0 },
+            providerID: .cursor,
+            modelId: "gpt-5.4-medium",
+            taskState: .inProgress
+        )
+        let stopped = ProjectTasksStorage.addTask(
+            workspacePath: workspaceURL.path,
+            content: "Investigate why pasted screenshots are not appearing in the delegated prompt.",
+            screenshotData: [],
+            providerID: .cursor,
+            modelId: "composer-1.5",
+            taskState: .inProgress
+        )
+        _ = ProjectTasksStorage.addTask(
+            workspacePath: workspaceURL.path,
+            content: "Backlog: design a cleaner screenshot gallery for task cards.",
+            screenshotData: [makePNGData(color: .systemPurple)].compactMap { $0 },
+            providerID: .cursor,
+            modelId: AvailableModels.autoID,
+            taskState: .backlog
+        )
+
+        return TasksPreviewWorkspace(
+            path: workspaceURL.path,
+            linkedStatuses: [
+                processing.id: .processing,
+                review.id: .review,
+                stopped.id: .stopped
+            ],
+            editableTask: todo,
+            multiScreenshotTask: todo,
+            singleScreenshotTask: review,
+            plainTask: processing
+        )
+    }
+
+    private static func draftScreenshot(color: NSColor) -> DraftTaskScreenshot? {
+        guard let pngData = makePNGData(color: color) else { return nil }
+        return DraftTaskScreenshot(pngData: pngData)
+    }
+
+    private static func makePNGData(color: NSColor) -> Data? {
+        let size = CGSize(width: 80, height: 80)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        color.setFill()
+        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: 16, yRadius: 16).fill()
+        image.unlockFocus()
+
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData) else {
+            return nil
+        }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
+private struct AddTaskStoryPreview: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var draft = "Capture the visual issues shown in the screenshots and outline the fixes."
+    @State private var screenshots = TasksStorybookData.makeDraftScreenshots()
+    @State private var selectedModelId = AvailableModels.autoID
+    @State private var previewImage: NSImage?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+            Text("Add Task Story")
+                .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+
+            VStack(alignment: .leading, spacing: CursorTheme.spaceS + CursorTheme.spaceXXS) {
+                HStack(alignment: .top, spacing: CursorTheme.spaceS + CursorTheme.spaceXXS) {
+                    Image(systemName: "circle")
+                        .font(.system(size: CursorTheme.fontIconList))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+
+                    SubmittableTextEditor(
+                        text: $draft,
+                        isDisabled: false,
+                        onSubmit: {},
+                        onPasteImage: nil,
+                        colorScheme: colorScheme,
+                        font: NSFont.systemFont(ofSize: CursorTheme.fontBody, weight: .regular),
+                        textContainerInset: NSSize(width: 0, height: 4)
+                    )
+                    .frame(minHeight: 48, maxHeight: 140)
+
+                    Button(action: {}) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if !screenshots.isEmpty {
+                    HStack(alignment: .center, spacing: CursorTheme.spaceS) {
+                        ForEach(screenshots) { item in
+                            ScreenshotThumbnailView(
+                                image: item.image,
+                                size: CGSize(width: 56, height: 56),
+                                cornerRadius: 6,
+                                onTapPreview: { previewImage = item.image },
+                                onDelete: {
+                                    if previewImage === item.image {
+                                        previewImage = nil
+                                    }
+                                    screenshots.removeAll { $0.id == item.id }
+                                }
+                            )
+                        }
+                    }
+                }
+
+                ModelPickerView(
+                    selectedModelId: selectedModelId,
+                    models: TasksStorybookData.models,
+                    onSelect: { selectedModelId = $0 }
+                )
+            }
+            .padding(CursorTheme.paddingCard)
+            .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                    .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+            )
+        }
+        .padding(CursorTheme.paddingPanel)
+        .frame(width: 760)
+        .background(CursorTheme.panel(for: colorScheme))
+    }
+}
+
+private struct EditTaskStoryPreview: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var editDraft = "Audit the spacing and hierarchy in the account settings screen."
+    @State private var editScreenshots = TasksStorybookData.makeDraftScreenshots()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+            Text("Edit Task Story")
+                .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+
+            TaskRowView(
+                task: TasksStorybookData.workspace.editableTask,
+                workspacePath: TasksStorybookData.workspace.path,
+                models: TasksStorybookData.models,
+                agentTaskState: .none,
+                isEditing: true,
+                editDraft: $editDraft,
+                editScreenshots: editScreenshots,
+                onTap: {},
+                onCommitEdit: {},
+                onCancelEdit: {},
+                onToggleComplete: {},
+                onSendToAgent: {},
+                onDelete: {},
+                onPreviewEditScreenshot: { _ in },
+                onRemoveEditScreenshot: { id in
+                    editScreenshots.removeAll { $0.id == id }
+                }
+            )
+        }
+        .padding(CursorTheme.paddingPanel)
+        .frame(width: 760)
+        .background(CursorTheme.panel(for: colorScheme))
+    }
+}
+
+private struct TaskRowScreenshotStatesPreview: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var editDraft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+            Text("Task Row Screenshot States")
+                .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+
+            TaskRowView(
+                task: TasksStorybookData.workspace.multiScreenshotTask,
+                workspacePath: TasksStorybookData.workspace.path,
+                models: TasksStorybookData.models,
+                agentTaskState: .none,
+                isEditing: false,
+                editDraft: $editDraft,
+                onTap: {},
+                onCommitEdit: {},
+                onCancelEdit: {},
+                onToggleComplete: {},
+                onSendToAgent: {},
+                onDelete: {}
+            )
+
+            TaskRowView(
+                task: TasksStorybookData.workspace.singleScreenshotTask,
+                workspacePath: TasksStorybookData.workspace.path,
+                models: TasksStorybookData.models,
+                agentTaskState: .none,
+                isEditing: false,
+                editDraft: $editDraft,
+                onTap: {},
+                onCommitEdit: {},
+                onCancelEdit: {},
+                onToggleComplete: {},
+                onSendToAgent: {},
+                onDelete: {}
+            )
+
+            TaskRowView(
+                task: TasksStorybookData.workspace.plainTask,
+                workspacePath: TasksStorybookData.workspace.path,
+                models: TasksStorybookData.models,
+                agentTaskState: .none,
+                isEditing: false,
+                editDraft: $editDraft,
+                onTap: {},
+                onCommitEdit: {},
+                onCancelEdit: {},
+                onToggleComplete: {},
+                onSendToAgent: {},
+                onDelete: {}
+            )
+        }
+        .padding(CursorTheme.paddingPanel)
+        .frame(width: 760)
+        .background(CursorTheme.panel(for: colorScheme))
+    }
+}
+
+#Preview("Tasks – Full List Stories") {
+    TasksListView(
+        workspacePath: TasksStorybookData.workspace.path,
+        triggerAddNewTask: .constant(false),
+        linkedStatuses: TasksStorybookData.workspace.linkedStatuses,
+        newTaskProviderID: .cursor,
+        modelsForProvider: { _ in TasksStorybookData.models },
+        onSendToAgent: { _, _, _, _, _ in },
+        onOpenLinkedAgent: { _ in },
+        onContinueAgent: { _ in },
+        onResetAgent: { _ in },
+        onStopAgent: { _ in },
+        onTasksDidUpdate: {},
+        onDismiss: {}
+    )
+    .frame(width: 900, height: 720)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Tasks – Add With Screenshots") {
+    AddTaskStoryPreview()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Tasks – Edit With Screenshots") {
+    EditTaskStoryPreview()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Tasks – Task Rows With And Without Screenshots") {
+    TaskRowScreenshotStatesPreview()
+        .preferredColorScheme(.dark)
+}
+#endif

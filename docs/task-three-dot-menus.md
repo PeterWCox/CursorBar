@@ -45,7 +45,7 @@ Common actions (shown when applicable):
 | Label | Icon | When shown |
 |-------|------|------------|
 | Delegate | `person` | In progress, no agent linked |
-| Edit | `pencil` | Task is editable |
+| Edit | `pencil` | Task is in Todo section only (in progress, no linked agent or agent in todo state) |
 | Backlog | `tray.full` | When viewing In Progress list |
 | Move to In Progress | `arrow.right.circle` | When viewing Backlog list |
 | Complete | `checkmark.circle` | Always for incomplete tasks |

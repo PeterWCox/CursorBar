@@ -19,6 +19,16 @@ final class ImageAssetCache {
         return image
     }
 
+    func removeScreenshot(for url: URL) {
+        screenshotCache.removeObject(forKey: url.path as NSString)
+    }
+
+    func removeScreenshots(for urls: [URL]) {
+        for url in urls {
+            removeScreenshot(for: url)
+        }
+    }
+
     func projectIcon(for path: String) -> NSImage {
         let key = path as NSString
         if let cached = projectIconCache.object(forKey: key) {

@@ -101,8 +101,6 @@ struct TasksListSnapshot: Equatable {
 
 @MainActor
 final class TasksListStore: ObservableObject {
-    private static let completedRecentInterval: TimeInterval = 24 * 60 * 60
-
     @Published private(set) var workspacePath: String = ""
     @Published private(set) var snapshot: TasksListSnapshot = .empty
     @Published private(set) var debugURL: String = ""
@@ -113,7 +111,6 @@ final class TasksListStore: ObservableObject {
     @Published var isAddingNewTask: Bool = false
     @Published var newTaskDraft: String = ""
     @Published var newTaskModelId: String = AvailableModels.autoID
-    @Published var showOnlyRecentCompleted: Bool = true
     @Published var expandedCompletedSections: Set<String> = ["Today"]
     @Published var expandedDeletedSections: Set<String> = ["Today"]
     @Published var selectedTasksTab: TasksListTab = .inProgress
@@ -188,12 +185,6 @@ final class TasksListStore: ObservableObject {
         startupScripts = ProjectSettingsStorage.getStartupScripts(workspacePath: workspacePath)
     }
 
-    func setShowOnlyRecentCompleted(_ enabled: Bool) {
-        guard showOnlyRecentCompleted != enabled else { return }
-        showOnlyRecentCompleted = enabled
-        recomputeSnapshot()
-    }
-
     func setCompletedSectionExpanded(_ title: String, expanded: Bool) {
         if expanded {
             expandedCompletedSections.insert(title)
@@ -210,19 +201,19 @@ final class TasksListStore: ObservableObject {
         }
     }
 
-    func commitNewTask(screenshotImages: [NSImage], providerID: AgentProviderID) {
+    func commitNewTask(screenshotData: [Data], providerID: AgentProviderID) {
         let trimmed = newTaskDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !workspacePath.isEmpty else { return }
         recordHangEvent("tasks-commit-new-task", metadata: [
             "contentLength": "\(trimmed.count)",
-            "screenshots": "\(screenshotImages.count)"
+            "screenshots": "\(screenshotData.count)"
         ])
 
         let taskState: TaskState = (selectedTasksTab == .backlog) ? .backlog : .inProgress
         _ = ProjectTasksStorage.addTask(
             workspacePath: workspacePath,
             content: trimmed,
-            screenshotImages: screenshotImages,
+            screenshotData: screenshotData,
             providerID: providerID,
             modelId: newTaskModelId,
             taskState: taskState
@@ -262,11 +253,11 @@ final class TasksListStore: ObservableObject {
         selectedTasksTab = tab
     }
 
-    func commitEdit(screenshotImages: [NSImage]) {
+    func commitEdit(screenshotData: [Data]) {
         let trimmed = editingDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty, let id = editingTask?.id, !workspacePath.isEmpty {
             ProjectTasksStorage.updateTask(workspacePath: workspacePath, id: id, content: trimmed)
-            ProjectTasksStorage.updateTaskScreenshots(workspacePath: workspacePath, id: id, images: screenshotImages)
+            ProjectTasksStorage.updateTaskScreenshots(workspacePath: workspacePath, id: id, screenshotData: screenshotData)
             reload()
         }
         editingTask = nil
@@ -315,7 +306,6 @@ final class TasksListStore: ObservableObject {
         newTaskDraft = ""
         newTaskModelId = AvailableModels.autoID
         previewRunningInExternalTerminal = false
-        showOnlyRecentCompleted = true
         expandedCompletedSections = ["Today"]
         expandedDeletedSections = ["Today"]
         selectedTasksTab = .inProgress
@@ -333,11 +323,7 @@ final class TasksListStore: ObservableObject {
             return state == nil || state == .none || state == .todo
         }
 
-        let cutoff = referenceDate.addingTimeInterval(-Self.completedRecentInterval)
-        let visibleCompletedTasks = showOnlyRecentCompleted
-            ? completedTasks.filter { ($0.completedAt ?? .distantPast) >= cutoff }
-            : completedTasks
-        let sortedVisibleCompletedTasks = visibleCompletedTasks
+        let sortedVisibleCompletedTasks = completedTasks
             .sorted { ($0.completedAt ?? .distantPast) >= ($1.completedAt ?? .distantPast) }
 
         snapshot = TasksListSnapshot(

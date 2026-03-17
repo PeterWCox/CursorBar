@@ -18,15 +18,30 @@ private final class TasksViewShortcutCoordinator: ObservableObject {
 }
 
 private let projectSetupAgentPrompt = """
-Set up Cursor Metro for this project from scratch.
+Set up Cursor Metro for this project from scratch and make it fully runnable for the user without extra manual terminal steps.
 
-1) Create or update .metro/project.json with a "scripts" array. Each element must be a **shell command** to run (e.g. "npm run dev", "npm run backend"), NOT a filename. Do not put "startup.sh" or any file path in the scripts array. Do not create or reference .metro/startup.sh. Example: {"scripts": ["npm run dev"]} or {"scripts": ["npm run backend", "npm run frontend"]} for multiple terminals.
+1) Create or update `.metro/project.json` with a `"scripts"` array. Each element must be a **shell command string** to run (for example `"npm run dev"` or `"cd backend && npm run dev"`), NOT a filename. Do not put `"startup.sh"` or any file path in the scripts array. Do not create or reference `.metro/startup.sh`.
 
-Commands are run with the shell's current working directory set to the **project root** (the directory that contains .metro). Use commands like `npm run dev` if package.json is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into .metro.
+2) Commands are run with the shell's current working directory set to the **project root** (the directory that contains `.metro`), and Cursor Metro executes each script via `/bin/bash -c`. Use commands like `npm run dev` if `package.json` is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into `.metro`.
 
-2) If this is a web app, add or update the "debugUrl" field in .metro/project.json with the URL where the app is served (e.g. http://localhost:3000).
+3) If this is a web app, add or update the `"debugUrl"` field in `.metro/project.json` with the URL where the app is served (for example `http://localhost:3000`).
 
-Detect the project type from the repo (package.json, etc.) and configure accordingly.
+4) Detect the project type from the repo and configure startup commands that are **self-contained and ready to run in a fresh terminal**. Do not assume the user has already activated a virtual environment, sourced a shell file, or run install steps manually.
+
+5) If any backend or service uses Python, the generated startup command must take care of the Python environment for the user:
+   - detect the correct backend directory
+   - create a local virtual environment automatically if it does not exist
+   - prefer the repo's existing convention (`venv`, `.venv`, Poetry, Pipenv, etc.) when clearly present; otherwise default to `.venv`
+   - follow any clearly documented repo setup conventions from files like `README.md` or `AGENTS.md`
+   - install dependencies when needed using the dependency files present in the repo
+   - activate the environment in the same command
+   - use `python -m pip ...` instead of bare `pip`
+   - start Python servers with `python -m ...` when possible (for example `python -m uvicorn ...`) instead of relying on a bare executable being on PATH
+   - do not tell the user to activate the venv manually
+
+6) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that clicking Start Preview works from a clean terminal session.
+
+7) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. After writing `.metro/project.json`, briefly summarize the exact scripts and debug URL you configured.
 """
 
 /// Installs Cmd+T key monitor when Tasks panel is visible so shortcuts work when focus is inside the list.
@@ -613,7 +628,8 @@ struct PopoutView: View {
 
         var initialPrompt = prompt
         for path in screenshotPaths {
-            initialPrompt += "\n\n[Screenshot attached: .metro/\(path)]"
+            let screenshotURL = ProjectTasksStorage.taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: path)
+            initialPrompt += "\n\n[Screenshot attached: \(screenshotURL.path)]"
         }
 
         if let newTab = addNewAgentTab(
@@ -1380,7 +1396,10 @@ struct PopoutView: View {
     }
 
     private func tasksTitleContent(workspacePath path: String) -> some View {
-        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+        let projectColor = path.isEmpty
+            ? CursorTheme.textTertiary(for: colorScheme)
+            : CursorTheme.colorForWorkspace(path: path)
+        return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
             Image(systemName: "checklist")
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
@@ -1393,10 +1412,10 @@ struct PopoutView: View {
                 HStack(spacing: CursorTheme.spaceXS) {
                     Image(systemName: "folder")
                         .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(projectColor)
                     Text((path as NSString).lastPathComponent)
                         .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(projectColor)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -1406,7 +1425,10 @@ struct PopoutView: View {
     }
 
     private func terminalTitleContent(workspacePath path: String) -> some View {
-        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+        let projectColor = path.isEmpty
+            ? CursorTheme.textTertiary(for: colorScheme)
+            : CursorTheme.colorForWorkspace(path: path)
+        return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
             Image(systemName: "terminal")
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
@@ -1419,10 +1441,10 @@ struct PopoutView: View {
                 HStack(spacing: CursorTheme.spaceXS) {
                     Image(systemName: "folder")
                         .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(projectColor)
                     Text((path as NSString).lastPathComponent)
                         .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .foregroundStyle(projectColor)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }

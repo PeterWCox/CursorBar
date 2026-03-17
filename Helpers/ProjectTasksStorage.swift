@@ -183,6 +183,33 @@ enum ProjectTasksStorage {
             .appendingPathComponent(screenshotPath)
     }
 
+    private static func pngData(from image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff) else {
+            return nil
+        }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+
+    private static func persistScreenshotData(_ screenshotData: [Data], taskID: UUID, workspacePath: String) -> [String] {
+        let dir = screenshotsDirectoryURL(workspacePath: workspacePath)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        var paths: [String] = []
+        for (index, data) in screenshotData.enumerated() {
+            let relPath = "screenshots/\(taskID.uuidString)_\(index).png"
+            let fileURL = dir.appendingPathComponent("\(taskID.uuidString)_\(index).png")
+            do {
+                try data.write(to: fileURL, options: .atomic)
+                ImageAssetCache.shared.removeScreenshot(for: fileURL)
+                paths.append(relPath)
+            } catch {
+                continue
+            }
+        }
+        return paths
+    }
+
     private static func load(workspacePath: String) -> ProjectTasksFile {
         let normalizedPath = normalizedWorkspacePath(workspacePath)
         if let cached = cachedFilesByWorkspace[normalizedPath] {
@@ -259,26 +286,24 @@ enum ProjectTasksStorage {
             .sorted { ($0.deletedAt ?? .distantPast) >= ($1.deletedAt ?? .distantPast) }
     }
 
-    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], providerID: AgentProviderID = .cursor, modelId: String = AvailableModels.autoID, taskState: TaskState = .inProgress) -> ProjectTask {
+    static func addTask(workspacePath: String, content: String, screenshotData: [Data], providerID: AgentProviderID = .cursor, modelId: String = AvailableModels.autoID, taskState: TaskState = .inProgress) -> ProjectTask {
         var file = load(workspacePath: workspacePath)
         var task = ProjectTask(content: content, taskState: taskState, providerID: providerID, modelId: modelId)
-        let dir = screenshotsDirectoryURL(workspacePath: workspacePath)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        var paths: [String] = []
-        for (index, image) in screenshotImages.enumerated() {
-            let relPath = "screenshots/\(task.id.uuidString)_\(index).png"
-            let fileURL = dir.appendingPathComponent("\(task.id.uuidString)_\(index).png")
-            if let tiff = image.tiffRepresentation,
-               let bitmap = NSBitmapImageRep(data: tiff),
-               let pngData = bitmap.representation(using: .png, properties: [:]) {
-                try? pngData.write(to: fileURL)
-                paths.append(relPath)
-            }
-        }
-        task.screenshotPaths = paths
+        task.screenshotPaths = persistScreenshotData(screenshotData, taskID: task.id, workspacePath: workspacePath)
         file.tasks.insert(task, at: 0)
         save(workspacePath: workspacePath, file)
         return task
+    }
+
+    static func addTask(workspacePath: String, content: String, screenshotImages: [NSImage] = [], providerID: AgentProviderID = .cursor, modelId: String = AvailableModels.autoID, taskState: TaskState = .inProgress) -> ProjectTask {
+        addTask(
+            workspacePath: workspacePath,
+            content: content,
+            screenshotData: screenshotImages.compactMap(pngData(from:)),
+            providerID: providerID,
+            modelId: modelId,
+            taskState: taskState
+        )
     }
 
     static func updateTask(workspacePath: String, id: UUID, content: String? = nil, taskState: TaskState? = nil, providerID: AgentProviderID? = nil, modelId: String? = nil) {
@@ -292,29 +317,26 @@ enum ProjectTasksStorage {
     }
 
     /// Update the task's screenshots: save images to .metro/screenshots/<id>_0.png, _1.png, etc.; remove any old files not in the new set.
-    static func updateTaskScreenshots(workspacePath: String, id: UUID, images: [NSImage]) {
+    static func updateTaskScreenshots(workspacePath: String, id: UUID, screenshotData: [Data]) {
         var file = load(workspacePath: workspacePath)
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
-        let dir = screenshotsDirectoryURL(workspacePath: workspacePath)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let oldPaths = file.tasks[index].screenshotPaths
-        var newPaths: [String] = []
-        for (i, img) in images.enumerated() {
-            let relPath = "screenshots/\(id.uuidString)_\(i).png"
-            let fileURL = dir.appendingPathComponent("\(id.uuidString)_\(i).png")
-            if let tiff = img.tiffRepresentation,
-               let bitmap = NSBitmapImageRep(data: tiff),
-               let pngData = bitmap.representation(using: .png, properties: [:]) {
-                try? pngData.write(to: fileURL)
-                newPaths.append(relPath)
-            }
-        }
+        let newPaths = persistScreenshotData(screenshotData, taskID: id, workspacePath: workspacePath)
         for oldPath in oldPaths where !newPaths.contains(oldPath) {
             let url = taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: oldPath)
+            ImageAssetCache.shared.removeScreenshot(for: url)
             try? FileManager.default.removeItem(at: url)
         }
         file.tasks[index].screenshotPaths = newPaths
         save(workspacePath: workspacePath, file)
+    }
+
+    static func updateTaskScreenshots(workspacePath: String, id: UUID, images: [NSImage]) {
+        updateTaskScreenshots(
+            workspacePath: workspacePath,
+            id: id,
+            screenshotData: images.compactMap(pngData(from:))
+        )
     }
 
     /// Remove one screenshot by path and delete its file.
@@ -323,6 +345,7 @@ enum ProjectTasksStorage {
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
         file.tasks[index].screenshotPaths.removeAll { $0 == screenshotPath }
         let url = taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: screenshotPath)
+        ImageAssetCache.shared.removeScreenshot(for: url)
         try? FileManager.default.removeItem(at: url)
         save(workspacePath: workspacePath, file)
     }
@@ -353,6 +376,7 @@ enum ProjectTasksStorage {
         guard let index = file.tasks.firstIndex(where: { $0.id == id }) else { return }
         for path in file.tasks[index].screenshotPaths {
             let url = taskScreenshotFileURL(workspacePath: workspacePath, screenshotPath: path)
+            ImageAssetCache.shared.removeScreenshot(for: url)
             try? FileManager.default.removeItem(at: url)
         }
         file.tasks.removeAll { $0.id == id }

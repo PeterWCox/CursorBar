@@ -113,6 +113,7 @@ struct ActionButton: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(width: 700, height: 400)
+    .previewLayout(.sizeThatFits)
 }
 
 #Preview("ActionButton – dark") {
@@ -129,6 +130,7 @@ struct ActionButton: View {
     }
     .frame(width: 400, height: 200)
     .preferredColorScheme(.dark)
+    .previewLayout(.sizeThatFits)
 }
 
 // MARK: - Optional tooltip (apply .help only when non-empty)

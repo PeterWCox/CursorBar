@@ -20,6 +20,7 @@ struct ScreenshotPreviewModal: View {
     var onDeleteScreenshotAtIndex: ((Int) -> Void)? = nil
 
     @State private var escapeMonitor: Any? = nil
+    @State private var currentIndex: Int
 
     private var urls: [URL] {
         if let imageURLs, !imageURLs.isEmpty { return imageURLs }
@@ -28,12 +29,37 @@ struct ScreenshotPreviewModal: View {
     }
 
     private var hasMultiple: Bool { urls.count > 1 }
+    private var selectedIndex: Int {
+        guard !urls.isEmpty else { return 0 }
+        return min(max(currentIndex, 0), urls.count - 1)
+    }
+    private var selectedURL: URL? {
+        guard !urls.isEmpty else { return nil }
+        return urls[selectedIndex]
+    }
 
     /// Single in-memory image (draft) or single URL: show one image.
     private var singleDisplayImage: NSImage? {
         if let image { return image }
-        guard let url = urls.first else { return nil }
+        guard let url = selectedURL else { return nil }
         return ImageAssetCache.shared.screenshot(for: url)
+    }
+
+    init(
+        imageURLs: [URL]? = nil,
+        initialIndex: Int = 0,
+        imageURL: URL? = nil,
+        image: NSImage? = nil,
+        isPresented: Binding<Bool>,
+        onDeleteScreenshotAtIndex: ((Int) -> Void)? = nil
+    ) {
+        self.imageURLs = imageURLs
+        self.initialIndex = initialIndex
+        self.imageURL = imageURL
+        self.image = image
+        self._isPresented = isPresented
+        self.onDeleteScreenshotAtIndex = onDeleteScreenshotAtIndex
+        self._currentIndex = State(initialValue: initialIndex)
     }
 
     var body: some View {
@@ -57,18 +83,18 @@ struct ScreenshotPreviewModal: View {
                 }
 
                 if hasMultiple {
-                    // Side-by-side images, each with optional delete X in top-right
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .center, spacing: CursorTheme.spaceL) {
-                            ForEach(Array(urls.enumerated()), id: \.element.path) { index, url in
-                                CachedPreviewImageView(url: url) { nsImage in
-                                    screenshotImageCell(nsImage: nsImage, index: index)
-                                }
+                    HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+                        previewNavButton(systemName: "chevron.left", action: showPreviousScreenshot)
+
+                        if let selectedURL {
+                            CachedPreviewImageView(url: selectedURL) { nsImage in
+                                screenshotImageCell(nsImage: nsImage, index: selectedIndex)
                             }
                         }
-                        .padding(.horizontal, CursorTheme.spaceL)
+
+                        previewNavButton(systemName: "chevron.right", action: showNextScreenshot)
                     }
-                    .frame(maxWidth: 900, maxHeight: 700)
+                    .frame(maxWidth: 980, maxHeight: 700)
                 } else if let nsImage = singleDisplayImage {
                     // Single image (URL or in-memory draft)
                     screenshotImageCell(nsImage: nsImage, index: 0)
@@ -80,9 +106,19 @@ struct ScreenshotPreviewModal: View {
         .onAppear {
             guard escapeMonitor == nil else { return }
             escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                guard event.keyCode == 53 else { return event } // 53 = Escape
-                Task { @MainActor in isPresented = false }
-                return nil
+                Task { @MainActor in
+                    switch event.keyCode {
+                    case 53: // Escape
+                        isPresented = false
+                    case 123: // Left arrow
+                        showPreviousScreenshot()
+                    case 124: // Right arrow
+                        showNextScreenshot()
+                    default:
+                        break
+                    }
+                }
+                return [53, 123, 124].contains(event.keyCode) ? nil : event
             }
         }
         .onDisappear {
@@ -97,12 +133,38 @@ struct ScreenshotPreviewModal: View {
         }
     }
 
+    private func showPreviousScreenshot() {
+        guard hasMultiple else { return }
+        currentIndex = selectedIndex == 0 ? urls.count - 1 : selectedIndex - 1
+    }
+
+    private func showNextScreenshot() {
+        guard hasMultiple else { return }
+        currentIndex = selectedIndex == urls.count - 1 ? 0 : selectedIndex + 1
+    }
+
+    @ViewBuilder
+    private func previewNavButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 36, height: 36)
+                .background(Color.white.opacity(0.08), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
     @ViewBuilder
     private func screenshotImageCell(nsImage: NSImage, index: Int) -> some View {
         Image(nsImage: nsImage)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(maxWidth: hasMultiple ? 440 : 900, maxHeight: hasMultiple ? 500 : 700)
+            .frame(maxWidth: hasMultiple ? 860 : 900, maxHeight: 700)
             .fixedSize(horizontal: true, vertical: true)
             .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
             .overlay(
@@ -110,18 +172,32 @@ struct ScreenshotPreviewModal: View {
                     .stroke(CursorTheme.border, lineWidth: 1)
             )
             .overlay(alignment: .topTrailing) {
-                if onDeleteScreenshotAtIndex != nil {
-                    Button {
-                        onDeleteScreenshotAtIndex?(index)
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: CursorTheme.fontIconList))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .background(Circle().fill(Color.black.opacity(0.4)))
+                HStack(spacing: CursorTheme.spaceS) {
+                    if hasMultiple {
+                        Text("\(selectedIndex + 1) / \(urls.count)")
+                            .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, CursorTheme.spaceS)
+                            .padding(.vertical, CursorTheme.spaceXS)
+                            .background(Color.black.opacity(0.45), in: Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .padding(CursorTheme.spaceS)
+
+                    if onDeleteScreenshotAtIndex != nil {
+                        Button {
+                            onDeleteScreenshotAtIndex?(index)
+                            if currentIndex >= urls.count - 1 {
+                                currentIndex = max(0, urls.count - 2)
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: CursorTheme.fontIconList))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .background(Circle().fill(Color.black.opacity(0.4)))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(CursorTheme.spaceS)
             }
             .shadow(color: .black.opacity(0.4), radius: 24, x: 0, y: 8)
     }
