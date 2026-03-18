@@ -2914,9 +2914,9 @@ Build the initial app or service structure directly in this repository, choose s
 
     private func placeholderText(whenRunning isRunning: Bool) -> String {
         if isRunning {
-            return "Press Enter to queue message (sends when agent finishes). ⇧Enter for new line."
+            return CursorTheme.composerPlaceholderWhenRunning
         }
-        return "Send message and/or ⌘V to paste one or more screenshots from clipboard. Press Enter to submit and ⇧Enter for new line."
+        return CursorTheme.composerPlaceholderHint
     }
 
     private func queuedCountLabel(_ count: Int) -> String {

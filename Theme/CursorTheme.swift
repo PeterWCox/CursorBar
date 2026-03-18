@@ -196,6 +196,15 @@ enum CursorTheme {
         let hue = Double((hash + 360) % 360) / 360.0
         return Color(hue: hue, saturation: 0.58, brightness: 0.88)
     }
+
+    // MARK: - Composer placeholder (Agent Input & Add Task)
+
+    /// Placeholder hint for the composer when empty. Reused for Agent Input and Add Task.
+    /// Describes: ⌘V paste screenshots, ⇧Enter new line, Enter to send.
+    static let composerPlaceholderHint = "⌘V to paste screenshots, ⇧Enter for new line, Enter to send"
+
+    /// Placeholder when the agent is running; message is queued until the agent finishes.
+    static let composerPlaceholderWhenRunning = "Enter to queue message (sends when agent finishes). ⇧Enter for new line."
 }
 
 struct ModelOption: Identifiable {

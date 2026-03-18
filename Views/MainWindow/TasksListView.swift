@@ -845,7 +845,7 @@ struct TasksListView: View {
                         .padding(.horizontal, -4)
                         .padding(.vertical, -4)
                     if store.newTaskDraft.isEmpty {
-                        Text(newTaskDraftScreenshots.isEmpty ? "Add task…" : "Describe the task…")
+                        Text(newTaskDraftScreenshots.isEmpty ? CursorTheme.composerPlaceholderHint : "Describe the task…")
                             .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                             .allowsHitTesting(false)
