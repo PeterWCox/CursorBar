@@ -148,6 +148,8 @@ struct TasksListView: View {
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @StateObject private var store = TasksListStore()
     @State private var focusNewTaskField: (() -> Void)?
+    /// Height of the new-task text editor; grows with content so multi-line draft is fully visible.
+    @State private var newTaskEditorHeight: CGFloat = 24
     /// URLs and paths for full-screen task screenshot preview (saved task screenshots). When non-empty, modal shows images side by side.
     @State private var taskScreenshotPreviewURLs: [URL] = []
     @State private var taskScreenshotPreviewPaths: [String] = []
@@ -160,6 +162,8 @@ struct TasksListView: View {
     @State private var newTaskDraftScreenshots: [DraftTaskScreenshot] = []
     /// Draft screenshots while editing an existing task. Existing screenshots are loaded into memory and replaced on save.
     @State private var editDraftScreenshots: [DraftTaskScreenshot] = []
+    /// Height of the edit-task text editor; grows with content so multi-line draft is fully visible.
+    @State private var editTaskEditorHeight: CGFloat = 36
 
     private var preferredTerminal: PreferredTerminalApp {
         PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
@@ -425,61 +429,11 @@ struct TasksListView: View {
         )
     }
 
-    /// Start Preview / Stop / Open in Browser / Configure Setup (external terminal; window closes on Stop).
+    /// Add Task only; Play / Stop / Configure Setup / Open in Browser are in the Preview view header.
     private var previewButtonsBar: some View {
-        let debugURL = store.debugURL
-        let isConfigured = !store.startupScripts.isEmpty
-        let hasPreviewURL = !debugURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return HStack(spacing: CursorTheme.spaceS) {
+        HStack(spacing: CursorTheme.spaceS) {
             addTaskChip
             Spacer(minLength: 0)
-            if store.previewRunningInExternalTerminal {
-                ActionButton(
-                    title: "Stop",
-                    icon: "stop.fill",
-                    action: {
-                        _ = closePreviewTerminalWindow(workspacePath: workspacePath)
-                        store.previewRunningInExternalTerminal = false
-                    },
-                    help: "Close the preview terminal window",
-                    style: .stop
-                )
-                if hasPreviewURL {
-                    ActionButton(
-                        title: "Open in Browser",
-                        icon: "safari",
-                        action: {
-                            guard let url = URL(string: debugURL.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
-                            openURLInChrome(url)
-                        },
-                        help: "Open the preview URL in Chrome",
-                        style: .primary
-                    )
-                }
-            } else {
-                if isConfigured {
-                    ActionButton(
-                        title: "Start Preview",
-                        icon: "play.fill",
-                        action: {
-                            if launchStartupScriptInNewWindow(workspacePath: workspacePath, preferredTerminal: preferredTerminal) == nil {
-                                store.previewRunningInExternalTerminal = true
-                            }
-                        },
-                        help: "Run each startup script in its own terminal window (closed when you tap Stop)",
-                        style: .play
-                    )
-                }
-                if let launch = onLaunchSetupAgent {
-                    ActionButton(
-                        title: isConfigured ? "Regenerate Setup" : "Configure Setup",
-                        icon: "gearshape",
-                        action: { launch(workspacePath) },
-                        help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
-                        style: .accent
-                    )
-                }
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -588,7 +542,7 @@ struct TasksListView: View {
                 newTaskRow
             }
             ForEach(snapshot.backlogTasks) { task in
-                taskRow(task, stateTransitionLabel: "Move to In Progress", stateTransitionIcon: "arrow.right.circle", onStateTransition: {
+                taskRow(task, stateTransitionLabel: "In Progress", stateTransitionIcon: "arrow.right.circle", onStateTransition: {
                     store.moveTask(task, to: .inProgress)
                 })
             }
@@ -707,7 +661,9 @@ struct TasksListView: View {
             onStateTransition: onStateTransition,
             onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil,
             onContinueAgent: linkedStatuses[task.id] == .stopped ? { onContinueAgent(task) } : nil,
-            onResetAgent: linkedStatuses[task.id] == .stopped ? { onResetAgent(task) } : nil
+            onResetAgent: linkedStatuses[task.id] == .stopped ? { onResetAgent(task) } : nil,
+            editEditorHeight: editTaskEditorHeight,
+            onEditEditorHeightChange: { editTaskEditorHeight = $0 }
         )
     }
 
@@ -868,6 +824,7 @@ struct TasksListView: View {
                         isDisabled: false,
                         onSubmit: commitNewTask,
                         onPasteImage: pasteNewTaskScreenshot,
+                        onHeightChange: { newTaskEditorHeight = $0 },
                         onFocusRequested: { focus, _ in
                             focusNewTaskField = focus
                             if store.isAddingNewTask {
@@ -884,7 +841,7 @@ struct TasksListView: View {
                             cancelNewTask()
                             return .handled
                         }
-                        .frame(minHeight: 24, maxHeight: 120)
+                        .frame(height: min(400, max(24, newTaskEditorHeight)))
                         .padding(.horizontal, -4)
                         .padding(.vertical, -4)
                     if store.newTaskDraft.isEmpty {
@@ -1080,6 +1037,9 @@ private struct TaskRowView: View {
     var onContinueAgent: (() -> Void)? = nil
     /// When non-nil (stopped tasks), the row shows "Reset agent" which closes the linked agent and starts a fresh one.
     var onResetAgent: (() -> Void)? = nil
+    /// Current height of the edit text editor (from onEditEditorHeightChange); used so the editor expands with content.
+    var editEditorHeight: CGFloat = 36
+    var onEditEditorHeightChange: ((CGFloat) -> Void)? = nil
 
     private var isProcessing: Bool { agentTaskState == .processing }
     private var isStopped: Bool { agentTaskState == .stopped }
@@ -1150,7 +1110,6 @@ private struct TaskRowView: View {
                                 onResetAgent()
                             }
                         }
-                        Divider()
                     }
                     if !task.completed {
                         if canDelegate {
@@ -1168,11 +1127,11 @@ private struct TaskRowView: View {
                                 onStateTransition()
                             }
                         }
-                        Divider()
                     }
                     Button(task.completed ? "Mark as not done" : "Complete", systemImage: task.completed ? "circle" : "checkmark.circle") {
                         onToggleComplete()
                     }
+                    Divider()
                     Button("Delete", systemImage: "trash", role: .destructive) {
                         onDelete()
                     }
@@ -1196,6 +1155,7 @@ private struct TaskRowView: View {
                         isDisabled: false,
                         onSubmit: onCommitEdit,
                         onPasteImage: onPasteEditScreenshot,
+                        onHeightChange: { onEditEditorHeightChange?($0) },
                         onFocusRequested: { focus, _ in
                             focusEditor = focus
                             if isEditing {
@@ -1208,7 +1168,8 @@ private struct TaskRowView: View {
                         font: NSFont.systemFont(ofSize: 14, weight: .regular),
                         textContainerInset: NSSize(width: 0, height: 4)
                     )
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 36, maxHeight: 160)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(height: min(400, max(36, editEditorHeight)))
                         .onKeyPress(.escape) {
                             onCancelEdit()
                             return .handled
@@ -1304,7 +1265,6 @@ private struct TaskRowView: View {
                         onResetAgent()
                     }
                 }
-                Divider()
             }
             if canDelegate {
                 Button("Delegate", systemImage: "person") {
@@ -1325,12 +1285,12 @@ private struct TaskRowView: View {
                     }
                     .disabled(isProcessing)
                 }
-                Divider()
             }
             Button(task.completed ? "Mark as not done" : "Complete", systemImage: task.completed ? "circle" : "checkmark.circle") {
                 onToggleComplete()
             }
             .disabled(isProcessing)
+            Divider()
             Button("Delete", systemImage: "trash", role: .destructive) {
                 onDelete()
             }

@@ -20,7 +20,7 @@ private final class TasksViewShortcutCoordinator: ObservableObject {
 private let projectSetupAgentPrompt = """
 Set up Cursor Metro for this project from scratch and make it fully runnable for the user without extra manual terminal steps.
 
-1) Create or update `.metro/project.json` with a `"scripts"` array. Each element must be a **shell command string** to run (for example `"npm run dev"` or `"cd backend && npm run dev"`), NOT a filename. Do not put `"startup.sh"` or any file path in the scripts array. Do not create or reference `.metro/startup.sh`.
+1) Create or update `.metro/project.json` with a `"scripts"` array. Each element must be a **shell command string** to run (for example `"npm run dev"` or `"cd backend && npm run dev"`), NOT a filename. Do not put `"startup.sh"` or any file path in the scripts array. Do not create or reference `.metro/startup.sh`. **Always** add a `"scriptLabels"` array of the same length as `scripts` so Preview terminal tabs show clear names: for multiple scripts use descriptive names like `["backend", "frontend"]` or `["api", "web"]`; for a single script use `["Preview"]` or the app name. Tabs without scriptLabels fall back to "1", "2", etc.
 
 2) Commands are run with the shell's current working directory set to the **project root** (the directory that contains `.metro`), and Cursor Metro executes each script via `/bin/bash -c`. Use commands like `npm run dev` if `package.json` is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into `.metro`.
 
@@ -39,9 +39,9 @@ Set up Cursor Metro for this project from scratch and make it fully runnable for
    - start Python servers with `python -m ...` when possible (for example `python -m uvicorn ...`) instead of relying on a bare executable being on PATH
    - do not tell the user to activate the venv manually
 
-6) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that clicking Start Preview works from a clean terminal session.
+6) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that Preview runs it in a clean terminal session.
 
-7) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. After writing `.metro/project.json`, briefly summarize the exact scripts and debug URL you configured.
+7) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. Always include `scriptLabels` so Preview tabs have clear names (e.g. "backend", "frontend" for multi-service apps, or "Preview" / the app name for a single script). After writing `.metro/project.json`, briefly summarize the exact scripts, scriptLabels, and debug URL you configured.
 """
 
 /// Installs Cmd+T key monitor when Tasks panel is visible so shortcuts work when focus is inside the list.
@@ -111,6 +111,22 @@ private struct GitBranchSnapshot: Equatable {
     let branches: [String]
 }
 
+private enum AddProjectMode: String, CaseIterable, Identifiable {
+    case existing
+    case new
+    case github
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .existing: return "Existing"
+        case .new: return "New"
+        case .github: return "GitHub"
+        }
+    }
+}
+
 /// Wrapper that observes a single tab so only this subtree re-renders when that tab streams.
 /// Use for the active-tab content area so background tabs don't invalidate the whole window.
 private struct ObservedTabView<Content: View>: View {
@@ -133,6 +149,7 @@ private struct TerminalTabChip: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 12))
                     .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                    .frame(width: 16, height: 16, alignment: .center)
                 Text(terminalTab.title)
                     .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
                     .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
@@ -270,6 +287,7 @@ struct PopoutView: View {
     var dismiss: () -> Void = {}
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
+    @AppStorage(AppPreferences.projectScanRootsKey) private var projectScanRootsRaw: String = AppPreferences.defaultProjectScanRootsRaw
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
     @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
@@ -305,6 +323,17 @@ struct PopoutView: View {
     @State private var expandedPromptTabID: UUID? = nil
     /// How many of the most recent turns are mounted for each tab. `Int.max` means full history.
     @State private var visibleTurnLimitsByTabID: [UUID: Int] = [:]
+    @State private var addProjectMode: AddProjectMode = .existing
+    @State private var selectedExistingProjectPath: String?
+    @State private var newProjectName: String = ""
+    @State private var newProjectParentPath: String = ""
+    @State private var newProjectIdea: String = ""
+    @State private var gitRepositoryURL: String = ""
+    @State private var gitCloneParentPath: String = ""
+    @State private var gitCloneFolderName: String = ""
+    @State private var projectHubErrorMessage: String?
+    @State private var projectHubStatusMessage: String?
+    @State private var isProjectHubBusy: Bool = false
     /// When true, hide main agent content and show only title bar + tab sidebar (uses AppState so panel can resize).
     private var isMainContentCollapsed: Bool { appState.isMainContentCollapsed }
 
@@ -320,6 +349,14 @@ struct PopoutView: View {
 
     private var hasOpenProjects: Bool {
         appState.openProjectCount > 0
+    }
+
+    private var projectScanRoots: [String] {
+        AppPreferences.resolvedProjectScanRoots(raw: projectScanRootsRaw, legacyRootPath: projectsRootPath)
+    }
+
+    private var preferredProjectBrowserRoot: String {
+        AppPreferences.preferredProjectBrowserRoot(raw: projectScanRootsRaw, legacyRootPath: projectsRootPath)
     }
 
     /// Workspace path for the current context: active tab's workspace, selected project, or app storage fallback.
@@ -730,6 +767,19 @@ struct PopoutView: View {
         )
     }
 
+    /// Opens Dashboard: in-app tabbed terminals running each startup script for the project.
+    private func openDashboard(workspacePath path: String) {
+        let root = projectRootForTerminal(workspacePath: path)
+        let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
+        guard !scripts.isEmpty else { return }
+        let labels = ProjectSettingsStorage.getStartupScriptDisplayLabels(workspacePath: root)
+        if tabManager.addDashboardTabs(workspacePath: path, scripts: scripts, labels: labels) {
+            if appState.isMainContentCollapsed {
+                withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+            }
+        }
+    }
+
     /// Removes a project (all tabs for that workspace path) from the sidebar. Stops any running agents first.
     private func removeProject(workspacePath path: String) {
         for t in tabManager.tabs where t.workspacePath == path {
@@ -738,24 +788,65 @@ struct PopoutView: View {
         tabManager.removeProject(path)
     }
 
-    /// Opens the folder picker and always creates a new agent tab for the chosen project.
     private func addProject() {
+        seedProjectHubDefaults()
+        tabManager.showAddProjectView()
+    }
+
+    private func seedProjectHubDefaults() {
+        if newProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            newProjectParentPath = preferredProjectBrowserRoot
+        }
+        if gitCloneParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            gitCloneParentPath = preferredProjectBrowserRoot
+        }
+        if let selectedExistingProjectPath,
+           !tabManager.projects.contains(where: { $0.path == selectedExistingProjectPath }),
+           selectedExistingProjectPath != currentWorkspacePath {
+            self.selectedExistingProjectPath = nil
+        }
+        if selectedExistingProjectPath == nil {
+            selectedExistingProjectPath = tabManager.projects.first?.path ?? devFolders.first?.path
+        }
+    }
+
+    private func selectFolder(
+        title: String,
+        message: String,
+        startingAt path: String? = nil
+    ) -> String? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
-        panel.title = "Select Workspace"
-        panel.message = "Choose the repository directory where Cursor agent will work."
+        panel.title = title
+        panel.message = message
 
-        if !workspacePath.isEmpty && FileManager.default.fileExists(atPath: workspacePath) {
-            panel.directoryURL = URL(fileURLWithPath: workspacePath)
-        } else {
-            panel.directoryURL = URL(fileURLWithPath: AppPreferences.resolvedProjectsRootPath(projectsRootPath))
+        let preferredPath = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let resolvedPath = preferredPath.isEmpty ? preferredProjectBrowserRoot : preferredPath
+        if FileManager.default.fileExists(atPath: resolvedPath) {
+            panel.directoryURL = URL(fileURLWithPath: resolvedPath)
         }
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        openProjectInNewAgentTab(url.path)
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        return url.path
+    }
+
+    private func updateProjectContext(to path: String) {
+        workspacePath = path
+        appState.workspacePath = path
+        tabManager.activeTab?.errorMessage = nil
+        refreshGitState(for: path, force: true)
+    }
+
+    private func openProjectInTasksView(_ path: String) {
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return }
+
+        tabManager.addProject(path: trimmedPath, select: true)
+        tabManager.showTasksView(workspacePath: trimmedPath)
+        updateProjectContext(to: trimmedPath)
     }
 
     private func openProjectInNewAgentTab(_ path: String) {
@@ -764,11 +855,98 @@ struct PopoutView: View {
 
         tabManager.addProject(path: trimmedPath, select: true)
         showTasksComposer(workspacePath: trimmedPath, startNewTask: true)
-        workspacePath = trimmedPath
-        appState.workspacePath = trimmedPath
+        updateProjectContext(to: trimmedPath)
+    }
 
-        tabManager.activeTab?.errorMessage = nil
-        refreshGitState(for: trimmedPath, force: true)
+    private func launchProjectCreationAgent(in path: String, idea: String) {
+        let trimmedIdea = idea.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedIdea.isEmpty else {
+            openProjectInTasksView(path)
+            return
+        }
+        tabManager.addProject(path: path, select: true)
+        updateProjectContext(to: path)
+        let prompt = """
+Create a brand new project in this empty workspace based on the user's request: "\(trimmedIdea)".
+
+Build the initial app or service structure directly in this repository, choose sensible defaults, and make it runnable without making the user decide every low-level detail.
+
+\(projectSetupAgentPrompt)
+"""
+        _ = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: path)
+    }
+
+    private func openExistingProjectFromHub(_ path: String) {
+        projectHubErrorMessage = nil
+        projectHubStatusMessage = nil
+        selectedExistingProjectPath = path
+        openProjectInTasksView(path)
+    }
+
+    private func browseForExistingProject() {
+        guard let path = selectFolder(
+            title: "Open Project",
+            message: "Choose a project folder to add to Cursor Metro.",
+            startingAt: selectedExistingProjectPath ?? currentWorkspacePath
+        ) else { return }
+        selectedExistingProjectPath = path
+        openExistingProjectFromHub(path)
+    }
+
+    private func createEmptyProjectFromHub() {
+        projectHubErrorMessage = nil
+        projectHubStatusMessage = nil
+        switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
+        case .success(let path):
+            projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
+            openProjectInTasksView(path)
+        case .failure(let error):
+            projectHubErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func createProjectWithAgentFromHub() {
+        projectHubErrorMessage = nil
+        projectHubStatusMessage = nil
+        switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
+        case .success(let path):
+            projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
+            launchProjectCreationAgent(in: path, idea: newProjectIdea)
+        case .failure(let error):
+            projectHubErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func cloneProjectFromHub(runSetupAgent: Bool) {
+        projectHubErrorMessage = nil
+        projectHubStatusMessage = nil
+        isProjectHubBusy = true
+        let repositoryURL = gitRepositoryURL
+        let parentPath = gitCloneParentPath
+        let folderName = gitCloneFolderName
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = cloneRepository(
+                repositoryURL: repositoryURL,
+                destinationParentPath: parentPath,
+                folderName: folderName.isEmpty ? nil : folderName
+            )
+            DispatchQueue.main.async {
+                isProjectHubBusy = false
+                switch result {
+                case .success(let path):
+                    projectHubStatusMessage = "Cloned \(appState.workspaceDisplayName(for: path))."
+                    if runSetupAgent {
+                        tabManager.addProject(path: path, select: true)
+                        updateProjectContext(to: path)
+                        _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path)
+                    } else {
+                        openProjectInTasksView(path)
+                    }
+                case .failure(let error):
+                    projectHubErrorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func openProjectInCursor(_ path: String) {
@@ -1038,11 +1216,11 @@ struct PopoutView: View {
     }
 
     /// Tabs grouped by workspace path, order preserved by first occurrence. Linked agent tabs only appear while their tasks are actively in progress. Projects hidden in Settings are excluded.
+    /// Terminal tabs are not shown in the sidebar; they appear only as tabs in the Dashboard panel (Dashboard + one tab per terminal).
     private var tabGroups: [TabSidebarGroup] {
         _ = appState.taskListRevision
         let visibleTabs = tabManager.tabs.filter { isAgentTabVisibleInSidebar($0) }
         let groupedTabs = Dictionary(grouping: visibleTabs, by: \.workspacePath)
-        let groupedTerminals = Dictionary(grouping: tabManager.terminalTabs, by: \.workspacePath)
         let hiddenPaths = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
         return tabManager.projects
             .filter { !hiddenPaths.contains(AppPreferences.normalizedProjectPath($0.path)) }
@@ -1053,29 +1231,160 @@ struct PopoutView: View {
                     path: path,
                     displayName: displayName.isEmpty ? "Project" : displayName,
                     tabs: groupedTabs[path] ?? [],
-                    terminalTabs: groupedTerminals[path] ?? []
+                    terminalTabs: [] // Terminal tabs live in Dashboard panel tab bar only, not in sidebar
                 )
             }
     }
 
+    /// Terminals for the current project when in Dashboard view (for panel tab bar).
+    private func dashboardPanelTerminals(for workspacePath: String) -> [TerminalTab] {
+        tabManager.terminalTabs.filter { $0.workspacePath == workspacePath }
+    }
+
+    /// True when Dashboard view is selected, we have terminals, but no terminal tab is selected (show overview).
+    private var showingDashboardOverview: Bool {
+        guard let path = selectedProjectPath,
+              tabManager.selectedDashboardViewPath == path,
+              tabManager.selectedTerminalID == nil else { return false }
+        return !dashboardPanelTerminals(for: path).isEmpty
+    }
+
     @ViewBuilder
     private var mainContentZStack: some View {
-        ZStack {
-            if !tabManager.terminalTabs.isEmpty {
-                MultiTerminalHostView(
-                    tabs: tabManager.terminalTabs.map { ($0.id, $0.workspacePath) },
-                    selectedID: tabManager.selectedTerminalID,
-                    store: tabManager.terminalHostStore
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-            if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
-                tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
-            }
-            if tabManager.selectedTerminalID == nil {
-                agentOrEmptyContent
+        if tabManager.selectedAddProjectView || !hasOpenProjects {
+            addProjectHubContent
+        } else {
+            let showingDashboardEmpty = selectedProjectPath != nil
+                && tabManager.selectedDashboardViewPath == selectedProjectPath
+                && tabManager.dashboardTabs(for: selectedProjectPath!).isEmpty
+            ZStack {
+                if !tabManager.terminalTabs.isEmpty {
+                    MultiTerminalHostView(
+                        tabs: tabManager.terminalTabs.map { ($0.id, $0.workspacePath, $0.initialCommand) },
+                        selectedID: tabManager.selectedTerminalID,
+                        store: tabManager.terminalHostStore
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                if tabManager.selectedTasksViewPath != nil, let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
+                    tasksListContent(tasksPath: tasksPath, triggerAddNewTask: $tasksViewTriggerAddNew)
+                }
+                if showingDashboardEmpty {
+                    dashboardEmptyStateView(workspacePath: selectedProjectPath!)
+                }
+                if showingDashboardOverview {
+                    dashboardOverviewView()
+                }
+                if tabManager.selectedTerminalID == nil, !showingDashboardEmpty, !showingDashboardOverview {
+                    agentOrEmptyContent
+                }
             }
         }
+    }
+
+    /// Tab bar shown in the Dashboard panel: Dashboard (first) then one tab per terminal. Only in Dashboard view.
+    @ViewBuilder
+    private func dashboardPanelTabBar(workspacePath path: String) -> some View {
+        let terminals = dashboardPanelTerminals(for: path)
+        HStack(spacing: 6) {
+            Button {
+                tabManager.selectedTerminalID = nil
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 12))
+                    Text("Preview")
+                        .font(.system(size: 12, weight: tabManager.selectedTerminalID == nil ? .semibold : .medium))
+                }
+                .foregroundStyle(tabManager.selectedTerminalID == nil ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    tabManager.selectedTerminalID == nil ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(tabManager.selectedTerminalID == nil ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .help("Preview overview")
+            ForEach(terminals) { term in
+                HStack(spacing: 0) {
+                    Button {
+                        tabManager.selectedTerminalID = term.id
+                        tabManager.selectedTabID = nil
+                        tabManager.selectedTasksViewPath = nil
+                        tabManager.selectedProjectPath = term.workspacePath
+                        tabManager.selectedDashboardViewPath = term.isDashboardTab ? term.workspacePath : nil
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 12))
+                            Text(term.title)
+                                .font(.system(size: 12, weight: term.id == tabManager.selectedTerminalID ? .semibold : .medium))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(term.id == tabManager.selectedTerminalID ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                        .padding(.leading, 10)
+                        .padding(.trailing, 6)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    .help(term.title)
+                    Button(action: { tabManager.closeTerminalTab(term.id) }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                            .frame(width: 14, height: 14)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 8)
+                }
+                .background(
+                    term.id == tabManager.selectedTerminalID ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(term.id == tabManager.selectedTerminalID ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                )
+            }
+        }
+        .padding(.horizontal, CursorTheme.paddingPanel)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.5))
+    }
+
+    /// Shown when Preview tab is selected and terminals exist (user should pick a tab).
+    private func dashboardOverviewView() -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "eye")
+                .font(.system(size: 40, weight: .medium))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .symbolRenderingMode(.hierarchical)
+            Text("Select a tab above")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Shown when Preview is selected but Run has not been clicked yet.
+    private func dashboardEmptyStateView(workspacePath path: String) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "eye")
+                .font(.system(size: 48, weight: .medium))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .symbolRenderingMode(.hierarchical)
+            Text("Click Run to start your startup scripts")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -1122,6 +1431,9 @@ struct PopoutView: View {
                 } else {
                     VStack(spacing: 0) {
                         mainColumnHeaderArea
+                        if tabManager.selectedDashboardViewPath == selectedProjectPath, let path = selectedProjectPath, !path.isEmpty {
+                            dashboardPanelTabBar(workspacePath: path)
+                        }
                         mainContentZStack
                     }
                     .frame(maxWidth: .infinity)
@@ -1186,8 +1498,9 @@ struct PopoutView: View {
         bodyWithShortcuts
         .onAppear {
             sanitizeSelectedModel()
-            devFolders = loadDevFolders(rootPath: projectsRootPath)
-            tabManager.setProjectsFromPaths(devFolders.map(\.path))
+            devFolders = loadDevFolders(rootPaths: projectScanRoots)
+            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
+            seedProjectHubDefaults()
             refreshQuickActions(for: currentWorkspacePath)
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
@@ -1196,9 +1509,16 @@ struct PopoutView: View {
             refreshQuickActions(for: workspacePath, force: true)
             updateHangDiagnosticsSnapshot()
         }
+        .onChange(of: projectScanRootsRaw) { _, _ in
+            devFolders = loadDevFolders(rootPaths: projectScanRoots)
+            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
+            seedProjectHubDefaults()
+            updateHangDiagnosticsSnapshot()
+        }
         .onChange(of: projectsRootPath) { _, _ in
-            devFolders = loadDevFolders(rootPath: projectsRootPath)
-            tabManager.setProjectsFromPaths(devFolders.map(\.path))
+            devFolders = loadDevFolders(rootPaths: projectScanRoots)
+            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
+            seedProjectHubDefaults()
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: selectedModel) { _, _ in
@@ -1389,22 +1709,103 @@ struct PopoutView: View {
         .padding(.vertical, CursorTheme.paddingHeaderVertical)
     }
 
-    /// Header area: title row (agent prompt expands in place by wrapping, no separate card).
+    /// Header area: title row (agent prompt expands in place by wrapping, no separate card). When Dashboard view is selected, add Play/Stop/Configure/Open in Browser row.
     @ViewBuilder
     private var mainColumnHeaderArea: some View {
-        mainColumnTitleRow
+        VStack(alignment: .leading, spacing: 0) {
+            mainColumnTitleRow
+            if tabManager.selectedDashboardViewPath == selectedProjectPath, let path = selectedProjectPath, !path.isEmpty {
+                dashboardButtonsRow(workspacePath: path)
+            }
+        }
+    }
+
+    /// Play, Stop, Configure Setup, Open in Browser — shown in Dashboard/terminal view header.
+    private func dashboardButtonsRow(workspacePath path: String) -> some View {
+        let root = projectRootForTerminal(workspacePath: path)
+        let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
+        let debugURL = (ProjectSettingsStorage.getDebugURL(workspacePath: path) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let isDashboardRunning = !tabManager.dashboardTabs(for: path).isEmpty
+        let isConfigured = !scripts.isEmpty
+        let hasPreviewURL = !debugURL.isEmpty
+        return HStack(spacing: CursorTheme.spaceS) {
+            if isDashboardRunning {
+                ActionButton(
+                    title: "Stop",
+                    icon: "stop.fill",
+                    action: { tabManager.closeDashboardTabs(workspacePath: path) },
+                    help: "Close Preview tabs",
+                    style: .stop
+                )
+                if hasPreviewURL {
+                    ActionButton(
+                        title: "Open in Browser",
+                        icon: "safari",
+                        action: {
+                            guard let url = URL(string: debugURL) else { return }
+                            openURLInChrome(url)
+                        },
+                        help: "Open the preview URL in Chrome",
+                        style: .primary
+                    )
+                }
+            } else {
+                if isConfigured {
+                    ActionButton(
+                        title: "Run",
+                        icon: "play.fill",
+                        action: { openDashboard(workspacePath: path) },
+                        help: "Run each startup script in its own Preview tab",
+                        style: .play
+                    )
+                }
+                ActionButton(
+                    title: isConfigured ? "Regenerate Setup" : "Configure Setup",
+                    icon: "gearshape",
+                    action: { _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path) },
+                    help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
+                    style: .accent
+                )
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, CursorTheme.paddingHeaderHorizontal)
+        .padding(.trailing, CursorTheme.spaceS)
+        .padding(.bottom, CursorTheme.paddingHeaderVertical)
     }
 
     @ViewBuilder
     private var mainColumnTitleContent: some View {
-        if let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
+        if tabManager.selectedAddProjectView || !hasOpenProjects {
+            addProjectTitleContent()
+        } else if let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
             tasksTitleContent(workspacePath: tasksPath)
-        } else if tabManager.selectedTerminalID != nil, let path = selectedProjectPath {
+        } else if (tabManager.selectedTerminalID != nil || tabManager.selectedDashboardViewPath == selectedProjectPath), let path = selectedProjectPath {
             terminalTitleContent(workspacePath: path)
         } else if let tab = tabManager.activeTab {
             agentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
         } else {
             EmptyView()
+        }
+    }
+
+    private func addProjectTitleContent() -> some View {
+        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+            Image(systemName: "gearshape")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .frame(width: 32, height: 32)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Projects")
+                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .lineLimit(1)
+                Text("Open an existing workspace, create a new one, or clone from GitHub.")
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    .lineLimit(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1442,12 +1843,12 @@ struct PopoutView: View {
             ? CursorTheme.textTertiary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: path)
         return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: "terminal")
+            Image(systemName: "eye")
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Terminal")
+                Text("Preview")
                     .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
                     .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                     .lineLimit(1)
@@ -1553,8 +1954,9 @@ struct PopoutView: View {
                                         VStack(alignment: .leading, spacing: 2) {
                                             HStack(spacing: 4) {
                                                 if !group.path.isEmpty {
-                                                    ProjectIconView(path: group.path)
-                                                        .frame(width: 12, height: 12)
+                                                    Image(systemName: "folder")
+                                                        .font(.system(size: 12, weight: .medium))
+                                                        .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
                                                 }
                                                 Text(group.displayName)
                                                     .font(.system(size: 12, weight: .semibold))
@@ -1574,7 +1976,6 @@ struct PopoutView: View {
                                                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                                                 .lineLimit(1)
                                                 .truncationMode(.middle)
-                                                .padding(.leading, 14)
                                             }
                                         }
                                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1602,6 +2003,7 @@ struct PopoutView: View {
                                         Image(systemName: "checklist")
                                             .font(.system(size: 12))
                                             .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                            .frame(width: 16, height: 16, alignment: .center)
                                         Text("Tasks")
                                             .font(.system(size: 12, weight: isTasksSelected ? .semibold : .medium))
                                             .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
@@ -1621,6 +2023,37 @@ struct PopoutView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help("View tasks for this project")
+                                let isDashboardSelected = tabManager.selectedDashboardViewPath == group.path
+                                Button {
+                                    tabManager.showDashboardView(workspacePath: group.path)
+                                    if appState.isMainContentCollapsed {
+                                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "eye")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                            .frame(width: 16, height: 16, alignment: .center)
+                                        Text("Preview")
+                                            .font(.system(size: 12, weight: isDashboardSelected ? .semibold : .medium))
+                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                            .lineLimit(1)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        isDashboardSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(isDashboardSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                .help("Preview: run startup scripts in tabs")
                                 ForEach(group.tabs) { t in
                                     ObservedTabChip(
                                         tab: t,
@@ -1633,23 +2066,6 @@ struct PopoutView: View {
                                     )
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                ForEach(group.terminalTabs) { term in
-                                    TerminalTabChip(
-                                        terminalTab: term,
-                                        isSelected: term.id == tabManager.selectedTerminalID,
-                                        onSelect: {
-                                            tabManager.selectedTerminalID = term.id
-                                            tabManager.selectedTabID = nil
-                                            tabManager.selectedTasksViewPath = nil
-                                            tabManager.selectedProjectPath = term.workspacePath
-                                            if appState.isMainContentCollapsed {
-                                                withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-                                            }
-                                        },
-                                        onClose: { tabManager.closeTerminalTab(term.id) }
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
                             }
                         }
                     }
@@ -1659,10 +2075,10 @@ struct PopoutView: View {
             .frame(maxHeight: .infinity)
 
             ActionButton(
-                title: "Add Project",
-                icon: "plus.circle.fill",
+                title: "Projects",
+                icon: "gearshape",
                 action: addProject,
-                help: "Add a project",
+                help: "Projects",
                 style: .primary
             )
             .frame(maxWidth: .infinity)
@@ -1671,6 +2087,347 @@ struct PopoutView: View {
         .frame(width: sidebarWidth)
         .clipped()
         .padding(.trailing, 12)
+    }
+
+    // MARK: - Projects hub
+
+    private var addProjectHubContent: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                    Text("Bring an existing project into Cursor Metro, start something new, or clone from GitHub.")
+                        .font(.system(size: CursorTheme.fontBody))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Picker("Add Project Mode", selection: $addProjectMode) {
+                        ForEach(AddProjectMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 360)
+                }
+
+                if let message = projectHubErrorMessage, !message.isEmpty {
+                    projectHubBanner(message, tint: CursorTheme.semanticErrorTint, border: CursorTheme.semanticError)
+                } else if let message = projectHubStatusMessage, !message.isEmpty {
+                    projectHubBanner(message, tint: CursorTheme.semanticSuccess.opacity(0.18), border: CursorTheme.semanticSuccess)
+                }
+
+                switch addProjectMode {
+                case .existing:
+                    existingProjectsSection
+                case .new:
+                    newProjectSection
+                case .github:
+                    githubProjectSection
+                }
+            }
+            .padding(CursorTheme.paddingPanel)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func projectHubBanner(_ message: String, tint: Color, border: Color) -> some View {
+        Text(message)
+            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(CursorTheme.paddingCard)
+            .background(tint, in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                    .stroke(border.opacity(0.45), lineWidth: 1)
+            )
+    }
+
+    private func projectHubCard<Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                Text(title)
+                    .font(.system(size: CursorTheme.fontSubtitle, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                Text(subtitle)
+                    .font(.system(size: CursorTheme.fontBodySmall))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            content()
+        }
+        .padding(CursorTheme.paddingCard)
+        .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+        )
+    }
+
+    private var existingProjectsSection: some View {
+        let projects = tabManager.projects.sorted { lhs, rhs in
+            if lhs.source != rhs.source {
+                return lhs.source == .discovered
+            }
+            return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
+        }
+        return projectHubCard(
+            title: "Pick Existing Project",
+            subtitle: "Open a discovered Metro project or browse to any repository folder on disk."
+        ) {
+            HStack(spacing: CursorTheme.spaceS) {
+                ActionButton(
+                    title: "Open Selected",
+                    icon: "folder",
+                    action: {
+                        if let path = selectedExistingProjectPath {
+                            openExistingProjectFromHub(path)
+                        }
+                    },
+                    isDisabled: selectedExistingProjectPath == nil,
+                    help: "Open the selected project in Tasks",
+                    style: .primary
+                )
+                ActionButton(
+                    title: "Browse Folder",
+                    icon: "folder.badge.plus",
+                    action: browseForExistingProject,
+                    help: "Choose any folder on your Mac",
+                    style: .secondary
+                )
+                Spacer(minLength: 0)
+            }
+
+            if projects.isEmpty {
+                Text("No projects discovered yet. Browse to any folder to add one.")
+                    .font(.system(size: CursorTheme.fontBodySmall))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+            } else {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                    ForEach(projects, id: \.path) { project in
+                        let isSelected = selectedExistingProjectPath == project.path
+                        let normalized = AppPreferences.normalizedProjectPath(project.path)
+                        let isVisible = !AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw).contains(normalized)
+                        HStack(alignment: .top, spacing: CursorTheme.spaceM) {
+                            Button {
+                                selectedExistingProjectPath = project.path
+                            } label: {
+                                HStack(alignment: .top, spacing: CursorTheme.spaceM) {
+                                    Image(systemName: project.source == .discovered ? "sparkles" : "folder")
+                                        .font(.system(size: CursorTheme.fontBody, weight: .medium))
+                                        .foregroundStyle(CursorTheme.colorForWorkspace(path: project.path))
+                                        .frame(width: 18, height: 18)
+                                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                                        HStack(spacing: CursorTheme.spaceXS) {
+                                            Text(appState.workspaceDisplayName(for: project.path))
+                                                .font(.system(size: CursorTheme.fontBody, weight: .semibold))
+                                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                                .lineLimit(1)
+                                            projectHubTag(project.source == .discovered ? "Scanned" : "Added")
+                                            if hasMetroProjectSettings(workspacePath: project.path) {
+                                                projectHubTag("Configured")
+                                            } else if hasMetroDirectory(workspacePath: project.path) {
+                                                projectHubTag(".metro")
+                                            } else {
+                                                projectHubTag("Needs Setup")
+                                            }
+                                            if isGitRepository(workspacePath: project.path) {
+                                                projectHubTag("Git")
+                                            }
+                                        }
+                                        Text(project.path)
+                                            .font(.system(size: CursorTheme.fontSecondary))
+                                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            Toggle("", isOn: Binding(
+                                get: { isVisible },
+                                set: { visible in
+                                    var hidden = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
+                                    if visible {
+                                        hidden.remove(normalized)
+                                    } else {
+                                        hidden.insert(normalized)
+                                    }
+                                    hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
+                                }
+                            ))
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .labelsHidden()
+                            .help("Show in sidebar")
+                        }
+                        .padding(CursorTheme.paddingCard)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            isSelected ? CursorTheme.surfaceMuted(for: colorScheme) : CursorTheme.editor(for: colorScheme),
+                            in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme), lineWidth: 1)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var newProjectSection: some View {
+        projectHubCard(
+            title: "Create New Project",
+            subtitle: "Create an empty workspace or let the agent scaffold the first version from your idea."
+        ) {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Project name")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    TextField("my-app", text: $newProjectName)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Destination")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    HStack(spacing: CursorTheme.spaceS) {
+                        TextField("~/dev", text: $newProjectParentPath)
+                            .textFieldStyle(.roundedBorder)
+                        ActionButton(
+                            title: "Browse",
+                            icon: "folder",
+                            action: {
+                                if let path = selectFolder(
+                                    title: "Choose New Project Destination",
+                                    message: "Choose where the new project folder should be created.",
+                                    startingAt: newProjectParentPath
+                                ) {
+                                    newProjectParentPath = path
+                                }
+                            },
+                            style: .secondary
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("What should it be?")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    TextField("Example: a small Next.js app for tracking invoices", text: $newProjectIdea, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(3...6)
+                }
+
+                HStack(spacing: CursorTheme.spaceS) {
+                    ActionButton(
+                        title: "Create Empty",
+                        icon: "plus.square",
+                        action: createEmptyProjectFromHub,
+                        isDisabled: newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        help: "Create the folder and open it in Tasks",
+                        style: .primary
+                    )
+                    ActionButton(
+                        title: "Create With Agent",
+                        icon: "wand.and.stars",
+                        action: createProjectWithAgentFromHub,
+                        isDisabled: newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        help: "Create the folder and ask the agent to scaffold the project",
+                        style: .accent
+                    )
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private var githubProjectSection: some View {
+        projectHubCard(
+            title: "Clone From GitHub",
+            subtitle: "Clone a repository into one of your working directories, then open it directly in Cursor Metro."
+        ) {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Repository URL")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    TextField("https://github.com/owner/repo", text: $gitRepositoryURL)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Clone into")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    HStack(spacing: CursorTheme.spaceS) {
+                        TextField("~/dev", text: $gitCloneParentPath)
+                            .textFieldStyle(.roundedBorder)
+                        ActionButton(
+                            title: "Browse",
+                            icon: "folder",
+                            action: {
+                                if let path = selectFolder(
+                                    title: "Choose Clone Destination",
+                                    message: "Choose the parent directory where the repository should be cloned.",
+                                    startingAt: gitCloneParentPath
+                                ) {
+                                    gitCloneParentPath = path
+                                }
+                            },
+                            style: .secondary
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Folder name override")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    TextField("Optional", text: $gitCloneFolderName)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                HStack(spacing: CursorTheme.spaceS) {
+                    ActionButton(
+                        title: isProjectHubBusy ? "Cloning..." : "Clone Project",
+                        icon: "arrow.down.doc",
+                        action: { cloneProjectFromHub(runSetupAgent: false) },
+                        isDisabled: isProjectHubBusy || gitRepositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        help: "Clone the repository and open it in Tasks",
+                        style: .primary
+                    )
+                    ActionButton(
+                        title: isProjectHubBusy ? "Cloning..." : "Clone + Setup",
+                        icon: "wand.and.stars",
+                        action: { cloneProjectFromHub(runSetupAgent: true) },
+                        isDisabled: isProjectHubBusy || gitRepositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        help: "Clone the repository and launch the setup agent",
+                        style: .accent
+                    )
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+    }
+
+    private func projectHubTag(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
+            .padding(.vertical, CursorTheme.paddingBadgeVertical)
+            .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
     }
 
     // MARK: - Splash content (no projects: invite to add a project)
@@ -1699,10 +2456,10 @@ struct PopoutView: View {
                 }
 
                 ActionButton(
-                    title: "Add Project",
-                    icon: "plus.circle.fill",
+                    title: "Projects",
+                    icon: "gearshape",
                     action: addProject,
-                    help: "Add a project",
+                    help: "Projects",
                     style: .primary
                 )
             }

@@ -147,8 +147,8 @@ final class TerminalHostStore {
 /// Hosts one terminal session per tab in a single NSView. Uses TerminalHostStore so sessions
 /// persist when the view is recreated (e.g. switching to another terminal and back).
 struct MultiTerminalHostView: NSViewRepresentable {
-    /// (id, workspacePath) for each tab. Order preserved.
-    var tabs: [(id: UUID, workspacePath: String)]
+    /// (id, workspacePath, initialCommand) for each tab. Order preserved. initialCommand runs at startup when non-nil.
+    var tabs: [(id: UUID, workspacePath: String, initialCommand: String?)]
     var selectedID: UUID?
     /// Store that outlives this view; holds containers so shells survive view recreation.
     var store: TerminalHostStore
@@ -181,7 +181,7 @@ struct MultiTerminalHostView: NSViewRepresentable {
                 container = existing
                 existing.embeddedTerminal?.processDelegate = coordinator
             } else {
-                container = makeTerminalContainer(workspacePath: item.workspacePath, initialCommand: nil, coordinator: coordinator)
+                container = makeTerminalContainer(workspacePath: item.workspacePath, initialCommand: item.initialCommand, coordinator: coordinator)
                 store.setContainer(container, for: item.id)
             }
             if container.superview !== host {

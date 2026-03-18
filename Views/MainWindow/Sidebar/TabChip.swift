@@ -81,23 +81,29 @@ struct TabChip: View {
         )
     }
 
+    /// Fixed width so all tab pills align; icon (spinner/symbol) is centered within.
+    private static let iconContainerWidth: CGFloat = 16
+
     private var fullContent: some View {
         HStack(spacing: 6) {
-            if isRunning {
-                LightBlueSpinner(size: 10)
-            } else if latestTurnState == .stopped {
-                Image(systemName: "square.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CursorTheme.semanticError)
-            } else if hasPrompted {
-                Image(systemName: "clock.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(CursorTheme.semanticReview)
-            } else {
-                Image(systemName: "bubble.left")
-                    .font(.system(size: 12))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+            Group {
+                if isRunning {
+                    LightBlueSpinner(size: 10)
+                } else if latestTurnState == .stopped {
+                    Image(systemName: "square.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(CursorTheme.semanticError)
+                } else if hasPrompted {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CursorTheme.semanticReview)
+                } else {
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                }
             }
+            .frame(width: Self.iconContainerWidth, height: 16, alignment: .center)
 
             if let sub = subtitle, !sub.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
@@ -162,7 +168,7 @@ struct TabChip: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                .frame(maxWidth: 160, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             if showClose {

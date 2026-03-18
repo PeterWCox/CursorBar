@@ -9,6 +9,8 @@ private struct ProjectSettingsFile: Codable {
     var startupScript: String?
     /// Commands to run when starting preview; each entry is run in its own terminal (e.g. ["npm run backend", "npm run frontend"]).
     var scripts: [String]?
+    /// Optional display names for each script (e.g. ["backend", "frontend"]). Same length as scripts; used for tab/window titles.
+    var scriptLabels: [String]?
     /// Instructions for the agent when debugging (e.g. "when the terminal is opened" context). Used when creating a debug agent from Preview.
     var debugInstructions: String?
 }
@@ -16,6 +18,8 @@ private struct ProjectSettingsFile: Codable {
 enum ProjectSettingsStorage {
     static let didChangeNotification = Notification.Name("ProjectSettingsStorageDidChange")
     private static var cachedSettingsByWorkspace: [String: ProjectSettingsFile] = [:]
+    /// File modification dates when we cached; if project.json on disk is newer, we re-read so setup agent or manual edits are visible.
+    private static var cachedModDatesByWorkspace: [String: Date] = [:]
 
     private static func normalizedWorkspacePath(_ workspacePath: String) -> String {
         workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -36,15 +40,25 @@ enum ProjectSettingsStorage {
 
     private static func load(workspacePath: String) -> ProjectSettingsFile {
         let normalizedPath = normalizedWorkspacePath(workspacePath)
-        if let cached = cachedSettingsByWorkspace[normalizedPath] {
-            return cached
-        }
-
         migrateCursormetroToMetroIfNeeded(workspacePath: workspacePath)
         let url = projectSettingsURL(workspacePath: workspacePath)
+
+        // If we have a cache, re-read from disk when project.json was modified (e.g. by Configure Setup or manual edit).
+        if let cached = cachedSettingsByWorkspace[normalizedPath],
+           let cachedDate = cachedModDatesByWorkspace[normalizedPath] {
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let modDate = attrs[.modificationDate] as? Date,
+               modDate <= cachedDate {
+                return cached
+            }
+            cachedSettingsByWorkspace[normalizedPath] = nil
+            cachedModDatesByWorkspace[normalizedPath] = nil
+        }
+
         if let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(ProjectSettingsFile.self, from: data) {
             cachedSettingsByWorkspace[normalizedPath] = decoded
+            cachedModDatesByWorkspace[normalizedPath] = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
             return decoded
         }
         // Migrate from legacy .cursor/project-settings.json
@@ -54,8 +68,9 @@ enum ProjectSettingsStorage {
             save(workspacePath: workspacePath, legacy)
             return legacy
         }
-        let empty = ProjectSettingsFile(debugUrl: nil, startupScript: nil, scripts: nil, debugInstructions: nil)
+        let empty = ProjectSettingsFile(debugUrl: nil, startupScript: nil, scripts: nil, scriptLabels: nil, debugInstructions: nil)
         cachedSettingsByWorkspace[normalizedPath] = empty
+        cachedModDatesByWorkspace[normalizedPath] = nil
         return empty
     }
 
@@ -67,6 +82,7 @@ enum ProjectSettingsStorage {
         try? data.write(to: url)
         let normalizedPath = normalizedWorkspacePath(workspacePath)
         cachedSettingsByWorkspace[normalizedPath] = file
+        cachedModDatesByWorkspace[normalizedPath] = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
         NotificationCenter.default.post(
             name: didChangeNotification,
             object: nil,
@@ -124,6 +140,20 @@ enum ProjectSettingsStorage {
         let trimmed = scripts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         file.scripts = trimmed.isEmpty ? nil : trimmed
         save(workspacePath: workspacePath, file)
+    }
+
+    /// Returns display names for each startup script (for tab and window titles). Same length as `getStartupScripts`; uses `scriptLabels` from project.json when present and valid, otherwise "1", "2", … or "Preview" for a single script.
+    static func getStartupScriptDisplayLabels(workspacePath: String) -> [String] {
+        let scripts = getStartupScripts(workspacePath: workspacePath)
+        guard !scripts.isEmpty else { return [] }
+        let raw = load(workspacePath: workspacePath).scriptLabels
+        return (0..<scripts.count).map { index in
+            if let labels = raw, index < labels.count {
+                let label = labels[index].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !label.isEmpty { return label }
+            }
+            return scripts.count > 1 ? "\(index + 1)" : "Preview"
+        }
     }
 
     // MARK: - Debug instructions (prefilled when creating debug agent from Preview)

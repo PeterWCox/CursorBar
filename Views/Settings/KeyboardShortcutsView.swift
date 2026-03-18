@@ -44,26 +44,11 @@ struct KeyboardShortcutsContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            comingSoonBanner
             ForEach(Self.sections, id: \.title) { section in
                 KeyboardShortcutsContentView.sectionView(title: section.title, rows: section.rows)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var comingSoonBanner: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(CursorTheme.brandBlue)
-            Text("Ability to customise these shortcuts is coming soon.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CursorTheme.brandBlue.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     fileprivate static func sectionView(title: String, rows: [ShortcutRow]) -> some View {

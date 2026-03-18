@@ -7,8 +7,6 @@ import Inject
 // MARK: - Settings modal with sidebar panes
 
 private enum SettingsPane: String, CaseIterable, Identifiable {
-    case general = "General"
-    case projects = "Projects"
     case models = "Models"
     case keyboardShortcuts = "Shortcuts"
     case about = "About"
@@ -17,8 +15,6 @@ private enum SettingsPane: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
-        case .general: return "slider.horizontal.3"
-        case .projects: return "folder"
         case .models: return "cpu"
         case .keyboardShortcuts: return "command"
         case .about: return "info.circle"
@@ -33,7 +29,7 @@ struct SettingsModalView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
-    @State private var selectedPane: SettingsPane = .general
+    @State private var selectedPane: SettingsPane = .models
 
     private let sidebarWidth: CGFloat = 200
 
@@ -101,14 +97,6 @@ struct SettingsModalView: View {
     private var contentArea: some View {
         Group {
             switch selectedPane {
-            case .general:
-                SettingsPaneContainer {
-                    GeneralSettingsPaneContent()
-                }
-            case .projects:
-                SettingsPaneContainer {
-                    ProjectsSettingsPaneContent()
-                }
             case .models:
                 SettingsPaneContainer {
                     ModelsSettingsPaneContent()
@@ -138,195 +126,6 @@ private struct SettingsPaneContainer<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(24)
         }
-    }
-}
-
-// MARK: - General pane
-
-private struct GeneralSettingsPaneContent: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
-    @AppStorage(AppPreferences.sidebarOnRightKey) private var sidebarOnRight: Bool = false
-
-    private var resolvedProjectsRootPath: String {
-        AppPreferences.resolvedProjectsRootPath(projectsRootPath)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Sidebar position")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    .textCase(.uppercase)
-                    .tracking(0.6)
-
-                Text("Show the agent tabs sidebar and logo on the left or right. Collapse with Cmd+S or Cmd+B.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Picker("", selection: $sidebarOnRight) {
-                    Text("Left").tag(false)
-                    Text("Right").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
-            }
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Project picker root")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                        .textCase(.uppercase)
-                        .tracking(0.6)
-
-                    Text("Direct subfolders from this directory appear in the workspace picker.")
-                        .font(.system(size: 14))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        Button(action: { selectProjectsRootFolder() }) {
-                            HStack(spacing: 12) {
-                                Text(resolvedProjectsRootPath)
-                                    .font(.system(size: 13))
-                                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: "folder.badge.plus")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(CursorTheme.editor(for: colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if projectsRootPath != AppPreferences.defaultProjectsRootPath {
-                            Button("Reset to default") {
-                                projectsRootPath = AppPreferences.defaultProjectsRootPath
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(16)
-                    .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                    )
-
-                    Text("Current root: \(resolvedProjectsRootPath)")
-                        .font(.system(size: 12))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                        .textSelection(.enabled)
-                }
-            }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func selectProjectsRootFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.title = "Select Projects Root"
-        panel.message = "Choose the directory whose subfolders should be shown in the workspace picker."
-        panel.directoryURL = URL(fileURLWithPath: resolvedProjectsRootPath)
-
-        if panel.runModal() == .OK, let url = panel.url {
-            projectsRootPath = url.path
-        }
-    }
-}
-
-// MARK: - Projects pane (visibility toggles for agent sidebar)
-
-private struct ProjectsSettingsPaneContent: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @EnvironmentObject var appState: AppState
-    @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
-
-    private var hiddenPaths: Set<String> {
-        AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
-    }
-
-    private func isVisible(projectPath: String) -> Bool {
-        !hiddenPaths.contains(AppPreferences.normalizedProjectPath(projectPath))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Choose which projects appear in the agent sidebar. Uncheck to hide a project from the sidebar; it remains in your workspace list.")
-                .font(.system(size: 14))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-
-            if appState.tabManager.projects.isEmpty {
-                Text("No projects loaded. Add or open projects from the workspace picker; they will appear here.")
-                    .font(.system(size: 14))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                    .padding(.vertical, 8)
-            } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(appState.tabManager.projects, id: \.path) { project in
-                        let path = project.path
-                        let displayName = appState.workspaceDisplayName(for: path)
-                        let normalized = AppPreferences.normalizedProjectPath(path)
-                        HStack(spacing: 12) {
-                            Image(systemName: "folder")
-                                .font(.system(size: 14))
-                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                .symbolRenderingMode(.hierarchical)
-                            Text(displayName.isEmpty ? (path as NSString).lastPathComponent : displayName)
-                                .font(.system(size: 14))
-                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer(minLength: 8)
-                            Toggle("", isOn: Binding(
-                                get: { isVisible(projectPath: path) },
-                                set: { visible in
-                                    var hidden = hiddenPaths
-                                    if visible {
-                                        hidden.remove(normalized)
-                                    } else {
-                                        hidden.insert(normalized)
-                                    }
-                                    hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
-                                }
-                            ))
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .labelsHidden()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-
-                        if project.id != appState.tabManager.projects.last?.id {
-                            Divider()
-                                .background(CursorTheme.border(for: colorScheme))
-                                .padding(.leading, 12)
-                        }
-                    }
-                }
-                .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.6), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

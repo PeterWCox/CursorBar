@@ -10,10 +10,13 @@ struct OutputScrollView<Content: View>: View {
     @State private var bottomVisibleID: AnyHashable?
     /// When true, we just programmatically scrolled (auto-scroll); hide the button briefly so it doesn’t flash.
     @State private var isAutoScrolling = false
+    /// When false, we don't follow new messages (user scrolled up). Tapping scroll-to-bottom turns this back on.
+    @State private var autoScrollEnabled = true
 
-    /// Show the scroll-to-bottom button when there is content, user is not at bottom, and we’re not in the middle of auto-scrolling.
+    /// Show the scroll-to-bottom button only when auto-scroll is off (user scrolled up). When following new content, never show it to avoid flashing.
     private var showScrollButton: Bool {
         guard !tab.turns.isEmpty else { return false }
+        guard !autoScrollEnabled else { return false }
         guard !isAutoScrolling else { return false }
         return bottomVisibleID != nil && bottomVisibleID != AnyHashable("outputEnd")
     }
@@ -29,6 +32,7 @@ struct OutputScrollView<Content: View>: View {
             .overlay(alignment: .bottom) {
                 if showScrollButton {
                     Button {
+                        autoScrollEnabled = true
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("outputEnd", anchor: .bottom)
                         }
@@ -49,7 +53,13 @@ struct OutputScrollView<Content: View>: View {
                     .padding(.bottom, 12)
                 }
             }
+            .onChange(of: bottomVisibleID) { _, newID in
+                if !isAutoScrolling, newID != nil, newID != AnyHashable("outputEnd") {
+                    autoScrollEnabled = false
+                }
+            }
             .onChange(of: scrollToken) { _, _ in
+                guard autoScrollEnabled else { return }
                 isAutoScrolling = true
                 proxy.scrollTo("outputEnd", anchor: .bottom)
                 Task { @MainActor in
@@ -58,7 +68,8 @@ struct OutputScrollView<Content: View>: View {
                 }
             }
             .onAppear {
-                // When we focus this agent (tab selected), start at bottom; if work is ongoing, existing requestAutoScroll will keep autoscroll.
+                // When we focus this agent (tab selected), start at bottom and re-enable follow; if work is ongoing, existing requestAutoScroll will keep autoscroll.
+                autoScrollEnabled = true
                 isAutoScrolling = true
                 proxy.scrollTo("outputEnd", anchor: .bottom)
                 Task { @MainActor in

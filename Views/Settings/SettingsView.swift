@@ -42,7 +42,7 @@ struct SettingsView: View {
             } header: {
                 Text("Project settings")
             } footer: {
-                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup scripts are in .metro/project.json (scripts array). Start Preview runs each line in its own terminal (e.g. backend + frontend).")
+                Text("View in Browser URL opens in Chrome when you use \"Open in Browser\". Startup scripts are in .metro/project.json (scripts array). Preview runs each script in its own in-app tab (e.g. backend + frontend).")
             }
 
             Section {

@@ -165,21 +165,27 @@ final class AgentSessionStore: ObservableObject {
 
         let task = Task {
             do {
-                let provider = AgentProviders.provider(for: currentTab.providerID)
-
+                let providerID = currentTab.providerID
                 if currentTab.conversationID == nil {
-                    let chatId = try provider.createConversation()
+                    let chatId = try await Task.detached(priority: .userInitiated) {
+                        let p = AgentProviders.provider(for: providerID)
+                        return try p.createConversation()
+                    }.value
                     guard currentTab.activeRunID == runID else { return }
                     currentTab.conversationID = chatId
                 }
 
                 let modelToUse = currentTab.modelId ?? selectedModel
-                let stream = try provider.stream(request: AgentStreamRequest(
+                let streamRequest = AgentStreamRequest(
                     prompt: trimmed,
                     workspacePath: currentTab.workspacePath,
                     modelID: modelToUse,
                     conversationID: currentTab.conversationID
-                ))
+                )
+                let stream = try await Task.detached(priority: .userInitiated) {
+                    let p = AgentProviders.provider(for: providerID)
+                    return try p.stream(request: streamRequest)
+                }.value
 
                 guard currentTab.activeRunID == runID, currentTab.activeTurnID == turnID else { return }
 
@@ -298,8 +304,11 @@ final class AgentSessionStore: ObservableObject {
                     currentTab.pendingCompressRunID = nil
 
                     do {
-                        let provider = AgentProviders.provider(for: currentTab.providerID)
-                        let newId = try provider.createConversation()
+                        let providerID = currentTab.providerID
+                        let newId = try await Task.detached(priority: .userInitiated) {
+                            let p = AgentProviders.provider(for: providerID)
+                            return try p.createConversation()
+                        }.value
                         currentTab.conversationID = newId
                         currentTab.turns = []
                         currentTab.cachedConversationCharacterCount = 0

@@ -92,7 +92,6 @@ final class TasksListStoreTests: XCTestCase {
         store.showNewTaskComposer(selecting: .backlog)
         store.newTaskDraft = "Draft"
         store.newTaskModelId = "custom-model"
-        store.previewRunningInExternalTerminal = true
         store.expandedCompletedSections = ["Older"]
         store.expandedDeletedSections = ["Older"]
 
@@ -101,7 +100,6 @@ final class TasksListStoreTests: XCTestCase {
         XCTAssertFalse(store.isAddingNewTask)
         XCTAssertEqual(store.newTaskDraft, "")
         XCTAssertEqual(store.newTaskModelId, AvailableModels.autoID)
-        XCTAssertFalse(store.previewRunningInExternalTerminal)
         XCTAssertEqual(store.expandedCompletedSections, ["Today"])
         XCTAssertEqual(store.expandedDeletedSections, ["Today"])
         XCTAssertEqual(store.selectedTasksTab, .inProgress)

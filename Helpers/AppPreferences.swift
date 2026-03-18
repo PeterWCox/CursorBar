@@ -29,6 +29,7 @@ enum PreferredAppearance: String, CaseIterable, Identifiable {
 
 enum AppPreferences {
     static let projectsRootPathKey = "projectsRootPath"
+    static let projectScanRootsKey = "projectScanRoots"
     static let preferredTerminalAppKey = "preferredTerminalApp"
     static let preferredAppearanceKey = "preferredAppearance"
     /// Key for placing the agent tabs sidebar and logo on the right (mirrored layout). Persisted via UserDefaults.
@@ -50,10 +51,50 @@ enum AppPreferences {
             .path
     }
 
+    static var defaultProjectScanRoots: [String] {
+        [defaultProjectsRootPath]
+    }
+
+    static let defaultProjectScanRootsRaw: String = ""
+
     static func resolvedProjectsRootPath(_ path: String) -> String {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         let expanded = (trimmed as NSString).expandingTildeInPath
         return expanded.isEmpty ? defaultProjectsRootPath : expanded
+    }
+
+    static func projectScanRoots(from raw: String) -> [String] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        var seen = Set<String>()
+        return trimmed
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { ($0 as NSString).expandingTildeInPath }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+    }
+
+    static func rawFrom(projectScanRoots roots: [String]) -> String {
+        var seen = Set<String>()
+        return roots
+            .map { normalizedProjectPath($0) }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+            .joined(separator: ",")
+    }
+
+    static func resolvedProjectScanRoots(raw: String, legacyRootPath: String) -> [String] {
+        let stored = projectScanRoots(from: raw)
+        if !stored.isEmpty {
+            return stored
+        }
+        let legacyResolved = resolvedProjectsRootPath(legacyRootPath)
+        return legacyResolved.isEmpty ? defaultProjectScanRoots : [legacyResolved]
+    }
+
+    static func preferredProjectBrowserRoot(raw: String, legacyRootPath: String) -> String {
+        resolvedProjectScanRoots(raw: raw, legacyRootPath: legacyRootPath).first ?? defaultProjectsRootPath
     }
 
     /// Parses the stored disabled model IDs string (comma-separated) into a set. Empty or missing value → all models shown.

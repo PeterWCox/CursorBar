@@ -160,6 +160,36 @@ func loadDevFolders(rootPath: String) -> [URL] {
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 }
 
+/// Returns Metro projects discovered under any of the configured scan roots, deduplicated by path.
+func loadDevFolders(rootPaths: [String]) -> [URL] {
+    var seen = Set<String>()
+    return rootPaths
+        .flatMap(loadDevFolders(rootPath:))
+        .filter { seen.insert($0.path).inserted }
+        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+}
+
+/// Returns true when the workspace contains a `.metro` directory.
+func hasMetroDirectory(workspacePath: String) -> Bool {
+    let metroDir = URL(fileURLWithPath: workspacePath).appendingPathComponent(".metro", isDirectory: true)
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: metroDir.path, isDirectory: &isDir) && isDir.boolValue
+}
+
+/// Returns true when the workspace has `.metro/project.json`.
+func hasMetroProjectSettings(workspacePath: String) -> Bool {
+    let settingsURL = URL(fileURLWithPath: workspacePath)
+        .appendingPathComponent(".metro", isDirectory: true)
+        .appendingPathComponent("project.json", isDirectory: false)
+    return FileManager.default.fileExists(atPath: settingsURL.path)
+}
+
+struct WorkspaceOperationError: LocalizedError {
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 /// Reads the default branch name from .git/HEAD (e.g. "ref: refs/heads/main" -> "main"). Returns nil if not a symbolic ref or not a git repo.
 func gitDefaultBranchName(workspacePath: String) -> String? {
     let headURL = URL(fileURLWithPath: workspacePath).appendingPathComponent(".git/HEAD", isDirectory: false)
@@ -277,6 +307,104 @@ func gitInit(workspacePath: String) -> String? {
     guard process.terminationStatus != 0 else { return nil }
     let err = (try? String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)) ?? "Unknown error"
     return err.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// Creates the given project directory inside the parent directory if it doesn't already exist.
+/// Returns the created directory path on success or an error message on failure.
+func createProjectDirectory(parentPath: String, folderName: String) -> Result<String, WorkspaceOperationError> {
+    let resolvedParent = (parentPath as NSString).expandingTildeInPath
+    let trimmedFolderName = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedFolderName.isEmpty else {
+        return .failure(WorkspaceOperationError(message: "Project name cannot be empty."))
+    }
+
+    let parentURL = URL(fileURLWithPath: resolvedParent)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: parentURL.path, isDirectory: &isDir), isDir.boolValue else {
+        return .failure(WorkspaceOperationError(message: "Choose a valid destination folder."))
+    }
+
+    let projectURL = parentURL.appendingPathComponent(trimmedFolderName, isDirectory: true)
+    guard !FileManager.default.fileExists(atPath: projectURL.path) else {
+        return .failure(WorkspaceOperationError(message: "A folder named \"\(trimmedFolderName)\" already exists there."))
+    }
+
+    do {
+        try FileManager.default.createDirectory(at: projectURL, withIntermediateDirectories: true)
+        return .success(projectURL.path)
+    } catch {
+        return .failure(WorkspaceOperationError(message: error.localizedDescription))
+    }
+}
+
+/// Clones a Git repository into the destination folder. Returns the cloned directory path on success.
+func cloneRepository(repositoryURL: String, destinationParentPath: String, folderName: String?) -> Result<String, WorkspaceOperationError> {
+    let trimmedURL = repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedURL.isEmpty else {
+        return .failure(WorkspaceOperationError(message: "Enter a repository URL."))
+    }
+
+    let resolvedParent = (destinationParentPath as NSString).expandingTildeInPath
+    let parentURL = URL(fileURLWithPath: resolvedParent)
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: parentURL.path, isDirectory: &isDir), isDir.boolValue else {
+        return .failure(WorkspaceOperationError(message: "Choose a valid destination folder."))
+    }
+
+    let trimmedFolderName = folderName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let destinationURL = trimmedFolderName.isEmpty
+        ? nil
+        : parentURL.appendingPathComponent(trimmedFolderName, isDirectory: true)
+    if let destinationURL, FileManager.default.fileExists(atPath: destinationURL.path) {
+        return .failure(WorkspaceOperationError(message: "A folder named \"\(trimmedFolderName)\" already exists there."))
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    var arguments = ["clone", trimmedURL]
+    if let destinationURL {
+        arguments.append(destinationURL.path)
+    }
+    process.arguments = arguments
+    process.currentDirectoryURL = parentURL
+    let errorPipe = Pipe()
+    process.standardError = errorPipe
+    process.standardOutput = Pipe()
+
+    do {
+        try process.run()
+    } catch {
+        return .failure(WorkspaceOperationError(message: error.localizedDescription))
+    }
+
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let message = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return .failure(WorkspaceOperationError(message: message?.isEmpty == false ? message! : "Git clone failed."))
+    }
+
+    if let destinationURL {
+        return .success(destinationURL.path)
+    }
+
+    guard let repositoryName = inferredRepositoryFolderName(from: trimmedURL) else {
+        return .failure(WorkspaceOperationError(message: "Repository cloned, but the destination folder could not be determined."))
+    }
+    return .success(parentURL.appendingPathComponent(repositoryName, isDirectory: true).path)
+}
+
+private func inferredRepositoryFolderName(from repositoryURL: String) -> String? {
+    let trimmed = repositoryURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let lastComponent = trimmed
+        .split(separator: "/")
+        .last
+        .map(String.init)?
+        .replacingOccurrences(of: ".git", with: "")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    return lastComponent?.isEmpty == false ? lastComponent : nil
 }
 
 /// Returns the GitHub repository web URL (https://github.com/owner/repo) if the workspace has a GitHub remote; nil otherwise.
@@ -561,6 +689,12 @@ private func commandForScript(script: String, projectRoot: String) -> String {
     return "cd \(quotedPath) && /bin/bash -c \(quotedScript)"
 }
 
+/// Returns the shell command to run one startup script in the project (for embedded terminal). Cwd is project root.
+func startupCommandForScript(script: String, workspacePath: String) -> String {
+    let root = projectRootForTerminal(workspacePath: workspacePath)
+    return commandForScript(script: script, projectRoot: root)
+}
+
 /// Launches each of the project's startup scripts in the preferred terminal (first in front window, rest in new tabs).
 /// Returns an error message on failure, nil on success.
 func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerminalApp) -> String? {
@@ -632,11 +766,12 @@ func previewWindowTitlePrefix(workspacePath: String) -> String {
     return "Cursor Metro Preview - \(name)"
 }
 
-/// Window title for one preview terminal (scriptIndex is 0-based; display as 1-based in title).
+/// Window title for one preview terminal (scriptIndex is 0-based). Uses scriptLabels when set (e.g. "backend"), otherwise " - 1", " - 2", or no suffix for a single script.
 func previewWindowTitle(workspacePath: String, scriptIndex: Int) -> String {
     let root = projectRootForTerminal(workspacePath: workspacePath)
-    let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
-    let suffix = scripts.count > 1 ? " - \(scriptIndex + 1)" : ""
+    let labels = ProjectSettingsStorage.getStartupScriptDisplayLabels(workspacePath: root)
+    guard scriptIndex < labels.count else { return previewWindowTitlePrefix(workspacePath: workspacePath) }
+    let suffix = labels.count > 1 ? " - \(labels[scriptIndex])" : ""
     return previewWindowTitlePrefix(workspacePath: workspacePath) + suffix
 }
 

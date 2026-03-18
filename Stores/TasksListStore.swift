@@ -114,7 +114,6 @@ final class TasksListStore: ObservableObject {
     @Published var expandedCompletedSections: Set<String> = ["Today"]
     @Published var expandedDeletedSections: Set<String> = ["Today"]
     @Published var selectedTasksTab: TasksListTab = .inProgress
-    @Published var previewRunningInExternalTerminal: Bool = false
 
     private var tasks: [ProjectTask] = []
     private var deletedTasksList: [ProjectTask] = []
@@ -227,7 +226,7 @@ final class TasksListStore: ObservableObject {
 
     func cancelNewTask() {
         recordHangEvent("tasks-cancel-new-task")
-        newTaskDraft = ""
+        // Keep newTaskDraft so it can be restored when Add Task is opened again
         newTaskModelId = AvailableModels.autoID
         isAddingNewTask = false
     }
@@ -236,7 +235,7 @@ final class TasksListStore: ObservableObject {
         if let tab {
             selectedTasksTab = tab
         }
-        newTaskDraft = ""
+        // Keep existing newTaskDraft so cancelled drafts are restored
         newTaskModelId = AvailableModels.autoID
         isAddingNewTask = true
     }
@@ -305,7 +304,6 @@ final class TasksListStore: ObservableObject {
         isAddingNewTask = false
         newTaskDraft = ""
         newTaskModelId = AvailableModels.autoID
-        previewRunningInExternalTerminal = false
         expandedCompletedSections = ["Today"]
         expandedDeletedSections = ["Today"]
         selectedTasksTab = .inProgress
