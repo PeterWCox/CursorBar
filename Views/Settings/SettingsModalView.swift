@@ -129,12 +129,13 @@ private struct SettingsPaneContainer<Content: View>: View {
     }
 }
 
-// MARK: - Models pane (Cursor-like: toggles, default set, View All)
+// MARK: - Models pane (Cursor-like: default model, toggles, View All)
 
 private struct ModelsSettingsPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject var appState: AppState
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
+    @AppStorage(AppPreferences.defaultModelIdKey) private var defaultModelId: String = AppPreferences.defaultDefaultModelId
     @State private var modelSearchText: String = ""
     @State private var showAllModels: Bool = false
 
@@ -149,6 +150,15 @@ private struct ModelsSettingsPaneContent: View {
             defaultEnabledModelIds: AgentProviders.defaultEnabledModelIds(for: .cursor),
             defaultModelID: AgentProviders.defaultModelID(for: .cursor)
         )
+    }
+
+    /// Options for the default model picker: Auto plus all visible (enabled) models, without duplicating Auto.
+    private var defaultModelOptions: [ModelOption] {
+        let disabled = effectiveDisabled()
+        let visible = appState.visibleModels(for: .cursor, disabledIds: disabled)
+            .filter { $0.id != AvailableModels.autoID }
+        let auto = ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
+        return [auto] + visible
     }
 
     private var displayedModels: [ModelOption] {
@@ -166,7 +176,20 @@ private struct ModelsSettingsPaneContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Search and refresh
+            // Default model: label above dropdown (no badge)
+            ModelsSettingsPaneContent.defaultModelSectionView(
+                colorScheme: colorScheme,
+                defaultModelId: $defaultModelId,
+                options: defaultModelOptions
+            )
+
+            // Available Models section
+            Text("AVAILABLE MODELS")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .textCase(.uppercase)
+                .tracking(0.6)
+
             HStack(spacing: 8) {
                 TextField("Search models...", text: $modelSearchText)
                     .textFieldStyle(.roundedBorder)
@@ -232,6 +255,51 @@ private struct ModelsSettingsPaneContent: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             appState.loadModelsFromCLI()
+        }
+        .onChange(of: defaultModelOptions.count) { _, _ in
+            if !defaultModelOptions.isEmpty && !defaultModelOptions.contains(where: { $0.id == defaultModelId }) {
+                defaultModelId = AppPreferences.defaultDefaultModelId
+            }
+        }
+    }
+
+    /// Default model: "Default Model" label above a plain dropdown (no badge).
+    fileprivate static func defaultModelSectionView(
+        colorScheme: ColorScheme,
+        defaultModelId: Binding<String>,
+        options: [ModelOption]
+    ) -> some View {
+        let resolvedId = options.contains(where: { $0.id == defaultModelId.wrappedValue })
+            ? defaultModelId.wrappedValue
+            : AvailableModels.autoID
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Default Model")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .textCase(.uppercase)
+                .tracking(0.6)
+
+            Menu {
+                ForEach(options, id: \.id) { model in
+                    Button {
+                        defaultModelId.wrappedValue = model.id
+                    } label: {
+                        HStack(spacing: 8) {
+                            if model.id == resolvedId {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(model.label)
+                        }
+                    }
+                }
+            } label: {
+                let selected = options.first { $0.id == resolvedId } ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
+                Text(selected.label)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 }

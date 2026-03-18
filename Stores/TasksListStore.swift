@@ -110,7 +110,7 @@ final class TasksListStore: ObservableObject {
     @Published var editingDraft: String = ""
     @Published var isAddingNewTask: Bool = false
     @Published var newTaskDraft: String = ""
-    @Published var newTaskModelId: String = AvailableModels.autoID
+    @Published var newTaskModelId: String = AppPreferences.defaultModelId
     @Published var expandedCompletedSections: Set<String> = ["Today"]
     @Published var expandedDeletedSections: Set<String> = ["Today"]
     @Published var selectedTasksTab: TasksListTab = .inProgress
@@ -220,14 +220,14 @@ final class TasksListStore: ObservableObject {
 
         reload()
         newTaskDraft = ""
-        newTaskModelId = AvailableModels.autoID
+        newTaskModelId = AppPreferences.defaultModelId
         isAddingNewTask = false
     }
 
     func cancelNewTask() {
         recordHangEvent("tasks-cancel-new-task")
         // Keep newTaskDraft so it can be restored when Add Task is opened again
-        newTaskModelId = AvailableModels.autoID
+        newTaskModelId = AppPreferences.defaultModelId
         isAddingNewTask = false
     }
 
@@ -235,8 +235,8 @@ final class TasksListStore: ObservableObject {
         if let tab {
             selectedTasksTab = tab
         }
-        // Keep existing newTaskDraft so cancelled drafts are restored
-        newTaskModelId = AvailableModels.autoID
+        // Keep existing newTaskDraft so cancelled drafts are restored; default model from Settings.
+        newTaskModelId = AppPreferences.defaultModelId
         isAddingNewTask = true
     }
 
@@ -303,7 +303,7 @@ final class TasksListStore: ObservableObject {
         editingDraft = ""
         isAddingNewTask = false
         newTaskDraft = ""
-        newTaskModelId = AvailableModels.autoID
+        newTaskModelId = AppPreferences.defaultModelId
         expandedCompletedSections = ["Today"]
         expandedDeletedSections = ["Today"]
         selectedTasksTab = .inProgress

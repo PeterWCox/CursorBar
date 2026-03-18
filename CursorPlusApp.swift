@@ -82,6 +82,63 @@ struct BrandAppIconView: View {
     }
 }
 
+/// Computes the total number of tasks in the "review" stage (agent finished, awaiting user) across all open projects.
+enum TasksInReviewCount {
+    /// Normalize path so "~/foo", "/Users/me/foo", and "/Users/me/foo/" all match when comparing tab vs project paths.
+    private static func normalizedPath(_ path: String) -> String {
+        let expanded = (path as NSString).expandingTildeInPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (expanded as NSString).standardizingPath
+    }
+
+    @MainActor
+    static func count(tabManager: TabManager, projectTasksStore: ProjectTasksStore) -> Int {
+        let paths = tabManager.projects.map(\.path)
+        return paths.reduce(0) { total, workspacePath in
+            let tasks = projectTasksStore.tasks(for: workspacePath).filter { $0.taskState == .inProgress }
+            let linkedStatuses = linkedStatusesForWorkspace(workspacePath, tabManager: tabManager, projectTasksStore: projectTasksStore)
+            // Only review (agent finished); exclude processing, stopped, todo, none.
+            return total + tasks.filter { linkedStatuses[$0.id] == .review }.count
+        }
+    }
+
+    @MainActor
+    private static func linkedTaskState(for tab: AgentTab, taskStatesByID: [UUID: TaskState]) -> AgentTaskState? {
+        guard let taskID = tab.linkedTaskID else { return nil }
+        guard let taskState = taskStatesByID[taskID] else { return nil }
+        if taskState == .backlog { return .none }
+        if tab.isRunning { return .processing }
+        if tab.turns.last?.displayState == .stopped { return .stopped }
+        if tab.turns.last?.displayState == .completed { return .review }
+        return .todo
+    }
+
+    @MainActor
+    private static func linkedTaskState(for savedTab: SavedAgentTab, taskStatesByID: [UUID: TaskState]) -> AgentTaskState? {
+        guard let taskID = savedTab.linkedTaskID else { return nil }
+        guard let taskState = taskStatesByID[taskID] else { return nil }
+        if taskState == .backlog { return .none }
+        if savedTab.restoredLastTurnState == .stopped { return .stopped }
+        if savedTab.restoredLastTurnState == .completed { return .review }
+        return .todo
+    }
+
+    @MainActor
+    private static func linkedStatusesForWorkspace(_ workspacePath: String, tabManager: TabManager, projectTasksStore: ProjectTasksStore) -> [UUID: AgentTaskState] {
+        let taskStatesByID = projectTasksStore.taskStatesByID(for: workspacePath)
+        let normalized = normalizedPath(workspacePath)
+        var result: [UUID: AgentTaskState] = [:]
+        for savedTab in tabManager.recentlyClosedTabs where normalizedPath(savedTab.workspacePath) == normalized {
+            guard let taskID = savedTab.linkedTaskID else { continue }
+            result[taskID] = linkedTaskState(for: savedTab, taskStatesByID: taskStatesByID)
+        }
+        for tab in tabManager.tabs where normalizedPath(tab.workspacePath) == normalized {
+            guard let taskID = tab.linkedTaskID else { continue }
+            result[taskID] = linkedTaskState(for: tab, taskStatesByID: taskStatesByID)
+        }
+        return result
+    }
+}
+
 enum BrandStatusIcon {
     /// Menubar icon: uses the dedicated branded icon asset for crisp small-size rendering.
     static func makeImage(size: CGFloat = 22) -> NSImage {
@@ -167,6 +224,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let projectSettingsStore = ProjectSettingsStore()
     private var cancellables = Set<AnyCancellable>()
     private var requestNewTaskObserver: NSObjectProtocol?
+    private var tasksStorageObserver: NSObjectProtocol?
     private var openInBrowserKeyMonitor: Any?
     private var openInCursorKeyMonitor: Any?
     private var savedExpandedPanelWidth: CGFloat = 720
@@ -237,6 +295,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
 
+        appState.tabManager.$tabs
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshDockBadge()
+            }
+            .store(in: &cancellables)
+        appState.tabManager.tabStateDidChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshDockBadge()
+            }
+            .store(in: &cancellables)
+
+        tasksStorageObserver = NotificationCenter.default.addObserver(
+            forName: ProjectTasksStorage.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshDockBadge()
+        }
+
         requestNewTaskObserver = NotificationCenter.default.addObserver(
             forName: FloatingPanel.requestNewTaskNotification,
             object: panel,
@@ -268,6 +348,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         appState.loadModelsFromCLI()
+        refreshDockBadge()
     }
 
     func applicationWillUpdate(_ notification: Notification) {
@@ -359,6 +440,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func quitApp() {
         NSApp.terminate(nil)
+    }
+
+    /// Updates the dock icon badge to show how many tasks are in the review stage (like unread count).
+    private func refreshDockBadge() {
+        let count = TasksInReviewCount.count(tabManager: appState.tabManager, projectTasksStore: projectTasksStore)
+        NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

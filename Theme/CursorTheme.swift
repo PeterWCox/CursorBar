@@ -122,6 +122,8 @@ enum CursorTheme {
     static let gapBetweenSections: CGFloat = 20
     /// Corner radius for cards (task row, raised surfaces).
     static let radiusCard: CGFloat = 12
+    /// Corner radius for panel tab bar selected pill (Tasks, Projects, Preview).
+    static let radiusTabBarPill: CGFloat = 6
     /// Small padding for badges and tags (horizontal).
     static let paddingBadgeHorizontal: CGFloat = 5
     /// Small padding for badges and tags (vertical).

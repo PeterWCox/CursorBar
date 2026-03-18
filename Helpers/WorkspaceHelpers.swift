@@ -309,11 +309,25 @@ func gitInit(workspacePath: String) -> String? {
     return err.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
+/// Sanitizes a project/folder name for safe filesystem use: spaces become hyphens, only letters, numbers, hyphens, and underscores allowed.
+func sanitizedProjectName(_ name: String) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    let withHyphens = trimmed.replacingOccurrences(of: " ", with: "-")
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+    return withHyphens
+        .unicodeScalars
+        .filter { allowed.contains($0) }
+        .map { Character($0) }
+        .reduce(into: "") { $0.append($1) }
+        .replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+}
+
 /// Creates the given project directory inside the parent directory if it doesn't already exist.
 /// Returns the created directory path on success or an error message on failure.
 func createProjectDirectory(parentPath: String, folderName: String) -> Result<String, WorkspaceOperationError> {
     let resolvedParent = (parentPath as NSString).expandingTildeInPath
-    let trimmedFolderName = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedFolderName = sanitizedProjectName(folderName)
     guard !trimmedFolderName.isEmpty else {
         return .failure(WorkspaceOperationError(message: "Project name cannot be empty."))
     }

@@ -38,6 +38,10 @@ enum AppPreferences {
     static let disabledModelIdsKey = "disabledModelIds"
     /// Default value: no models disabled, so all models are shown in the picker.
     static let defaultDisabledModelIdsRaw: String = ""
+    /// Key for the default model used for new tasks/agents (e.g. "auto"). Persisted via UserDefaults when used with @AppStorage.
+    static let defaultModelIdKey = "defaultModelId"
+    /// Default value for default model: "auto" (Auto model).
+    static let defaultDefaultModelId: String = "auto"
     /// Key for project paths to hide from the agent sidebar. Persisted via UserDefaults when used with @AppStorage.
     static let hiddenProjectPathsKey = "hiddenProjectPaths"
     /// Default value: no projects hidden, so all projects are shown in the sidebar.
@@ -143,5 +147,15 @@ enum AppPreferences {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         return (trimmed as NSString).expandingTildeInPath
+    }
+
+    /// Current default model ID for new tasks/agents (e.g. "auto"). Used when a tab or task has no explicit model set.
+    static var defaultModelId: String {
+        get {
+            UserDefaults.standard.string(forKey: defaultModelIdKey) ?? defaultDefaultModelId
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: defaultModelIdKey)
+        }
     }
 }

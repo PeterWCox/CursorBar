@@ -82,39 +82,15 @@ struct ScreenshotThumbnailView: View {
     var body: some View {
         Group {
             if let nsImage = resolvedImage {
-                HStack(alignment: .center, spacing: 6) {
-                    Image(nsImage: nsImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: size.width, height: size.height)
-                        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                        )
-                        .overlay {
-                            if showsPreviewAffordance {
-                                ScreenshotExpandPreviewOverlay(
-                                    cornerRadius: cornerRadius,
-                                    cornerFrameSize: min(size.width, size.height) * 0.36
-                                )
-                            }
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard let onTapPreview else { return }
-                            onTapPreview()
-                        }
-
-                    if onDelete != nil {
-                        Button(action: { onDelete?() }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
-                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                thumbnailContent(nsImage: nsImage)
+            } else if imageURL != nil {
+                // Placeholder while loading from URL (e.g. pasted screenshot in agent composer)
+                thumbnailPlaceholder
+            }
+        }
+        .onAppear {
+            if let imageURL, displayImage == nil {
+                displayImage = ImageAssetCache.shared.screenshot(for: imageURL)
             }
         }
         .task(id: imageURL?.path ?? image?.hash.description ?? "") {
@@ -122,6 +98,74 @@ struct ScreenshotThumbnailView: View {
                 displayImage = ImageAssetCache.shared.screenshot(for: imageURL)
             } else {
                 displayImage = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func thumbnailContent(nsImage: NSImage) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Image(nsImage: nsImage)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: size.width, height: size.height)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+                .overlay {
+                    if showsPreviewAffordance {
+                        ScreenshotExpandPreviewOverlay(
+                            cornerRadius: cornerRadius,
+                            cornerFrameSize: min(size.width, size.height) * 0.36
+                        )
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard let onTapPreview else { return }
+                    onTapPreview()
+                }
+
+            if onDelete != nil {
+                Button(action: { onDelete?() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var thumbnailPlaceholder: some View {
+        HStack(alignment: .center, spacing: 6) {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(CursorTheme.surfaceMuted(for: colorScheme))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+                .overlay {
+                    Image(systemName: "photo")
+                        .font(.system(size: min(size.width, size.height) * 0.4))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                }
+                .frame(width: size.width, height: size.height)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard let onTapPreview else { return }
+                    onTapPreview()
+                }
+
+            if onDelete != nil {
+                Button(action: { onDelete?() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                }
+                .buttonStyle(.plain)
             }
         }
     }

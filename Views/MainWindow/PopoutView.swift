@@ -26,9 +26,11 @@ Set up Cursor Metro for this project from scratch and make it fully runnable for
 
 3) If this is a web app, add or update the `"debugUrl"` field in `.metro/project.json` with the URL where the app is served (for example `http://localhost:3000`).
 
-4) Detect the project type from the repo and configure startup commands that are **self-contained and ready to run in a fresh terminal**. Do not assume the user has already activated a virtual environment, sourced a shell file, or run install steps manually.
+4) **Port cleanup:** For each script, ensure the ports it will use are free before starting. Include in the script string commands to kill any process already bound to those ports—for example prefix with `lsof -ti:PORT | xargs kill -9 2>/dev/null; ` (using the actual port number, e.g. 3000, 5000). Determine the port from the app's config (e.g. package.json, Vite/Next config, or framework default). Use `2>/dev/null` so that if no process is using the port, the command does not fail. Example: `"lsof -ti:3000 | xargs kill -9 2>/dev/null; npm run dev"`.
 
-5) If any backend or service uses Python, the generated startup command must take care of the Python environment for the user:
+5) Detect the project type from the repo and configure startup commands that are **self-contained and ready to run in a fresh terminal**. Do not assume the user has already activated a virtual environment, sourced a shell file, or run install steps manually.
+
+6) If any backend or service uses Python, the generated startup command must take care of the Python environment for the user:
    - detect the correct backend directory
    - create a local virtual environment automatically if it does not exist
    - prefer the repo's existing convention (`venv`, `.venv`, Poetry, Pipenv, etc.) when clearly present; otherwise default to `.venv`
@@ -39,9 +41,9 @@ Set up Cursor Metro for this project from scratch and make it fully runnable for
    - start Python servers with `python -m ...` when possible (for example `python -m uvicorn ...`) instead of relying on a bare executable being on PATH
    - do not tell the user to activate the venv manually
 
-6) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that Preview runs it in a clean terminal session.
+7) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that Preview runs it in a clean terminal session.
 
-7) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. Always include `scriptLabels` so Preview tabs have clear names (e.g. "backend", "frontend" for multi-service apps, or "Preview" / the app name for a single script). After writing `.metro/project.json`, briefly summarize the exact scripts, scriptLabels, and debug URL you configured.
+8) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. Always include `scriptLabels` so Preview tabs have clear names (e.g. "backend", "frontend" for multi-service apps, or "Preview" / the app name for a single script). After writing `.metro/project.json`, briefly summarize the exact scripts, scriptLabels, and debug URL you configured.
 """
 
 /// Installs Cmd+T key monitor when Tasks panel is visible so shortcuts work when focus is inside the list.
@@ -127,6 +129,15 @@ private enum AddProjectMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Tab for the Projects panel (matches Agent/Preview style).
+private enum ProjectsPanelTab: String, CaseIterable, Identifiable {
+    case turnOnOff = "Projects"
+    case newProject = "New"
+    case github = "GitHub"
+
+    var id: String { rawValue }
+}
+
 /// Wrapper that observes a single tab so only this subtree re-renders when that tab streams.
 /// Use for the active-tab content area so background tabs don't invalidate the whole window.
 private struct ObservedTabView<Content: View>: View {
@@ -203,6 +214,17 @@ private struct ObservedTabChip: View {
             onSelect: onSelect,
             onClose: onClose
         )
+    }
+}
+
+/// Wraps the agent header content so it observes the tab and re-renders when isRunning/turns change (keeps header icon in sync with sidebar).
+private struct ObservedAgentTitleContent<Content: View>: View {
+    @ObservedObject var tab: AgentTab
+    @Binding var expandedPromptTabID: UUID?
+    @ViewBuilder let content: (AgentTab) -> Content
+
+    var body: some View {
+        content(tab)
     }
 }
 
@@ -290,6 +312,7 @@ struct PopoutView: View {
     @AppStorage(AppPreferences.projectScanRootsKey) private var projectScanRootsRaw: String = AppPreferences.defaultProjectScanRootsRaw
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
+    @AppStorage(AppPreferences.defaultModelIdKey) private var appDefaultModelId: String = AppPreferences.defaultDefaultModelId
     @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
@@ -323,7 +346,7 @@ struct PopoutView: View {
     @State private var expandedPromptTabID: UUID? = nil
     /// How many of the most recent turns are mounted for each tab. `Int.max` means full history.
     @State private var visibleTurnLimitsByTabID: [UUID: Int] = [:]
-    @State private var addProjectMode: AddProjectMode = .existing
+    @State private var projectsPanelTab: ProjectsPanelTab = .turnOnOff
     @State private var selectedExistingProjectPath: String?
     @State private var newProjectName: String = ""
     @State private var newProjectParentPath: String = ""
@@ -899,7 +922,7 @@ Build the initial app or service structure directly in this repository, choose s
         switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
         case .success(let path):
             projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
-            openProjectInTasksView(path)
+            tabManager.addProject(path: path, select: false)
         case .failure(let error):
             projectHubErrorMessage = error.localizedDescription
         }
@@ -1071,14 +1094,14 @@ Build the initial app or service structure directly in this repository, choose s
         let targetWorkspacePath = lastWorkspacePath ?? tabManager.activeProjectPath
         guard let targetWorkspacePath else { return nil }
         let resolvedProviderID = providerID ?? appState.selectedAgentProviderID
-        let resolvedModelID = modelId ?? effectiveSelectedModel(for: resolvedProviderID)
+        // Pass through explicit modelId; nil means new tab will use app default from Settings.
         if appState.isMainContentCollapsed {
             withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
         }
         guard let newTab = tabManager.addTab(
             initialPrompt: initialPrompt,
             workspacePath: targetWorkspacePath,
-            modelId: resolvedModelID,
+            modelId: modelId,
             providerID: resolvedProviderID,
             select: select
         ) else { return nil }
@@ -1131,6 +1154,15 @@ Build the initial app or service structure directly in this repository, choose s
             return selectedModel
         }
         return appState.defaultModelID(for: providerID)
+    }
+
+    /// Effective model for a tab: tab's explicit model, or app default from Settings, sanitized against available models.
+    private func effectiveModelForTab(_ tab: AgentTab) -> String {
+        let raw = tab.modelId ?? appDefaultModelId
+        if appState.model(for: raw, providerID: tab.providerID) != nil {
+            return raw
+        }
+        return appState.defaultModelID(for: tab.providerID)
     }
 
     private var apiUsagePercent: Int {
@@ -1282,33 +1314,27 @@ Build the initial app or service structure directly in this repository, choose s
         }
     }
 
-    /// Tab bar shown in the Dashboard panel: Dashboard (first) then one tab per terminal. Only in Dashboard view.
+    /// Tab bar shown in the Dashboard panel (same style as PanelTabBarView: chrome strip + pill). Preview + terminal tabs with close.
     @ViewBuilder
     private func dashboardPanelTabBar(workspacePath path: String) -> some View {
         let terminals = dashboardPanelTerminals(for: path)
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             Button {
                 tabManager.selectedTerminalID = nil
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "eye")
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                     Text("Preview")
-                        .font(.system(size: 12, weight: tabManager.selectedTerminalID == nil ? .semibold : .medium))
+                        .font(.system(size: 13, weight: tabManager.selectedTerminalID == nil ? .semibold : .medium))
                 }
                 .foregroundStyle(tabManager.selectedTerminalID == nil ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    tabManager.selectedTerminalID == nil ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(tabManager.selectedTerminalID == nil ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                )
+                .padding(.horizontal, CursorTheme.spaceM)
+                .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
             }
             .buttonStyle(.plain)
+            .background(tabManager.selectedTerminalID == nil ? CursorTheme.surfaceMuted(for: colorScheme) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusTabBarPill, style: .continuous))
             .help("Preview overview")
             ForEach(terminals) { term in
                 HStack(spacing: 0) {
@@ -1321,15 +1347,15 @@ Build the initial app or service structure directly in this repository, choose s
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "terminal")
-                                .font(.system(size: 12))
+                                .font(.system(size: 13))
                             Text(term.title)
-                                .font(.system(size: 12, weight: term.id == tabManager.selectedTerminalID ? .semibold : .medium))
+                                .font(.system(size: 13, weight: term.id == tabManager.selectedTerminalID ? .semibold : .medium))
                                 .lineLimit(1)
                         }
                         .foregroundStyle(term.id == tabManager.selectedTerminalID ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                        .padding(.leading, 10)
-                        .padding(.trailing, 6)
-                        .padding(.vertical, 8)
+                        .padding(.leading, CursorTheme.spaceM)
+                        .padding(.trailing, CursorTheme.spaceS)
+                        .padding(.vertical, CursorTheme.spaceS + CursorTheme.spaceXXS)
                     }
                     .buttonStyle(.plain)
                     .help(term.title)
@@ -1341,22 +1367,16 @@ Build the initial app or service structure directly in this repository, choose s
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.trailing, 8)
+                    .padding(.trailing, CursorTheme.spaceS)
                 }
-                .background(
-                    term.id == tabManager.selectedTerminalID ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(term.id == tabManager.selectedTerminalID ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                )
+                .background(term.id == tabManager.selectedTerminalID ? CursorTheme.surfaceMuted(for: colorScheme) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusTabBarPill, style: .continuous))
             }
         }
-        .padding(.horizontal, CursorTheme.paddingPanel)
-        .padding(.vertical, 8)
+        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
+        .padding(.vertical, CursorTheme.spaceXS)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(CursorTheme.surfaceMuted(for: colorScheme).opacity(0.5))
+        .background(CursorTheme.chrome(for: colorScheme))
     }
 
     /// Shown when Preview tab is selected and terminals exist (user should pick a tab).
@@ -1375,14 +1395,37 @@ Build the initial app or service structure directly in this repository, choose s
 
     /// Shown when Preview is selected but Run has not been clicked yet.
     private func dashboardEmptyStateView(workspacePath path: String) -> some View {
-        VStack(spacing: 20) {
+        let root = projectRootForTerminal(workspacePath: path)
+        let isConfigured = !ProjectSettingsStorage.getStartupScripts(workspacePath: root).isEmpty
+        return VStack(spacing: CursorTheme.spaceXL) {
             Image(systemName: "eye")
                 .font(.system(size: 48, weight: .medium))
                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .symbolRenderingMode(.hierarchical)
             Text("Click Run to start your startup scripts")
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: CursorTheme.fontBodyEmphasis, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            HStack(spacing: CursorTheme.spaceS) {
+                Spacer(minLength: 0)
+                if isConfigured {
+                    ActionButton(
+                        title: "Run",
+                        icon: "play.fill",
+                        action: { openDashboard(workspacePath: path) },
+                        help: "Run each startup script in its own Preview tab",
+                        style: .primary
+                    )
+                }
+                ActionButton(
+                    title: isConfigured ? "Regenerate Setup" : "Configure Setup",
+                    icon: "gearshape",
+                    action: { _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path) },
+                    help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
+                    style: .primary
+                )
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1709,24 +1752,23 @@ Build the initial app or service structure directly in this repository, choose s
         .padding(.vertical, CursorTheme.paddingHeaderVertical)
     }
 
-    /// Header area: title row (agent prompt expands in place by wrapping, no separate card). When Dashboard view is selected, add Play/Stop/Configure/Open in Browser row.
+    /// Header area: title row (agent prompt expands in place by wrapping, no separate card). When Dashboard is running, show Stop/Open in Browser row.
     @ViewBuilder
     private var mainColumnHeaderArea: some View {
         VStack(alignment: .leading, spacing: 0) {
             mainColumnTitleRow
-            if tabManager.selectedDashboardViewPath == selectedProjectPath, let path = selectedProjectPath, !path.isEmpty {
+            if tabManager.selectedDashboardViewPath == selectedProjectPath,
+               let path = selectedProjectPath, !path.isEmpty,
+               !tabManager.dashboardTabs(for: path).isEmpty {
                 dashboardButtonsRow(workspacePath: path)
             }
         }
     }
 
-    /// Play, Stop, Configure Setup, Open in Browser — shown in Dashboard/terminal view header.
+    /// Stop, Open in Browser — shown in Dashboard header only when Preview tabs are running (Run/Configure live in empty state).
     private func dashboardButtonsRow(workspacePath path: String) -> some View {
-        let root = projectRootForTerminal(workspacePath: path)
-        let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
         let debugURL = (ProjectSettingsStorage.getDebugURL(workspacePath: path) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let isDashboardRunning = !tabManager.dashboardTabs(for: path).isEmpty
-        let isConfigured = !scripts.isEmpty
         let hasPreviewURL = !debugURL.isEmpty
         return HStack(spacing: CursorTheme.spaceS) {
             if isDashboardRunning {
@@ -1735,7 +1777,7 @@ Build the initial app or service structure directly in this repository, choose s
                     icon: "stop.fill",
                     action: { tabManager.closeDashboardTabs(workspacePath: path) },
                     help: "Close Preview tabs",
-                    style: .stop
+                    style: .primary
                 )
                 if hasPreviewURL {
                     ActionButton(
@@ -1749,23 +1791,6 @@ Build the initial app or service structure directly in this repository, choose s
                         style: .primary
                     )
                 }
-            } else {
-                if isConfigured {
-                    ActionButton(
-                        title: "Run",
-                        icon: "play.fill",
-                        action: { openDashboard(workspacePath: path) },
-                        help: "Run each startup script in its own Preview tab",
-                        style: .play
-                    )
-                }
-                ActionButton(
-                    title: isConfigured ? "Regenerate Setup" : "Configure Setup",
-                    icon: "gearshape",
-                    action: { _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path) },
-                    help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
-                    style: .accent
-                )
             }
             Spacer(minLength: 0)
         }
@@ -1783,29 +1808,20 @@ Build the initial app or service structure directly in this repository, choose s
         } else if (tabManager.selectedTerminalID != nil || tabManager.selectedDashboardViewPath == selectedProjectPath), let path = selectedProjectPath {
             terminalTitleContent(workspacePath: path)
         } else if let tab = tabManager.activeTab {
-            agentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
+            ObservedAgentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID) { tab in
+                agentTitleContent(tab: tab, expandedPromptTabID: $expandedPromptTabID)
+            }
         } else {
             EmptyView()
         }
     }
 
     private func addProjectTitleContent() -> some View {
-        HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: "gearshape")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+        PanelHeaderView(icon: "gearshape", title: "Projects") {
+            Text("Open an existing workspace, create a new one, or clone from GitHub.")
+                .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .frame(width: 32, height: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Projects")
-                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                    .lineLimit(1)
-                Text("Open an existing workspace, create a new one, or clone from GitHub.")
-                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(2)
         }
     }
 
@@ -1813,28 +1829,17 @@ Build the initial app or service structure directly in this repository, choose s
         let projectColor = path.isEmpty
             ? CursorTheme.textTertiary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: path)
-        return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: "checklist")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .frame(width: 32, height: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Tasks")
-                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+        return PanelHeaderView(icon: "checklist", title: "Tasks") {
+            HStack(spacing: CursorTheme.spaceXS) {
+                Image(systemName: "folder")
+                    .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                    .foregroundStyle(projectColor)
+                Text((path as NSString).lastPathComponent)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(projectColor)
                     .lineLimit(1)
-                HStack(spacing: CursorTheme.spaceXS) {
-                    Image(systemName: "folder")
-                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(projectColor)
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(projectColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                    .truncationMode(.middle)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -1842,28 +1847,17 @@ Build the initial app or service structure directly in this repository, choose s
         let projectColor = path.isEmpty
             ? CursorTheme.textTertiary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: path)
-        return HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: "eye")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .frame(width: 32, height: 32)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Preview")
-                    .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+        return PanelHeaderView(icon: "eye", title: "Preview") {
+            HStack(spacing: CursorTheme.spaceXS) {
+                Image(systemName: "folder")
+                    .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                    .foregroundStyle(projectColor)
+                Text((path as NSString).lastPathComponent)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(projectColor)
                     .lineLimit(1)
-                HStack(spacing: CursorTheme.spaceXS) {
-                    Image(systemName: "folder")
-                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(projectColor)
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(projectColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                    .truncationMode(.middle)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -2092,41 +2086,40 @@ Build the initial app or service structure directly in this repository, choose s
     // MARK: - Projects hub
 
     private var addProjectHubContent: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
-                VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                    Text("Bring an existing project into Cursor Metro, start something new, or clone from GitHub.")
-                        .font(.system(size: CursorTheme.fontBody))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
+        VStack(spacing: 0) {
+            projectsPanelTabBar
 
-                    Picker("Add Project Mode", selection: $addProjectMode) {
-                        ForEach(AddProjectMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 360)
-                }
-
-                if let message = projectHubErrorMessage, !message.isEmpty {
-                    projectHubBanner(message, tint: CursorTheme.semanticErrorTint, border: CursorTheme.semanticError)
-                } else if let message = projectHubStatusMessage, !message.isEmpty {
-                    projectHubBanner(message, tint: CursorTheme.semanticSuccess.opacity(0.18), border: CursorTheme.semanticSuccess)
-                }
-
-                switch addProjectMode {
-                case .existing:
-                    existingProjectsSection
-                case .new:
-                    newProjectSection
-                case .github:
-                    githubProjectSection
-                }
+            if let message = projectHubErrorMessage, !message.isEmpty {
+                projectHubBanner(message, tint: CursorTheme.semanticErrorTint, border: CursorTheme.semanticError)
+                    .padding(.horizontal, CursorTheme.paddingPanel)
+                    .padding(.top, CursorTheme.spaceS)
             }
-            .padding(CursorTheme.paddingPanel)
+
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+                    switch projectsPanelTab {
+                    case .turnOnOff:
+                        turnOnOffProjectsSection
+                    case .newProject:
+                        newProjectSection
+                    case .github:
+                        githubProjectSection
+                    }
+                }
+                .padding(CursorTheme.paddingPanel)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Tab bar for Projects panel (shared PanelTabBarView style: chrome strip + pill).
+    private var projectsPanelTabBar: some View {
+        PanelTabBarView(
+            tabs: ProjectsPanelTab.allCases.map { PanelTabItem(id: $0, label: $0.rawValue, count: nil) },
+            selection: $projectsPanelTab,
+            onSelect: { projectsPanelTab = $0 }
+        )
     }
 
     private func projectHubBanner(_ message: String, tint: Color, border: Color) -> some View {
@@ -2140,6 +2133,21 @@ Build the initial app or service structure directly in this repository, choose s
                 RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                     .stroke(border.opacity(0.45), lineWidth: 1)
             )
+    }
+
+    /// Inline success toast for "Created X" / "Cloned X" in the Projects hub.
+    private func projectHubSuccessToast(_ message: String) -> some View {
+        HStack(spacing: CursorTheme.spaceS) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: CursorTheme.fontBodySmall))
+                .foregroundStyle(CursorTheme.semanticSuccess)
+            Text(message)
+                .font(.system(size: CursorTheme.fontCaption, weight: .medium))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+        }
+        .padding(.horizontal, CursorTheme.paddingCard)
+        .padding(.vertical, CursorTheme.spaceS)
+        .background(CursorTheme.semanticSuccess.opacity(0.15), in: Capsule())
     }
 
     private func projectHubCard<Content: View>(
@@ -2168,7 +2176,8 @@ Build the initial app or service structure directly in this repository, choose s
         )
     }
 
-    private var existingProjectsSection: some View {
+    /// "Projects" tab: turn projects on/off, add scan directories, open or browse.
+    private var turnOnOffProjectsSection: some View {
         let projects = tabManager.projects.sorted { lhs, rhs in
             if lhs.source != rhs.source {
                 return lhs.source == .discovered
@@ -2176,110 +2185,170 @@ Build the initial app or service structure directly in this repository, choose s
             return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
         }
         return projectHubCard(
-            title: "Pick Existing Project",
-            subtitle: "Open a discovered Metro project or browse to any repository folder on disk."
+            title: "Turn on/off projects",
+            subtitle: "Choose which folders to scan, then show or hide projects in the sidebar. Open or browse to add more."
         ) {
-            HStack(spacing: CursorTheme.spaceS) {
-                ActionButton(
-                    title: "Open Selected",
-                    icon: "folder",
-                    action: {
-                        if let path = selectedExistingProjectPath {
-                            openExistingProjectFromHub(path)
-                        }
-                    },
-                    isDisabled: selectedExistingProjectPath == nil,
-                    help: "Open the selected project in Tasks",
-                    style: .primary
-                )
-                ActionButton(
-                    title: "Browse Folder",
-                    icon: "folder.badge.plus",
-                    action: browseForExistingProject,
-                    help: "Choose any folder on your Mac",
-                    style: .secondary
-                )
-                Spacer(minLength: 0)
-            }
+            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                // Scan directories
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    Text("Folders to scan")
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    scanRootsList
+                    ActionButton(
+                        title: "Add folder",
+                        icon: "folder.badge.plus",
+                        action: addProjectScanRoot,
+                        help: "Add a folder to scan for projects",
+                        style: .secondary
+                    )
+                }
 
-            if projects.isEmpty {
-                Text("No projects discovered yet. Browse to any folder to add one.")
-                    .font(.system(size: CursorTheme.fontBodySmall))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-            } else {
-                VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                    ForEach(projects, id: \.path) { project in
-                        let isSelected = selectedExistingProjectPath == project.path
-                        let normalized = AppPreferences.normalizedProjectPath(project.path)
-                        let isVisible = !AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw).contains(normalized)
-                        HStack(alignment: .top, spacing: CursorTheme.spaceM) {
-                            Button {
-                                selectedExistingProjectPath = project.path
-                            } label: {
-                                HStack(alignment: .top, spacing: CursorTheme.spaceM) {
-                                    Image(systemName: project.source == .discovered ? "sparkles" : "folder")
-                                        .font(.system(size: CursorTheme.fontBody, weight: .medium))
-                                        .foregroundStyle(CursorTheme.colorForWorkspace(path: project.path))
-                                        .frame(width: 18, height: 18)
-                                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                                        HStack(spacing: CursorTheme.spaceXS) {
-                                            Text(appState.workspaceDisplayName(for: project.path))
-                                                .font(.system(size: CursorTheme.fontBody, weight: .semibold))
-                                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                                .lineLimit(1)
-                                            projectHubTag(project.source == .discovered ? "Scanned" : "Added")
-                                            if hasMetroProjectSettings(workspacePath: project.path) {
-                                                projectHubTag("Configured")
-                                            } else if hasMetroDirectory(workspacePath: project.path) {
-                                                projectHubTag(".metro")
-                                            } else {
-                                                projectHubTag("Needs Setup")
-                                            }
-                                            if isGitRepository(workspacePath: project.path) {
-                                                projectHubTag("Git")
-                                            }
-                                        }
-                                        Text(project.path)
-                                            .font(.system(size: CursorTheme.fontSecondary))
-                                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                    }
-                                    Spacer(minLength: 0)
-                                }
+                Divider()
+                    .padding(.vertical, CursorTheme.spaceXS)
+
+                HStack(spacing: CursorTheme.spaceS) {
+                    ActionButton(
+                        title: "Open Selected",
+                        icon: "folder",
+                        action: {
+                            if let path = selectedExistingProjectPath {
+                                openExistingProjectFromHub(path)
                             }
-                            .buttonStyle(.plain)
-                            Toggle("", isOn: Binding(
-                                get: { isVisible },
-                                set: { visible in
-                                    var hidden = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
-                                    if visible {
-                                        hidden.remove(normalized)
-                                    } else {
-                                        hidden.insert(normalized)
+                        },
+                        isDisabled: selectedExistingProjectPath == nil,
+                        help: "Open the selected project in Tasks",
+                        style: .primary
+                    )
+                    ActionButton(
+                        title: "Browse Folder",
+                        icon: "folder.badge.plus",
+                        action: browseForExistingProject,
+                        help: "Choose any folder on your Mac",
+                        style: .secondary
+                    )
+                    Spacer(minLength: 0)
+                }
+
+                if projects.isEmpty {
+                    Text("No projects discovered yet. Add folders to scan or browse to a folder.")
+                        .font(.system(size: CursorTheme.fontBodySmall))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                } else {
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                        ForEach(projects, id: \.path) { project in
+                            let isSelected = selectedExistingProjectPath == project.path
+                            let normalized = AppPreferences.normalizedProjectPath(project.path)
+                            let isVisible = !AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw).contains(normalized)
+                            HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+                                Button {
+                                    selectedExistingProjectPath = project.path
+                                } label: {
+                                    HStack(alignment: .center, spacing: CursorTheme.spaceM) {
+                                        Image(systemName: project.source == .discovered ? "sparkles" : "folder")
+                                            .font(.system(size: CursorTheme.fontBody, weight: .medium))
+                                            .foregroundStyle(CursorTheme.colorForWorkspace(path: project.path))
+                                            .frame(width: 18, height: 18)
+                                        Text(appState.workspaceDisplayName(for: project.path))
+                                            .font(.system(size: CursorTheme.fontBody, weight: .semibold))
+                                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                            .lineLimit(1)
+                                        Spacer(minLength: 0)
                                     }
-                                    hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
                                 }
-                            ))
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .labelsHidden()
-                            .help("Show in sidebar")
+                                .buttonStyle(.plain)
+                                Toggle("", isOn: Binding(
+                                    get: { isVisible },
+                                    set: { visible in
+                                        var hidden = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
+                                        if visible {
+                                            hidden.remove(normalized)
+                                        } else {
+                                            hidden.insert(normalized)
+                                        }
+                                        hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
+                                    }
+                                ))
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .labelsHidden()
+                                .help("Show in sidebar")
+                            }
+                            .padding(CursorTheme.paddingCard)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                isSelected ? CursorTheme.surfaceMuted(for: colorScheme) : CursorTheme.editor(for: colorScheme),
+                                in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                    .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme), lineWidth: 1)
+                            )
                         }
-                        .padding(CursorTheme.paddingCard)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            isSelected ? CursorTheme.surfaceMuted(for: colorScheme) : CursorTheme.editor(for: colorScheme),
-                            in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                                .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme), lineWidth: 1)
-                        )
                     }
                 }
             }
         }
+    }
+
+    private var scanRootsList: some View {
+        let roots = projectScanRoots
+        if roots.isEmpty {
+            return AnyView(
+                Text("No folders added. Use “Add folder” or set Projects root in Settings.")
+                    .font(.system(size: CursorTheme.fontBodySmall))
+                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+            )
+        }
+        return AnyView(
+            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                ForEach(roots, id: \.self) { path in
+                    HStack(spacing: CursorTheme.spaceS) {
+                        Text(path)
+                            .font(.system(size: CursorTheme.fontSecondary))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Button {
+                            removeProjectScanRoot(path)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 14))
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove folder from scan")
+                    }
+                    .padding(.horizontal, CursorTheme.spaceS)
+                    .padding(.vertical, CursorTheme.spaceXS)
+                    .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                }
+            }
+        )
+    }
+
+    private func addProjectScanRoot() {
+        let startPath = projectScanRoots.first ?? (projectsRootPath as NSString).expandingTildeInPath
+        if let path = selectFolder(
+            title: "Add folder to scan",
+            message: "Choose a folder. Its subfolders will be scanned for Metro projects.",
+            startingAt: startPath
+        ) {
+            var roots = projectScanRoots
+            let normalized = (path as NSString).standardizingPath
+            if !roots.contains(normalized) {
+                roots.append(normalized)
+                projectScanRootsRaw = AppPreferences.rawFrom(projectScanRoots: roots)
+            }
+        }
+    }
+
+    private func removeProjectScanRoot(_ path: String) {
+        var roots = projectScanRoots
+        roots.removeAll { ($0 as NSString).standardizingPath == (path as NSString).standardizingPath }
+        projectScanRootsRaw = roots.isEmpty ? "" : AppPreferences.rawFrom(projectScanRoots: roots)
     }
 
     private var newProjectSection: some View {
@@ -2288,11 +2357,17 @@ Build the initial app or service structure directly in this repository, choose s
             subtitle: "Create an empty workspace or let the agent scaffold the first version from your idea."
         ) {
             VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                if let message = projectHubStatusMessage, message.hasPrefix("Created") {
+                    projectHubSuccessToast(message)
+                }
                 VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
                     Text("Project name")
                         .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
                         .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    TextField("my-app", text: $newProjectName)
+                    TextField("my-app", text: Binding(
+                        get: { newProjectName },
+                        set: { newProjectName = sanitizedProjectName($0) }
+                    ))
                         .textFieldStyle(.roundedBorder)
                 }
 
@@ -2334,7 +2409,7 @@ Build the initial app or service structure directly in this repository, choose s
                         title: "Create Empty",
                         icon: "plus.square",
                         action: createEmptyProjectFromHub,
-                        isDisabled: newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        isDisabled: sanitizedProjectName(newProjectName).isEmpty,
                         help: "Create the folder and open it in Tasks",
                         style: .primary
                     )
@@ -2342,7 +2417,7 @@ Build the initial app or service structure directly in this repository, choose s
                         title: "Create With Agent",
                         icon: "wand.and.stars",
                         action: createProjectWithAgentFromHub,
-                        isDisabled: newProjectName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        isDisabled: sanitizedProjectName(newProjectName).isEmpty,
                         help: "Create the folder and ask the agent to scaffold the project",
                         style: .accent
                     )
@@ -2358,6 +2433,9 @@ Build the initial app or service structure directly in this repository, choose s
             subtitle: "Clone a repository into one of your working directories, then open it directly in Cursor Metro."
         ) {
             VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                if let message = projectHubStatusMessage, message.hasPrefix("Cloned") {
+                    projectHubSuccessToast(message)
+                }
                 VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
                     Text("Repository URL")
                         .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
@@ -2563,7 +2641,7 @@ Build the initial app or service structure directly in this repository, choose s
             ? ((tab.workspacePath as NSString).lastPathComponent.isEmpty ? "Project" : (tab.workspacePath as NSString).lastPathComponent)
             : appState.workspaceDisplayName(for: tab.workspacePath)
         let modelLabel = appState.model(
-            for: tab.modelId ?? effectiveSelectedModel(for: tab.providerID),
+            for: effectiveModelForTab(tab),
             providerID: tab.providerID
         )?.label ?? "Auto"
         // Use view's currentBranch when tab's is empty (e.g. new tab before onChange runs) so we don't flash "No branch".
@@ -2690,15 +2768,16 @@ Build the initial app or service structure directly in this repository, choose s
 
             VStack(alignment: .leading, spacing: 0) {
                 if !attachedPaths.isEmpty {
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                    HStack(alignment: .center, spacing: 6) {
                         ForEach(attachedPaths, id: \.self) { path in
-                            ScreenshotCardView(
-                                path: path,
-                                workspacePath: tab.workspacePath,
-                                onDelete: { deleteScreenshot(path: path, tab: tab) },
+                            ScreenshotThumbnailView(
+                                imageURL: screenshotFileURL(path: path, workspacePath: tab.workspacePath),
+                                size: CGSize(width: 56, height: 56),
+                                cornerRadius: 6,
                                 onTapPreview: {
                                     showScreenshotPreview(paths: attachedPaths, selectedPath: path, workspacePath: tab.workspacePath)
-                                }
+                                },
+                                onDelete: { deleteScreenshot(path: path, tab: tab) }
                             )
                         }
                     }
@@ -2769,10 +2848,10 @@ Build the initial app or service structure directly in this repository, choose s
 
             HStack(alignment: .center, spacing: 8) {
                 ModelPickerView(
-                    selectedModelId: tab.modelId ?? effectiveSelectedModel(for: tab.providerID),
+                    selectedModelId: effectiveModelForTab(tab),
                     models: modelPickerModels(
                         for: tab.providerID,
-                        including: tab.modelId ?? effectiveSelectedModel(for: tab.providerID)
+                        including: effectiveModelForTab(tab)
                     ),
                     onSelect: { tab.modelId = $0 }
                 )
@@ -2971,7 +3050,7 @@ Build the initial app or service structure directly in this repository, choose s
     private func submitOrQueuePrompt(tab: AgentTab) {
         agentSessionStore.submitOrQueuePrompt(
             tab: tab,
-            selectedModel: effectiveSelectedModel(for: tab.providerID),
+            selectedModel: effectiveModelForTab(tab),
             incrementUsage: { messagesSentForUsage += 1 },
             recordHangEvent: recordHangEvent(_:metadata:),
             updateTabTitle: updateTabTitle(for:in:),
@@ -2992,7 +3071,7 @@ Build the initial app or service structure directly in this repository, choose s
     private func processNextQueuedFollowUp(tab: AgentTab) {
         agentSessionStore.submitOrQueuePrompt(
             tab: tab,
-            selectedModel: effectiveSelectedModel(for: tab.providerID),
+            selectedModel: effectiveModelForTab(tab),
             incrementUsage: { messagesSentForUsage += 1 },
             recordHangEvent: recordHangEvent(_:metadata:),
             updateTabTitle: updateTabTitle(for:in:),
@@ -3006,7 +3085,7 @@ Build the initial app or service structure directly in this repository, choose s
     private func compressContext(tab: AgentTab) {
         agentSessionStore.compressContext(
             tab: tab,
-            selectedModel: effectiveSelectedModel(for: tab.providerID),
+            selectedModel: effectiveModelForTab(tab),
             incrementUsage: { messagesSentForUsage += 1 },
             recordHangEvent: recordHangEvent(_:metadata:),
             updateTabTitle: updateTabTitle(for:in:),
@@ -3067,7 +3146,7 @@ Build the initial app or service structure directly in this repository, choose s
         agentSessionStore.sendInCurrentTab(
             prompt: prompt,
             tab: tab,
-            selectedModel: effectiveSelectedModel(for: tab.providerID),
+            selectedModel: effectiveModelForTab(tab),
             incrementUsage: { messagesSentForUsage += 1 },
             recordHangEvent: recordHangEvent(_:metadata:),
             updateTabTitle: updateTabTitle(for:in:),
@@ -3100,7 +3179,7 @@ Build the initial app or service structure directly in this repository, choose s
     private func sendPrompt(tab currentTab: AgentTab) {
         agentSessionStore.sendPrompt(
             tab: currentTab,
-            selectedModel: effectiveSelectedModel(for: currentTab.providerID),
+            selectedModel: effectiveModelForTab(currentTab),
             incrementUsage: { messagesSentForUsage += 1 },
             recordHangEvent: recordHangEvent(_:metadata:),
             updateTabTitle: updateTabTitle(for:in:),

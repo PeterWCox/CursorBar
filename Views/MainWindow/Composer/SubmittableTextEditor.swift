@@ -241,8 +241,9 @@ struct SubmittableTextEditor: NSViewRepresentable {
         if let callback = onFocusRequested, !context.coordinator.didSendFocusCallbacks {
             context.coordinator.didSendFocusCallbacks = true
             let focusClosure: () -> Void = { [weak scrollView] in
-                guard let sv = scrollView, let tv = sv.documentView as? NSTextView else { return }
-                sv.window?.makeFirstResponder(tv)
+                guard let sv = scrollView, let tv = sv.documentView as? NSTextView, let window = sv.window else { return }
+                window.makeKey()
+                window.makeFirstResponder(tv)
             }
             let isFirstResponderClosure: () -> Bool = { [weak scrollView] in
                 guard let sv = scrollView, let tv = sv.documentView as? NSTextView else { return false }

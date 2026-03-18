@@ -1,356 +1,6 @@
 import Foundation
 import Combine
 
-// MARK: - Persisted tab state (for save/restore across launches)
-
-enum ProjectSource: String, Codable, Equatable {
-    case manual
-    case discovered
-}
-
-struct SavedProject: Codable, Equatable {
-    var path: String
-    var source: ProjectSource
-
-    init(path: String, source: ProjectSource = .manual) {
-        self.path = path
-        self.source = source
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case path
-        case source
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        path = try container.decode(String.self, forKey: .path)
-        source = try container.decodeIfPresent(ProjectSource.self, forKey: .source) ?? .manual
-    }
-}
-
-struct SavedAgentTab: Codable {
-    var id: UUID
-    var title: String
-    var workspacePath: String
-    var currentBranch: String
-    var prompt: String
-    var turns: [ConversationTurn]
-    var hasAttachedScreenshot: Bool
-    var followUpQueue: [QueuedFollowUp]
-    /// When set, this agent is linked to a project task; used to show task status (open / processing / done) in the sidebar.
-    var linkedTaskID: UUID?
-    /// Agent provider used for this tab (e.g. Cursor now, Claude Code later).
-    var providerID: AgentProviderID
-    /// Provider conversation ID; when set, used to continue the same conversation after restart.
-    var conversationID: String?
-    /// Model ID for this tab (e.g. "auto", "gpt-5.4-medium"). When set, used when sending; otherwise app default is used.
-    var modelId: String?
-
-    init(id: UUID, title: String, workspacePath: String, currentBranch: String, prompt: String, turns: [ConversationTurn], hasAttachedScreenshot: Bool, followUpQueue: [QueuedFollowUp], linkedTaskID: UUID? = nil, providerID: AgentProviderID = .cursor, conversationID: String? = nil, modelId: String? = nil) {
-        self.id = id
-        self.title = title
-        self.workspacePath = workspacePath
-        self.currentBranch = currentBranch
-        self.prompt = prompt
-        self.turns = turns
-        self.hasAttachedScreenshot = hasAttachedScreenshot
-        self.followUpQueue = followUpQueue
-        self.linkedTaskID = linkedTaskID
-        self.providerID = providerID
-        self.conversationID = conversationID
-        self.modelId = modelId
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(UUID.self, forKey: .id)
-        title = try c.decode(String.self, forKey: .title)
-        workspacePath = try c.decode(String.self, forKey: .workspacePath)
-        currentBranch = try c.decode(String.self, forKey: .currentBranch)
-        prompt = try c.decode(String.self, forKey: .prompt)
-        turns = try c.decode([ConversationTurn].self, forKey: .turns)
-        hasAttachedScreenshot = try c.decode(Bool.self, forKey: .hasAttachedScreenshot)
-        followUpQueue = try c.decode([QueuedFollowUp].self, forKey: .followUpQueue)
-        linkedTaskID = try c.decodeIfPresent(UUID.self, forKey: .linkedTaskID)
-        let rawProviderID = try c.decodeIfPresent(String.self, forKey: .providerID)
-        providerID = AgentProviders.resolvedProviderID(rawProviderID ?? AgentProviderID.cursor.rawValue)
-        conversationID = try c.decodeIfPresent(String.self, forKey: .conversationID)
-            ?? c.decodeIfPresent(String.self, forKey: .cursorChatId)
-        modelId = try c.decodeIfPresent(String.self, forKey: .modelId)
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, title, workspacePath, currentBranch, prompt, turns, hasAttachedScreenshot, followUpQueue, linkedTaskID, providerID, conversationID, cursorChatId, modelId
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var c = encoder.container(keyedBy: CodingKeys.self)
-        try c.encode(id, forKey: .id)
-        try c.encode(title, forKey: .title)
-        try c.encode(workspacePath, forKey: .workspacePath)
-        try c.encode(currentBranch, forKey: .currentBranch)
-        try c.encode(prompt, forKey: .prompt)
-        try c.encode(turns, forKey: .turns)
-        try c.encode(hasAttachedScreenshot, forKey: .hasAttachedScreenshot)
-        try c.encode(followUpQueue, forKey: .followUpQueue)
-        try c.encodeIfPresent(linkedTaskID, forKey: .linkedTaskID)
-        try c.encode(providerID, forKey: .providerID)
-        try c.encodeIfPresent(conversationID, forKey: .conversationID)
-        try c.encodeIfPresent(modelId, forKey: .modelId)
-    }
-
-    /// Streaming work cannot survive an app relaunch, so restore persisted turns as settled state.
-    var restoredTurns: [ConversationTurn] {
-        turns.map { turn in
-            guard turn.isStreaming else { return turn }
-
-            var restored = turn
-            restored.isStreaming = false
-            restored.lastStreamPhase = nil
-
-            var didStopRunningTool = false
-            for index in restored.segments.indices {
-                if restored.segments[index].toolCall?.status == .running {
-                    restored.segments[index].toolCall?.status = .stopped
-                    didStopRunningTool = true
-                }
-            }
-
-            if didStopRunningTool {
-                restored.wasStopped = true
-            }
-
-            return restored
-        }
-    }
-
-    var restoredLastTurnState: ConversationTurnDisplayState? {
-        restoredTurns.last?.displayState
-    }
-}
-
-struct SavedTabState: Codable {
-    static let currentSchemaVersion = 3
-
-    var schemaVersion: Int
-    var tabs: [SavedAgentTab]
-    var recentlyClosedTabs: [SavedAgentTab]
-    var selectedTabID: UUID?
-    var projects: [SavedProject]
-    var selectedProjectPath: String?
-    var selectedAddProjectView: Bool
-
-    init(
-        tabs: [SavedAgentTab],
-        recentlyClosedTabs: [SavedAgentTab],
-        selectedTabID: UUID?,
-        projects: [SavedProject],
-        selectedProjectPath: String?,
-        selectedAddProjectView: Bool
-    ) {
-        self.schemaVersion = Self.currentSchemaVersion
-        self.tabs = tabs
-        self.recentlyClosedTabs = recentlyClosedTabs
-        self.selectedTabID = selectedTabID
-        self.projects = projects
-        self.selectedProjectPath = selectedProjectPath
-        self.selectedAddProjectView = selectedAddProjectView
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion
-        case tabs
-        case recentlyClosedTabs
-        case selectedTabID
-        case projects
-        case selectedProjectPath
-        case selectedAddProjectView
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
-        tabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .tabs) ?? []
-        recentlyClosedTabs = try container.decodeIfPresent([SavedAgentTab].self, forKey: .recentlyClosedTabs) ?? []
-        selectedTabID = try container.decodeIfPresent(UUID.self, forKey: .selectedTabID)
-        projects = try container.decodeIfPresent([SavedProject].self, forKey: .projects) ?? []
-        selectedProjectPath = try container.decodeIfPresent(String.self, forKey: .selectedProjectPath)
-        selectedAddProjectView = try container.decodeIfPresent(Bool.self, forKey: .selectedAddProjectView) ?? false
-    }
-}
-
-// MARK: - Linked agent status (for task and sidebar display)
-
-/// Status of agent work linked to a task. This is separate from the task lifecycle state.
-enum AgentTaskState: String, Equatable {
-    case none
-    case todo
-    case processing
-    case review
-    case stopped
-}
-
-enum TabManagerPersistence {
-    private static let fileName = "cursor_plus_tabs.json"
-
-    static var saveURL: URL {
-        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("CursorPlus", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(fileName)
-    }
-
-    static func load() -> SavedTabState? {
-        let data: Data
-        do {
-            data = try Data(contentsOf: saveURL)
-        } catch {
-            return nil
-        }
-        guard let state = try? JSONDecoder().decode(SavedTabState.self, from: data) else {
-            return nil
-        }
-        if state.schemaVersion < SavedTabState.currentSchemaVersion {
-            try? FileManager.default.removeItem(at: saveURL)
-            return nil
-        }
-        return state
-    }
-
-    static func save(_ state: SavedTabState) {
-        guard let data = try? JSONEncoder().encode(state) else { return }
-        try? data.write(to: saveURL)
-    }
-}
-
-// MARK: - Tab and conversation state
-
-/// A message queued to send as soon as the agent finishes its current response.
-struct QueuedFollowUp: Identifiable, Equatable, Codable {
-    let id: UUID
-    var text: String
-    init(id: UUID = UUID(), text: String) {
-        self.id = id
-        self.text = text
-    }
-}
-
-/// A terminal tab: shell session in a workspace. Not persisted across launches.
-class TerminalTab: ObservableObject, Identifiable {
-    let id: UUID
-    @Published var title: String
-    let workspacePath: String
-    /// When non-nil, the embedded terminal runs this command at startup (e.g. a startup script).
-    var initialCommand: String?
-    /// When true, this tab was created by Dashboard (Start); Stop closes all such tabs for the project.
-    var isDashboardTab: Bool
-
-    init(id: UUID = UUID(), title: String, workspacePath: String, initialCommand: String? = nil, isDashboardTab: Bool = false) {
-        self.id = id
-        self.title = title
-        self.workspacePath = workspacePath
-        self.initialCommand = initialCommand
-        self.isDashboardTab = isDashboardTab
-    }
-}
-
-class AgentTab: ObservableObject, Identifiable {
-    let id: UUID
-    @Published var title: String
-    @Published var providerID: AgentProviderID
-    /// Project/workspace path for this tab. When creating a new tab, it is set to the last-used path (e.g. the active tab’s workspace).
-    @Published var workspacePath: String = ""
-    /// Last-known git branch for this tab’s workspace (kept in sync when tab is active or on switch).
-    @Published var currentBranch: String = ""
-    @Published var prompt = ""
-    @Published var turns: [ConversationTurn] = []
-    @Published var isRunning = false
-    @Published var errorMessage: String?
-    @Published var hasAttachedScreenshot = false
-    @Published var scrollToken = UUID()
-    /// Messages to send one-by-one as soon as the agent finishes each response.
-    @Published var followUpQueue: [QueuedFollowUp] = []
-    /// When set, this agent is linked to a project task; sidebar shows that task's status (open / processing / done).
-    @Published var linkedTaskID: UUID?
-    /// Model ID for this tab when sending (e.g. "auto"). When nil, app default is used.
-    @Published var modelId: String?
-    var streamTask: Task<Void, Never>?
-    var activeRunID: UUID?
-    var activeTurnID: UUID?
-    var cachedConversationCharacterCount: Int
-    var lastAutoScrollAt: TimeInterval = 0
-    /// Last time we pushed a streaming UI update; used to throttle to ~100ms.
-    var lastStreamUIUpdateAt: TimeInterval = 0
-    /// Provider conversation ID for this tab; set after first message so follow-ups use the same conversation.
-    var conversationID: String?
-
-    /// If set, the run with this ID is a "compress context" run; when it finishes we replace context with the assistant's summary.
-    var pendingCompressRunID: UUID?
-    /// Set to true before sending so the next sendPrompt() marks that run as compress (used by Summarize button).
-    var isCompressRequest: Bool = false
-
-    /// Turn IDs the user has dismissed from the pinned-questions stack (not persisted).
-    @Published var dismissedPinnedTurnIDs: Set<UUID> = []
-
-    init(title: String = "Agent", workspacePath: String = "", providerID: AgentProviderID = .cursor) {
-        self.id = UUID()
-        self.title = title
-        self.providerID = providerID
-        self.workspacePath = workspacePath
-        self.cachedConversationCharacterCount = 0
-    }
-
-    init(from saved: SavedAgentTab) {
-        self.id = saved.id
-        self.title = saved.title
-        self.workspacePath = saved.workspacePath
-        self.currentBranch = saved.currentBranch
-        self.prompt = saved.prompt
-        self.turns = saved.restoredTurns
-        self.hasAttachedScreenshot = saved.hasAttachedScreenshot
-        self.followUpQueue = saved.followUpQueue
-        self.linkedTaskID = saved.linkedTaskID
-        self.providerID = saved.providerID
-        self.conversationID = saved.conversationID
-        self.modelId = saved.modelId
-        self.cachedConversationCharacterCount = Self.conversationCharacterCount(for: saved.restoredTurns)
-    }
-
-    func toSaved() -> SavedAgentTab {
-        SavedAgentTab(
-            id: id,
-            title: title,
-            workspacePath: workspacePath,
-            currentBranch: currentBranch,
-            prompt: prompt,
-            turns: turns,
-            hasAttachedScreenshot: hasAttachedScreenshot,
-            followUpQueue: followUpQueue,
-            linkedTaskID: linkedTaskID,
-            providerID: providerID,
-            conversationID: conversationID,
-            modelId: modelId
-        )
-    }
-
-    static func conversationCharacterCount(for turns: [ConversationTurn]) -> Int {
-        turns.reduce(into: 0) { total, turn in
-            total += turn.userPrompt.count
-            total += turn.segments.reduce(into: 0) { subtotal, segment in
-                subtotal += segment.text.count
-            }
-        }
-    }
-}
-
-struct ProjectState: Identifiable, Codable, Equatable {
-    var path: String
-    var source: ProjectSource = .manual
-
-    var id: String { path }
-}
-
 class TabManager: ObservableObject {
     private static let autosaveDelay: TimeInterval = 0.35
 
@@ -365,23 +15,19 @@ class TabManager: ObservableObject {
     @Published var terminalTabs: [TerminalTab] = []
     @Published var selectedTabID: UUID?
     @Published var selectedTerminalID: UUID?
-    /// When non-nil, main content shows the Tasks view for this project (instead of Agent or Terminal).
     @Published var selectedTasksViewPath: String?
-    /// When non-nil, main content shows the Dashboard view for this project (empty state or terminal tabs). Terminals only start when user clicks Run.
     @Published var selectedDashboardViewPath: String?
-    /// When true, main content shows the Add Project hub.
     @Published var selectedAddProjectView: Bool = false
     @Published var selectedProjectPath: String?
-    /// Stack of recently closed tabs (most recent last) for "Reopen closed tab" (Cmd+Shift+T). Capped at 20.
     @Published private(set) var recentlyClosedTabs: [SavedAgentTab] = []
     private static let maxRecentlyClosedTabs = 20
-    /// No longer forwarding each tab's objectWillChange — only structural changes (tabs, selectedTabID) publish.
-    /// Content and sidebar chips observe their specific AgentTab to avoid re-rendering the whole window when one tab streams.
+    @Published private(set) var runningAgentCount: Int = 0
+    /// Fires when any observed tab’s state changes (e.g. isRunning, turns), so subscribers can refresh derived state like tasks-in-review count.
+    let tabStateDidChange = PassthroughSubject<Void, Never>()
     private var tabSubscriptions: [UUID: AnyCancellable] = [:]
     private var linkedTaskStatusSignatures: [UUID: LinkedTaskStatusSignature] = [:]
     private var persistenceSubscriptions = Set<AnyCancellable>()
     private var pendingAutosaveWorkItem: DispatchWorkItem?
-    /// Holds terminal container views so shell sessions survive MultiTerminalHostView recreation (e.g. tab/project switch).
     let terminalHostStore = TerminalHostStore()
 
     init(loadedState: SavedTabState? = nil) {
@@ -408,9 +54,9 @@ class TabManager: ObservableObject {
         reconcileSelection()
         bindTabChanges()
         configurePersistenceObservers()
+        updateRunningAgentCount()
     }
 
-    /// True if the path exists and is a directory (project can be opened).
     private static func workspacePathExists(_ path: String) -> Bool {
         guard !path.isEmpty else { return false }
         let expanded = (path as NSString).expandingTildeInPath
@@ -418,7 +64,6 @@ class TabManager: ObservableObject {
         return FileManager.default.fileExists(atPath: expanded, isDirectory: &isDir) && isDir.boolValue
     }
 
-    /// Persist current tabs and selected tab to disk (call on quit or periodically).
     func saveState() {
         let state = SavedTabState(
             tabs: tabs
@@ -446,6 +91,7 @@ class TabManager: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in
                 self?.scheduleSaveState()
+                self?.updateRunningAgentCount()
             }
             .store(in: &persistenceSubscriptions)
 
@@ -480,13 +126,11 @@ class TabManager: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.autosaveDelay, execute: workItem)
     }
 
-    /// Current agent tab, or nil when a terminal tab, tasks view, or no tab is selected.
     var activeTab: AgentTab? {
         guard selectedTerminalID == nil, selectedTasksViewPath == nil, let selectedTabID else { return nil }
         return tabs.first { $0.id == selectedTabID }
     }
 
-    /// Current terminal tab, or nil when an agent tab, tasks view, or no terminal is selected.
     var activeTerminalTab: TerminalTab? {
         guard selectedTasksViewPath == nil, let selectedTerminalID else { return nil }
         return terminalTabs.first { $0.id == selectedTerminalID }
@@ -500,7 +144,6 @@ class TabManager: ObservableObject {
         projects.count
     }
 
-    /// Replaces only the discovered project set while keeping manual/saved projects.
     func setDiscoveredProjectsFromPaths(_ paths: [String]) {
         let normalized = paths
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -569,7 +212,6 @@ class TabManager: ObservableObject {
         }
     }
 
-    /// Show the Tasks view for the given project (like selecting a Terminal tab).
     func showTasksView(workspacePath path: String) {
         let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard projects.contains(where: { $0.path == resolved }) else { return }
@@ -581,7 +223,6 @@ class TabManager: ObservableObject {
         selectedTerminalID = nil
     }
 
-    /// Show the Dashboard view for the project (empty state or existing dashboard tabs). Does not start terminals; user clicks Run to start.
     func showDashboardView(workspacePath path: String) {
         let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard projects.contains(where: { $0.path == resolved }) else { return }
@@ -618,13 +259,11 @@ class TabManager: ObservableObject {
         return true
     }
 
-    /// Leave Tasks view and return to Agent/Terminal selection for the current project.
     func hideTasksView() {
         selectedTasksViewPath = nil
         reconcileSelection(preferredProjectPath: selectedProjectPath)
     }
 
-    /// Adds a new tab under the selected or supplied project. When `select` is false, the new tab is created but the current selection (e.g. Tasks view or another tab) is left unchanged.
     @discardableResult
     func addTab(initialPrompt: String? = nil, workspacePath: String? = nil, modelId: String? = nil, providerID: AgentProviderID = .cursor, select: Bool = true) -> AgentTab? {
         let path = workspacePath ?? activeProjectPath ?? activeTab?.workspacePath ?? ""
@@ -652,7 +291,6 @@ class TabManager: ObservableObject {
         return tab
     }
 
-    /// Adds a new terminal tab for the given (or current) project. Returns nil if workspace path is invalid.
     @discardableResult
     func addTerminalTab(workspacePath path: String? = nil) -> TerminalTab? {
         let resolved = (path ?? activeProjectPath ?? activeTab?.workspacePath ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -697,12 +335,10 @@ class TabManager: ObservableObject {
         }
     }
 
-    /// Dashboard tabs for a project (terminals created by Dashboard that run startup scripts). Stop closes these.
     func dashboardTabs(for workspacePath: String) -> [TerminalTab] {
         terminalTabs.filter { $0.workspacePath == workspacePath && $0.isDashboardTab }
     }
 
-    /// Adds one embedded terminal tab per script, runs each script, and shows the Dashboard (terminal view). Returns true if tabs were added. `labels` must be the same length as `scripts` (e.g. from `ProjectSettingsStorage.getStartupScriptDisplayLabels`).
     @discardableResult
     func addDashboardTabs(workspacePath path: String, scripts: [String], labels: [String]) -> Bool {
         let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -724,13 +360,12 @@ class TabManager: ObservableObject {
             selectedTerminalID = first.id
             selectedTabID = nil
             selectedTasksViewPath = nil
-                selectedAddProjectView = false
+            selectedAddProjectView = false
             selectedProjectPath = resolved
         }
         return true
     }
 
-    /// Closes all Preview tabs for the project (Stop button).
     func closeDashboardTabs(workspacePath path: String) {
         let idsToClose = terminalTabs.filter { $0.workspacePath == path && $0.isDashboardTab }.map(\.id)
         for id in idsToClose {
@@ -819,7 +454,6 @@ class TabManager: ObservableObject {
         reconcileSelection()
     }
 
-    /// Reopens the most recently closed tab. Returns true if a tab was restored.
     func reopenLastClosedTab() -> Bool {
         guard let saved = recentlyClosedTabs.popLast() else { return false }
         guard saved.linkedTaskID != nil else { return false }
@@ -834,7 +468,6 @@ class TabManager: ObservableObject {
         return selectAgentTab(id: tab.id)
     }
 
-    /// Reopens the most recently closed tab linked to a specific task.
     func reopenLinkedTaskTab(workspacePath: String, taskID: UUID, preferredTabID: UUID? = nil) -> Bool {
         let matchIndex = recentlyClosedTabs.indices.reversed().first { index in
             let saved = recentlyClosedTabs[index]
@@ -857,8 +490,13 @@ class TabManager: ObservableObject {
         tabs.forEach(observe)
     }
 
-    /// We only forward tab.objectWillChange when the Tasks view is showing and this tab is linked to a task in that workspace,
-    /// so the task list can update "processing" / "done" badges without re-rendering the whole window on every stream chunk.
+    private func updateRunningAgentCount() {
+        let count = tabs.filter(\.isRunning).count
+        if runningAgentCount != count {
+            runningAgentCount = count
+        }
+    }
+
     private func observe(_ tab: AgentTab) {
         guard tabSubscriptions[tab.id] == nil else { return }
         linkedTaskStatusSignatures[tab.id] = linkedTaskStatusSignature(for: tab)
@@ -867,6 +505,8 @@ class TabManager: ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.scheduleSaveState()
+                self.updateRunningAgentCount()
+                self.tabStateDidChange.send()
                 let previousStatus = self.linkedTaskStatusSignatures[tab.id]
                 let currentStatus = self.linkedTaskStatusSignature(for: tab)
                 self.linkedTaskStatusSignatures[tab.id] = currentStatus
@@ -941,4 +581,5 @@ class TabManager: ObservableObject {
         }
         return merged
     }
+
 }
