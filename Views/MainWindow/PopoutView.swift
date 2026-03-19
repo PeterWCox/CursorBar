@@ -378,6 +378,18 @@ struct PopoutView: View {
         AppPreferences.resolvedProjectScanRoots(raw: projectScanRootsRaw, legacyRootPath: projectsRootPath)
     }
 
+    /// Scan root that contains the given project path (longest matching root). Returns nil if path is not under any root.
+    private func scanRoot(for projectPath: String) -> String? {
+        let roots = projectScanRoots
+        let normalized = (projectPath as NSString).standardizingPath
+        return roots
+            .filter { root in
+                let r = (root as NSString).standardizingPath
+                return normalized == r || normalized.hasPrefix(r + "/")
+            }
+            .max(by: { $0.count < $1.count })
+    }
+
     private var preferredProjectBrowserRoot: String {
         AppPreferences.preferredProjectBrowserRoot(raw: projectScanRootsRaw, legacyRootPath: projectsRootPath)
     }
@@ -2167,54 +2179,80 @@ Build the initial app or service structure directly in this repository, choose s
     }
 
     /// "Projects" tab: turn projects on/off, add scan directories, open or browse.
+    /// Projects are ordered A–Z by display name and grouped by scan directory when more than one directory is configured.
     private var turnOnOffProjectsSection: some View {
-        let projects = tabManager.projects.sorted { lhs, rhs in
-            if lhs.source != rhs.source {
-                return lhs.source == .discovered
+        let roots = projectScanRoots
+        let projectGroups: [(sectionTitle: String, projects: [ProjectState])] = {
+            let all = tabManager.projects
+            guard !all.isEmpty else { return [] }
+            let byDisplayName: (ProjectState, ProjectState) -> Bool = { lhs, rhs in
+                appState.workspaceDisplayName(for: lhs.path).localizedStandardCompare(appState.workspaceDisplayName(for: rhs.path)) == .orderedAscending
             }
-            return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
-        }
-        return projectHubCard(
-            title: "Directories and Projects"
-        ) {
-            VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+            if roots.count > 1 {
+                let grouped = Dictionary(grouping: all) { scanRoot(for: $0.path) ?? "" }
+                var result: [(String, [ProjectState])] = roots
+                    .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+                    .map { root in
+                        let title = (root as NSString).lastPathComponent
+                        let projects = (grouped[root] ?? []).sorted(by: byDisplayName)
+                        return (title, projects)
+                    }
+                if let other = grouped[""], !other.isEmpty {
+                    result.append(("Other", other.sorted(by: byDisplayName)))
+                }
+                return result
+            }
+            return [("", all.sorted(by: byDisplayName))]
+        }()
+        return VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+            projectHubCard(
+                title: "Directories",
+                subtitle: "Folders to scan"
+            ) {
                 VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
                     if isProjectHubDiscoveryStatusMessageVisible, let message = projectHubStatusMessage {
                         projectHubSuccessToast(message)
                     }
 
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                        Text("Folders to scan")
-                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        folderPickerRow
-                        scanRootsList
-                        HStack(spacing: CursorTheme.spaceS) {
-                            Spacer(minLength: 0)
-                            Button {
-                                reloadProjectDiscovery()
-                            } label: {
-                                HStack(spacing: CursorTheme.spaceXS) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                                    Text("Reload")
-                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                                }
-                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    folderPickerRow
+                    scanRootsList
+                    HStack(spacing: CursorTheme.spaceS) {
+                        Spacer(minLength: 0)
+                        Button {
+                            reloadProjectDiscovery()
+                        } label: {
+                            HStack(spacing: CursorTheme.spaceXS) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                Text("Reload")
+                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
                             }
-                            .buttonStyle(.plain)
-                            .help("Seed .metro folders and rescan all configured roots")
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         }
+                        .buttonStyle(.plain)
+                        .help("Seed .metro folders and rescan all configured roots")
                     }
                 }
+            }
 
-                if projects.isEmpty {
-                    Text("No projects discovered yet. Add folders to scan above.")
+            projectHubCard(
+                title: "Projects",
+                subtitle: "Choose which workspaces appear in the sidebar."
+            ) {
+                if projectGroups.isEmpty {
+                    Text("No projects discovered yet. Add folders to scan in Directories.")
                         .font(.system(size: CursorTheme.fontBodySmall))
                         .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 } else {
                     VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                        ForEach(projects, id: \.path) { project in
+                        ForEach(Array(projectGroups.enumerated()), id: \.offset) { _, group in
+                            if !group.sectionTitle.isEmpty {
+                                Text(group.sectionTitle)
+                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                    .padding(.top, group.sectionTitle == "Other" ? CursorTheme.spaceS : 0)
+                            }
+                            ForEach(group.projects, id: \.path) { project in
                             let isSelected = selectedExistingProjectPath == project.path
                             let normalized = AppPreferences.normalizedProjectPath(project.path)
                             let isVisible = !AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw).contains(normalized)
@@ -2263,6 +2301,7 @@ Build the initial app or service structure directly in this repository, choose s
                                     .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme), lineWidth: 1)
                             )
                         }
+                            }
                     }
                 }
             }
@@ -2273,7 +2312,7 @@ Build the initial app or service structure directly in this repository, choose s
         let roots = projectScanRoots
         if roots.isEmpty {
             return AnyView(
-                Text("No folders added. Click above to choose folders or set Projects root in Settings.")
+                Text("No folders added yet. Use Add folder above, or set Projects root in Settings.")
                     .font(.system(size: CursorTheme.fontBodySmall))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
             )
@@ -2282,12 +2321,34 @@ Build the initial app or service structure directly in this repository, choose s
             VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
                 ForEach(roots, id: \.self) { path in
                     HStack(spacing: CursorTheme.spaceS) {
-                        Text(path)
-                            .font(.system(size: CursorTheme.fontSecondary))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer(minLength: 0)
+                        Button {
+                            pickReplacementScanRoot(for: path)
+                        } label: {
+                            HStack(spacing: CursorTheme.spaceS) {
+                                Text(path)
+                                    .font(.system(size: CursorTheme.fontSecondary))
+                                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Image(systemName: "tray.and.arrow.up.fill")
+                                    .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                    .accessibilityLabel("Choose folder")
+                            }
+                            .padding(.horizontal, CursorTheme.spaceS)
+                            .padding(.vertical, CursorTheme.spaceXS)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(CursorTheme.editor(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                    .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                            )
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Choose a different folder to scan")
+
                         Button {
                             removeProjectScanRoot(path)
                         } label: {
@@ -2299,9 +2360,6 @@ Build the initial app or service structure directly in this repository, choose s
                         .buttonStyle(.plain)
                         .help("Remove folder from scan")
                     }
-                    .padding(.horizontal, CursorTheme.spaceS)
-                    .padding(.vertical, CursorTheme.spaceXS)
-                    .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
             }
         )
@@ -2310,13 +2368,13 @@ Build the initial app or service structure directly in this repository, choose s
     private var folderPickerRow: some View {
         HStack(alignment: .center, spacing: CursorTheme.spaceS) {
             ActionButton(
-                title: "Add Folder",
+                title: "Add folder",
                 icon: "folder.badge.plus",
                 action: addProjectScanRoot,
-                help: "Add a top-level folder for project discovery",
+                help: "Add another top-level folder for project discovery",
                 style: .secondary
             )
-            Text("Metro scans subfolders inside each added directory.")
+            Text("Metro scans immediate subfolders inside each directory for projects.")
                 .font(.system(size: CursorTheme.fontCaption))
                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
@@ -2340,6 +2398,31 @@ Build the initial app or service structure directly in this repository, choose s
             } else {
                 reloadProjectDiscovery(using: roots)
             }
+        }
+    }
+
+    /// Opens the folder picker for an existing scan root; replaces that entry (deduped) and rescans.
+    private func pickReplacementScanRoot(for path: String) {
+        let prior = (path as NSString).standardizingPath
+        if let chosen = selectFolder(
+            title: "Choose folder to scan",
+            message: "Choose a folder. Its subfolders will be scanned for Metro projects.",
+            startingAt: prior
+        ) {
+            projectHubErrorMessage = nil
+            var roots = projectScanRoots
+            let normalized = (chosen as NSString).standardizingPath
+            guard let idx = roots.firstIndex(where: { ($0 as NSString).standardizingPath == prior }) else { return }
+            roots[idx] = normalized
+            var seen = Set<String>()
+            roots = roots.compactMap { root in
+                let n = (root as NSString).standardizingPath
+                guard !seen.contains(n) else { return nil }
+                seen.insert(n)
+                return n
+            }
+            projectScanRootsRaw = roots.isEmpty ? "" : AppPreferences.rawFrom(projectScanRoots: roots)
+            reloadProjectDiscovery(using: roots)
         }
     }
 
