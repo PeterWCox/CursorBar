@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursor Metro Onboarding Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070910;
+      --bg-elevated: rgba(17, 21, 32, 0.86);
+      --panel: rgba(20, 24, 36, 0.88);
+      --card: rgba(26, 31, 45, 0.92);
+      --card-2: rgba(16, 20, 30, 0.95);
+      --line: rgba(255, 255, 255, 0.09);
+      --line-strong: rgba(255, 255, 255, 0.18);
+      --text: rgba(255, 255, 255, 0.94);
+      --text-soft: rgba(255, 255, 255, 0.68);
+      --text-faint: rgba(255, 255, 255, 0.42);
+      --blue: #70a3ff;
+      --blue-2: #4f7ff7;
+      --teal: #19d7b2;
+      --purple: #8d70ff;
+      --green: #49d17f;
+      --amber: #ffbf5d;
+      --shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+      --radius-xl: 28px;
+      --radius-lg: 22px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 10% 10%, rgba(25, 215, 178, 0.16), transparent 28%),
+        radial-gradient(circle at 84% 16%, rgba(112, 163, 255, 0.17), transparent 24%),
+        radial-gradient(circle at 62% 72%, rgba(141, 112, 255, 0.11), transparent 24%),
+        linear-gradient(180deg, #090b12 0%, #06070c 100%);
+      color: var(--text);
+      font-family: "Manrope", sans-serif;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.18;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: radial-gradient(circle at center, black 42%, transparent 92%);
+    }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 40px 24px 72px;
+    }
+
+    .frame {
+      width: min(1320px, 100%);
+      min-height: 860px;
+      background:
+        linear-gradient(180deg, rgba(24, 28, 41, 0.92), rgba(9, 12, 20, 0.98));
+      border: 1px solid var(--line);
+      border-radius: 34px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: 350px 1fr;
+      position: relative;
+    }
+
+    .frame::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, rgba(255,255,255,0.05), transparent 28%, transparent 72%, rgba(255,255,255,0.04));
+      pointer-events: none;
+    }
+
+    .sidebar {
+      position: relative;
+      padding: 28px 22px 20px;
+      background:
+        linear-gradient(180deg, rgba(14, 17, 26, 0.96), rgba(11, 14, 22, 0.98));
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 10px;
+    }
+
+    .mark {
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+      position: relative;
+      background: linear-gradient(180deg, rgba(29, 35, 51, 0.98), rgba(19, 23, 34, 0.98));
+      border: 1px solid rgba(112, 163, 255, 0.25);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 16px 34px rgba(25, 215, 178, 0.13);
+    }
+
+    .mark::before {
+      content: "";
+      position: absolute;
+      inset: 13px;
+      border: 3px solid rgba(255,255,255,0.92);
+      border-radius: 50%;
+    }
+
+    .mark::after {
+      content: "";
+      position: absolute;
+      right: 9px;
+      bottom: 10px;
+      width: 12px;
+      height: 12px;
+      background: var(--teal);
+      border-radius: 4px;
+      box-shadow: 0 0 18px rgba(25, 215, 178, 0.55);
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .brand-copy strong {
+      font-family: "Syne", sans-serif;
+      font-weight: 800;
+      font-size: 26px;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-copy span {
+      color: var(--text-soft);
+      font-size: 12px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    .sidebar-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+    }
+
+    .sidebar-card h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    .sidebar-card p {
+      margin: 0;
+      color: var(--text-soft);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .sidebar-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 14px;
+      color: var(--text-soft);
+      font-size: 14px;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--teal);
+      box-shadow: 0 0 12px rgba(25, 215, 178, 0.5);
+      flex: 0 0 auto;
+    }
+
+    .content {
+      position: relative;
+      padding: 28px 30px 30px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 22px;
+      background:
+        radial-gradient(circle at top right, rgba(112, 163, 255, 0.09), transparent 34%),
+        linear-gradient(180deg, rgba(8, 11, 18, 0.55), rgba(8, 10, 18, 0.2));
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(112, 163, 255, 0.2);
+      background: rgba(112, 163, 255, 0.08);
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .topbar-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .topbar-chip {
+      padding: 10px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--line);
+      color: var(--text-soft);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .hero-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .hero {
+      background: linear-gradient(160deg, rgba(18, 24, 36, 0.96), rgba(10, 12, 20, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 30px;
+      padding: 34px;
+      position: relative;
+      overflow: hidden;
+      min-height: 540px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: auto -8% 16% auto;
+      width: 360px;
+      height: 360px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(141, 112, 255, 0.25), transparent 66%);
+      filter: blur(18px);
+      pointer-events: none;
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 1;
+      max-width: 760px;
+    }
+
+    .hero-copy h1 {
+      margin: 16px 0 14px;
+      font-family: "Syne", sans-serif;
+      font-size: clamp(48px, 6vw, 78px);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+    }
+
+    .hero-copy p {
+      margin: 0;
+      max-width: 620px;
+      color: var(--text-soft);
+      font-size: 18px;
+      line-height: 1.7;
+    }
+
+    .feature-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: var(--text-soft);
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+    .pill span {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--blue);
+      box-shadow: 0 0 12px rgba(112, 163, 255, 0.55);
+    }
+
+    .hero-actions {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .button {
+      appearance: none;
+      border: 0;
+      border-radius: 999px;
+      padding: 14px 20px;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease, background 180ms ease;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+    }
+
+    .button-primary {
+      color: #041018;
+      background: linear-gradient(135deg, var(--teal), #84f2d8);
+      box-shadow: 0 16px 32px rgba(25, 215, 178, 0.22);
+    }
+
+    .button-secondary {
+      color: var(--text);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid var(--line);
+    }
+
+    .button-ghost {
+      color: var(--text-soft);
+      background: transparent;
+      border: 1px dashed rgba(255,255,255,0.16);
+    }
+
+    .preview-panel {
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .preview-card {
+      background: linear-gradient(180deg, rgba(16, 20, 30, 0.96), rgba(11, 14, 23, 0.98));
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      padding: 20px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    .preview-card h2,
+    .preview-card h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .preview-card p {
+      color: var(--text-soft);
+      line-height: 1.65;
+      font-size: 14px;
+      margin: 10px 0 0;
+    }
+
+    .step-list {
+      margin-top: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 12px;
+      padding: 13px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .step-index {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: #08111d;
+      font-weight: 900;
+      background: linear-gradient(135deg, var(--blue), #a4beff);
+    }
+
+    .step strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .step span {
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .action-card {
+      position: relative;
+      background: linear-gradient(180deg, rgba(23, 28, 41, 0.96), rgba(15, 18, 29, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 18px 18px 16px;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+      cursor: pointer;
+      overflow: hidden;
+    }
+
+    .action-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255,255,255,0.15);
+      box-shadow: 0 20px 34px rgba(0, 0, 0, 0.22);
+    }
+
+    .action-accent {
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), transparent 70%);
+      opacity: 0.95;
+    }
+
+    .action-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      font-weight: 900;
+      color: white;
+      background: color-mix(in srgb, var(--accent) 26%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 52%, transparent);
+      margin-bottom: 18px;
+    }
+
+    .action-card h4 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      line-height: 1.15;
+    }
+
+    .action-card p {
+      margin: 0;
+      color: var(--text-soft);
+      line-height: 1.6;
+      font-size: 14px;
+      min-height: 66px;
+    }
+
+    .action-card .meta {
+      margin-top: 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-faint);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--text-soft);
+      font-size: 14px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px dashed rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .mini-preview {
+      margin-top: 14px;
+      padding: 16px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(9, 12, 20, 0.95), rgba(12, 15, 22, 0.95));
+    }
+
+    .mini-window {
+      border: 1px solid rgba(255,255,255,0.09);
+      border-radius: 18px;
+      overflow: hidden;
+      background: #0c1019;
+    }
+
+    .mini-topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      color: var(--text-faint);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .mini-body {
+      padding: 18px 16px 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .mini-line {
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04));
+    }
+
+    .mini-actions {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .mini-button {
+      height: 48px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.07);
+      background: rgba(255,255,255,0.035);
+    }
+
+    .caption {
+      margin-top: 10px;
+      color: var(--text-faint);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1100px) {
+      .frame {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .hero-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .page {
+        padding: 16px;
+      }
+
+      .content,
+      .sidebar {
+        padding: 20px;
+      }
+
+      .hero {
+        padding: 24px;
+      }
+
+      .actions-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-copy h1 {
+        font-size: 42px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="frame" aria-label="Cursor Metro onboarding preview">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="mark" aria-hidden="true"></div>
+          <div class="brand-copy">
+            <strong>Cursor Metro</strong>
+            <span>Onboarding Concept</span>
+          </div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3>Design Direction</h3>
+          <p>
+            A calmer first-run state with one clear decision at a time. The existing Projects hub stays available after setup, but the first impression becomes guided instead of operational.
+          </p>
+        </div>
+
+        <div class="sidebar-card">
+          <h3>Intent</h3>
+          <div class="sidebar-list">
+            <div class="sidebar-item">
+              <span>Show only on clean launch</span>
+              <span class="dot"></span>
+            </div>
+            <div class="sidebar-item">
+              <span>Return until setup succeeds</span>
+              <span class="dot"></span>
+            </div>
+            <div class="sidebar-item">
+              <span>Reuse existing project flows</span>
+              <span class="dot"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-card">
+          <h3>Outcome</h3>
+          <p>
+            New users land in a focused welcome screen. Experienced users still get the familiar project controls once onboarding is complete.
+          </p>
+        </div>
+      </aside>
+
+      <section class="content">
+        <div class="topbar">
+          <div class="eyebrow">First-Run Wizard Preview</div>
+          <div class="topbar-actions">
+            <div class="topbar-chip">Dark app shell</div>
+            <div class="topbar-chip">Single-screen flow</div>
+            <div class="topbar-chip">Uses existing actions</div>
+          </div>
+        </div>
+
+        <div class="hero-layout">
+          <section class="hero">
+            <div class="hero-copy">
+              <div class="eyebrow">Welcome to Cursor Metro</div>
+              <h1>Start with one project, not a control panel.</h1>
+              <p>
+                Instead of dropping users into the full Projects hub, the first launch invites them to open a workspace, create something new, or clone from GitHub. The advanced scan-folder path is still there, just quieter.
+              </p>
+
+              <div class="feature-pills">
+                <div class="pill"><span></span> Tasks</div>
+                <div class="pill"><span></span> Preview</div>
+                <div class="pill"><span></span> Agents</div>
+                <div class="pill"><span></span> GitHub</div>
+              </div>
+            </div>
+
+            <div class="hero-actions">
+              <button class="button button-primary">Open Existing Project</button>
+              <button class="button button-secondary">Create New Project</button>
+              <button class="button button-secondary">Clone From GitHub</button>
+              <button class="button button-ghost">Skip For Now</button>
+            </div>
+          </section>
+
+          <aside class="preview-panel">
+            <section class="preview-card">
+              <h2>What changes in the app</h2>
+              <p>The wizard appears only for fresh local state, then disappears permanently after the first successful setup.</p>
+
+              <div class="step-list">
+                <div class="step">
+                  <div class="step-index">1</div>
+                  <div>
+                    <strong>Fresh launch detected</strong>
+                    <span>No saved state, no configured roots, no restored manual projects.</span>
+                  </div>
+                </div>
+                <div class="step">
+                  <div class="step-index">2</div>
+                  <div>
+                    <strong>User chooses one path</strong>
+                    <span>Open, create, or clone. Scan folders stays as a secondary option.</span>
+                  </div>
+                </div>
+                <div class="step">
+                  <div class="step-index">3</div>
+                  <div>
+                    <strong>Success marks onboarding complete</strong>
+                    <span>Later launches fall back to the regular Projects hub instead of the wizard.</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="preview-card">
+              <h3>Mini in-app composition</h3>
+              <div class="mini-preview">
+                <div class="mini-window">
+                  <div class="mini-topbar">
+                    <span>Welcome</span>
+                    <span>Cursor Metro</span>
+                  </div>
+                  <div class="mini-body">
+                    <div class="mini-line" style="width: 74%;"></div>
+                    <div class="mini-line" style="width: 88%;"></div>
+                    <div class="mini-line" style="width: 58%;"></div>
+                    <div class="mini-actions">
+                      <div class="mini-button"></div>
+                      <div class="mini-button"></div>
+                      <div class="mini-button"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="caption">
+                  The real SwiftUI version can stay compact and native while using the same hierarchy shown here.
+                </div>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        <section class="actions-grid" aria-label="Onboarding action cards">
+          <article class="action-card" style="--accent: var(--blue);">
+            <div class="action-accent"></div>
+            <div class="action-icon">01</div>
+            <h4>Open Existing Project</h4>
+            <p>Fastest path into the product. Pick any folder and land directly in Tasks with the current workspace context updated for the rest of the app.</p>
+            <div class="meta">
+              <span>Primary route</span>
+              <span>Existing flow</span>
+            </div>
+          </article>
+
+          <article class="action-card" style="--accent: var(--purple);">
+            <div class="action-accent"></div>
+            <div class="action-icon">02</div>
+            <h4>Create New Project</h4>
+            <p>Use the current project creation logic, but present it after a calmer invitation instead of inside a dense multi-tabbed configuration surface.</p>
+            <div class="meta">
+              <span>New workspace</span>
+              <span>Reusable setup</span>
+            </div>
+          </article>
+
+          <article class="action-card" style="--accent: var(--green);">
+            <div class="action-accent"></div>
+            <div class="action-icon">03</div>
+            <h4>Clone From GitHub</h4>
+            <p>Bring in a repository and optionally chain into setup. This keeps the first-run story friendly for users who are joining an existing project.</p>
+            <div class="meta">
+              <span>Git-first</span>
+              <span>Optional setup agent</span>
+            </div>
+          </article>
+
+          <article class="action-card" style="--accent: var(--amber);">
+            <div class="action-accent"></div>
+            <div class="action-icon">04</div>
+            <h4>Add Folder To Scan</h4>
+            <p>Still supported, but visually demoted. It belongs as an advanced discovery option rather than the main story users see on first launch.</p>
+            <div class="meta">
+              <span>Secondary path</span>
+              <span>Advanced</span>
+            </div>
+          </article>
+        </section>
+
+        <div class="footer-note">
+          <span>This preview is meant to showcase hierarchy, tone, and density before further SwiftUI polishing.</span>
+          <span>File: <strong>docs/onboarding-preview.html</strong></span>
+        </div>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

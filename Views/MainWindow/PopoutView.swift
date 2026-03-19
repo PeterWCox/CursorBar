@@ -899,30 +899,13 @@ Build the initial app or service structure directly in this repository, choose s
         _ = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: path)
     }
 
-    private func openExistingProjectFromHub(_ path: String) {
-        projectHubErrorMessage = nil
-        projectHubStatusMessage = nil
-        selectedExistingProjectPath = path
-        openProjectInTasksView(path)
-    }
-
-    private func browseForExistingProject() {
-        guard let path = selectFolder(
-            title: "Open Project",
-            message: "Choose a project folder to add to Cursor Metro.",
-            startingAt: selectedExistingProjectPath ?? currentWorkspacePath
-        ) else { return }
-        selectedExistingProjectPath = path
-        openExistingProjectFromHub(path)
-    }
-
     private func createEmptyProjectFromHub() {
         projectHubErrorMessage = nil
         projectHubStatusMessage = nil
         switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
         case .success(let path):
             projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
-            tabManager.addProject(path: path, select: false)
+            openProjectInTasksView(path)
         case .failure(let error):
             projectHubErrorMessage = error.localizedDescription
         }
@@ -1036,11 +1019,11 @@ Build the initial app or service structure directly in this repository, choose s
             }
 
             hiddenShortcutButton("Toggle main window", key: "b") {
-                withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() }
+                toggleMainContentCollapsed()
             }
 
             hiddenShortcutButton("Toggle main window", key: "s") {
-                withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() }
+                toggleMainContentCollapsed()
             }
         }
         .allowsHitTesting(false)
@@ -1056,6 +1039,12 @@ Build the initial app or service structure directly in this repository, choose s
             .keyboardShortcut(key, modifiers: modifiers)
             .opacity(0)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func toggleMainContentCollapsed() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            appState.isMainContentCollapsed.toggle()
+        }
     }
 
     private func openProjectOnGitHub(_ path: String) {
@@ -1541,9 +1530,7 @@ Build the initial app or service structure directly in this repository, choose s
         bodyWithShortcuts
         .onAppear {
             sanitizeSelectedModel()
-            devFolders = loadDevFolders(rootPaths: projectScanRoots)
-            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
-            seedProjectHubDefaults()
+            reloadProjectDiscovery(showStatusMessage: false)
             refreshQuickActions(for: currentWorkspacePath)
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
@@ -1553,15 +1540,11 @@ Build the initial app or service structure directly in this repository, choose s
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectScanRootsRaw) { _, _ in
-            devFolders = loadDevFolders(rootPaths: projectScanRoots)
-            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
-            seedProjectHubDefaults()
+            reloadProjectDiscovery(showStatusMessage: false)
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectsRootPath) { _, _ in
-            devFolders = loadDevFolders(rootPaths: projectScanRoots)
-            tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
-            seedProjectHubDefaults()
+            reloadProjectDiscovery(showStatusMessage: false)
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: selectedModel) { _, _ in
@@ -1740,7 +1723,7 @@ Build the initial app or service structure directly in this repository, choose s
         return HStack(alignment: .center, spacing: 0) {
             mainColumnTitleContent
             Spacer(minLength: 0)
-            IconButton(icon: collapseChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Collapse")
+            IconButton(icon: collapseChevron, action: toggleMainContentCollapsed, help: "Collapse")
             IconButton(icon: isSidebarOnRight ? "sidebar.leading" : "sidebar.trailing", action: {
                 withAnimation(.easeInOut(duration: 0.2)) { isSidebarOnRight.toggle() }
             }, help: isSidebarOnRight ? "Move sidebar to left" : "Move sidebar to right")
@@ -2150,9 +2133,14 @@ Build the initial app or service structure directly in this repository, choose s
         .background(CursorTheme.semanticSuccess.opacity(0.15), in: Capsule())
     }
 
+    private var isProjectHubDiscoveryStatusMessageVisible: Bool {
+        guard let message = projectHubStatusMessage else { return false }
+        return message.hasPrefix("Prepared") || message.hasPrefix("Reloaded")
+    }
+
     private func projectHubCard<Content: View>(
         title: String,
-        subtitle: String,
+        subtitle: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
@@ -2160,10 +2148,12 @@ Build the initial app or service structure directly in this repository, choose s
                 Text(title)
                     .font(.system(size: CursorTheme.fontSubtitle, weight: .semibold))
                     .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                Text(subtitle)
-                    .font(.system(size: CursorTheme.fontBodySmall))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: CursorTheme.fontBodySmall))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             content()
@@ -2185,53 +2175,41 @@ Build the initial app or service structure directly in this repository, choose s
             return lhs.path.localizedStandardCompare(rhs.path) == .orderedAscending
         }
         return projectHubCard(
-            title: "Turn on/off projects",
-            subtitle: "Choose which folders to scan, then show or hide projects in the sidebar. Open or browse to add more."
+            title: "Directories and Projects"
         ) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
-                // Scan directories
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Folders to scan")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    scanRootsList
-                    ActionButton(
-                        title: "Add folder",
-                        icon: "folder.badge.plus",
-                        action: addProjectScanRoot,
-                        help: "Add a folder to scan for projects",
-                        style: .secondary
-                    )
-                }
+            VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                    if isProjectHubDiscoveryStatusMessageVisible, let message = projectHubStatusMessage {
+                        projectHubSuccessToast(message)
+                    }
 
-                Divider()
-                    .padding(.vertical, CursorTheme.spaceXS)
-
-                HStack(spacing: CursorTheme.spaceS) {
-                    ActionButton(
-                        title: "Open Selected",
-                        icon: "folder",
-                        action: {
-                            if let path = selectedExistingProjectPath {
-                                openExistingProjectFromHub(path)
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Folders to scan")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        folderPickerRow
+                        scanRootsList
+                        HStack(spacing: CursorTheme.spaceS) {
+                            Spacer(minLength: 0)
+                            Button {
+                                reloadProjectDiscovery()
+                            } label: {
+                                HStack(spacing: CursorTheme.spaceXS) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                    Text("Reload")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                }
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                             }
-                        },
-                        isDisabled: selectedExistingProjectPath == nil,
-                        help: "Open the selected project in Tasks",
-                        style: .primary
-                    )
-                    ActionButton(
-                        title: "Browse Folder",
-                        icon: "folder.badge.plus",
-                        action: browseForExistingProject,
-                        help: "Choose any folder on your Mac",
-                        style: .secondary
-                    )
-                    Spacer(minLength: 0)
+                            .buttonStyle(.plain)
+                            .help("Seed .metro folders and rescan all configured roots")
+                        }
+                    }
                 }
 
                 if projects.isEmpty {
-                    Text("No projects discovered yet. Add folders to scan or browse to a folder.")
+                    Text("No projects discovered yet. Add folders to scan above.")
                         .font(.system(size: CursorTheme.fontBodySmall))
                         .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                 } else {
@@ -2245,7 +2223,7 @@ Build the initial app or service structure directly in this repository, choose s
                                     selectedExistingProjectPath = project.path
                                 } label: {
                                     HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-                                        Image(systemName: project.source == .discovered ? "sparkles" : "folder")
+                                        Image(systemName: "folder")
                                             .font(.system(size: CursorTheme.fontBody, weight: .medium))
                                             .foregroundStyle(CursorTheme.colorForWorkspace(path: project.path))
                                             .frame(width: 18, height: 18)
@@ -2295,7 +2273,7 @@ Build the initial app or service structure directly in this repository, choose s
         let roots = projectScanRoots
         if roots.isEmpty {
             return AnyView(
-                Text("No folders added. Use “Add folder” or set Projects root in Settings.")
+                Text("No folders added. Click above to choose folders or set Projects root in Settings.")
                     .font(.system(size: CursorTheme.fontBodySmall))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
             )
@@ -2329,6 +2307,23 @@ Build the initial app or service structure directly in this repository, choose s
         )
     }
 
+    private var folderPickerRow: some View {
+        HStack(alignment: .center, spacing: CursorTheme.spaceS) {
+            ActionButton(
+                title: "Add Folder",
+                icon: "folder.badge.plus",
+                action: addProjectScanRoot,
+                help: "Add a top-level folder for project discovery",
+                style: .secondary
+            )
+            Text("Metro scans subfolders inside each added directory.")
+                .font(.system(size: CursorTheme.fontCaption))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+
     private func addProjectScanRoot() {
         let startPath = projectScanRoots.first ?? (projectsRootPath as NSString).expandingTildeInPath
         if let path = selectFolder(
@@ -2336,11 +2331,14 @@ Build the initial app or service structure directly in this repository, choose s
             message: "Choose a folder. Its subfolders will be scanned for Metro projects.",
             startingAt: startPath
         ) {
+            projectHubErrorMessage = nil
             var roots = projectScanRoots
             let normalized = (path as NSString).standardizingPath
             if !roots.contains(normalized) {
                 roots.append(normalized)
                 projectScanRootsRaw = AppPreferences.rawFrom(projectScanRoots: roots)
+            } else {
+                reloadProjectDiscovery(using: roots)
             }
         }
     }
@@ -2351,10 +2349,26 @@ Build the initial app or service structure directly in this repository, choose s
         projectScanRootsRaw = roots.isEmpty ? "" : AppPreferences.rawFrom(projectScanRoots: roots)
     }
 
+    private func reloadProjectDiscovery(using roots: [String]? = nil, showStatusMessage: Bool = true) {
+        let resolvedRoots = roots ?? projectScanRoots
+        let createdMetroCount = seedMetroDirectories(rootPaths: resolvedRoots)
+        devFolders = loadDevFolders(rootPaths: resolvedRoots)
+        tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
+        seedProjectHubDefaults()
+
+        guard showStatusMessage else { return }
+        let projectCount = devFolders.count
+        if createdMetroCount > 0 {
+            projectHubStatusMessage = "Reloaded \(projectCount) project\(projectCount == 1 ? "" : "s") and prepared \(createdMetroCount) new folder\(createdMetroCount == 1 ? "" : "s")."
+        } else {
+            projectHubStatusMessage = "Reloaded \(projectCount) project\(projectCount == 1 ? "" : "s")."
+        }
+    }
+
     private var newProjectSection: some View {
         projectHubCard(
             title: "Create New Project",
-            subtitle: "Create an empty workspace or let the agent scaffold the first version from your idea."
+            subtitle: "Let the agent scaffold the first version from your idea."
         ) {
             VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
                 if let message = projectHubStatusMessage, message.hasPrefix("Created") {
@@ -2406,15 +2420,7 @@ Build the initial app or service structure directly in this repository, choose s
 
                 HStack(spacing: CursorTheme.spaceS) {
                     ActionButton(
-                        title: "Create Empty",
-                        icon: "plus.square",
-                        action: createEmptyProjectFromHub,
-                        isDisabled: sanitizedProjectName(newProjectName).isEmpty,
-                        help: "Create the folder and open it in Tasks",
-                        style: .primary
-                    )
-                    ActionButton(
-                        title: "Create With Agent",
+                        title: "Create",
                         icon: "wand.and.stars",
                         action: createProjectWithAgentFromHub,
                         isDisabled: sanitizedProjectName(newProjectName).isEmpty,

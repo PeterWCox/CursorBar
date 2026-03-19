@@ -230,6 +230,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var savedExpandedPanelWidth: CGFloat = 720
     private var savedExpandedPanelHeight: CGFloat?
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard appState.tabManager.runningAgentCount > 0 else {
+            return .terminateNow
+        }
+        let alert = NSAlert()
+        alert.messageText = "Agents Are Running"
+        alert.informativeText = "One or more agents are still processing. Quit anyway? Their work will be interrupted."
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        NSApp.reply(toApplicationShouldTerminate: response == .alertFirstButtonReturn)
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         appState.saveTabState()
         PanelFrameStorage.save(panel.frame)
@@ -285,6 +299,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .environmentObject(projectSettingsStore)
             .environmentObject(appState.tabManager)
         )
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = CursorTheme.radiusWindow
+        hostingView.layer?.masksToBounds = true
         panel.contentView = hostingView
 
         appState.$isMainContentCollapsed
@@ -823,7 +840,8 @@ class AppState: ObservableObject {
 
     init() {
         HangDiagnostics.shared.start()
-        let manager = TabManager(loadedState: TabManagerPersistence.load())
+        let loadedState = TabManagerPersistence.load()
+        let manager = TabManager(loadedState: loadedState)
         tabManager = manager
         openProjectCount = manager.openProjectCount
 

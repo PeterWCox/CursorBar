@@ -257,6 +257,23 @@ struct TasksListView: View {
         )
     }
 
+    /// Add a task with the given title (shown in list), send the given prompt to the agent. Matches agent-window quick actions.
+    private func runQuickTask(taskTitle: String, agentPrompt: String) {
+        guard !workspacePath.isEmpty else { return }
+        syncNewTaskModelSelection()
+        store.selectTasksTab(.inProgress)
+        let task = ProjectTasksStorage.addTask(
+            workspacePath: workspacePath,
+            content: taskTitle,
+            screenshotData: [],
+            providerID: newTaskProviderID,
+            modelId: store.newTaskModelId,
+            taskState: .inProgress
+        )
+        onSendToAgent(agentPrompt, task.id, task.screenshotPaths, task.providerID, task.modelId)
+        onTasksDidUpdate()
+    }
+
     var body: some View {
         let snapshot = taskSnapshot
         PanelWindowView(
@@ -403,10 +420,41 @@ struct TasksListView: View {
         )
     }
 
-    /// Add Task only; Play / Stop / Configure Setup / Open in Browser are in the Preview view header.
+    /// Quick-action chips to the right of Add Task (same labels and prompts as agent window).
+    private var quickActionChips: some View {
+        Group {
+            ActionButton(
+                title: QuickActionCommand.defaultCommitAndPush.title,
+                icon: QuickActionCommand.defaultCommitAndPush.icon,
+                action: {
+                    runQuickTask(
+                        taskTitle: QuickActionCommand.defaultCommitAndPush.title,
+                        agentPrompt: QuickActionCommand.defaultCommitAndPush.prompt
+                    )
+                },
+                help: "Add task and send to agent to commit and push",
+                style: .secondary
+            )
+            ActionButton(
+                title: QuickActionCommand.defaultFixBuild.title,
+                icon: QuickActionCommand.defaultFixBuild.icon,
+                action: {
+                    runQuickTask(
+                        taskTitle: QuickActionCommand.defaultFixBuild.title,
+                        agentPrompt: QuickActionCommand.defaultFixBuild.prompt
+                    )
+                },
+                help: "Add task and send to agent to fix build errors",
+                style: .secondary
+            )
+        }
+    }
+
+    /// Add Task and quick actions (Commit & push, Fix build) in one row.
     private var previewButtonsBar: some View {
         HStack(spacing: CursorTheme.spaceS) {
             addTaskChip
+            quickActionChips
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -495,6 +543,7 @@ struct TasksListView: View {
     private func backlogContent(snapshot: TasksListSnapshot) -> some View {
         HStack(spacing: CursorTheme.spaceS) {
             addTaskChip
+            quickActionChips
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1289,7 +1338,7 @@ private enum TasksStorybookData {
         )
         let review = ProjectTasksStorage.addTask(
             workspacePath: workspaceURL.path,
-            content: "Confirm that the new onboarding panel matches the approved mock.",
+            content: "Confirm that the Projects hub makes it easy to choose the repo root and open a workspace.",
             screenshotData: [makePNGData(color: .systemBlue)].compactMap { $0 },
             providerID: .cursor,
             modelId: "gpt-5.4-medium",

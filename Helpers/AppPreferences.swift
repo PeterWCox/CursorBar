@@ -88,13 +88,11 @@ enum AppPreferences {
             .joined(separator: ",")
     }
 
+    /// Resolves stored scan roots. When raw is non-empty, returns parsed roots.
+    /// When raw is empty, returns [] so the user can have zero folders (e.g. to simulate out-of-box state).
+    /// Legacy fallback is no longer used so "Remove" on the last folder actually clears the list.
     static func resolvedProjectScanRoots(raw: String, legacyRootPath: String) -> [String] {
-        let stored = projectScanRoots(from: raw)
-        if !stored.isEmpty {
-            return stored
-        }
-        let legacyResolved = resolvedProjectsRootPath(legacyRootPath)
-        return legacyResolved.isEmpty ? defaultProjectScanRoots : [legacyResolved]
+        projectScanRoots(from: raw)
     }
 
     static func preferredProjectBrowserRoot(raw: String, legacyRootPath: String) -> String {

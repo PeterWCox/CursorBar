@@ -160,6 +160,52 @@ func loadDevFolders(rootPath: String) -> [URL] {
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 }
 
+/// Ensures every immediate subdirectory of `rootPath` has a `.metro` directory so Metro can discover it.
+/// Returns the number of `.metro` directories created during this pass.
+@discardableResult
+func seedMetroDirectories(rootPath: String) -> Int {
+    let resolvedRootPath = AppPreferences.resolvedProjectsRootPath(rootPath)
+    let rootURL = URL(fileURLWithPath: resolvedRootPath)
+    guard let contents = try? FileManager.default.contentsOfDirectory(
+        at: rootURL,
+        includingPropertiesForKeys: [.isDirectoryKey],
+        options: [.skipsHiddenFiles]
+    ) else { return 0 }
+
+    let fm = FileManager.default
+    var createdCount = 0
+    for candidate in contents {
+        guard (try? candidate.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+
+        let metroDir = candidate.appendingPathComponent(".metro", isDirectory: true)
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: metroDir.path, isDirectory: &isDir), isDir.boolValue {
+            continue
+        }
+
+        do {
+            try fm.createDirectory(at: metroDir, withIntermediateDirectories: true)
+            createdCount += 1
+        } catch {
+            continue
+        }
+    }
+
+    return createdCount
+}
+
+/// Seeds `.metro` directories across multiple scan roots, deduplicated by normalized path.
+/// Returns the total number of `.metro` directories created.
+@discardableResult
+func seedMetroDirectories(rootPaths: [String]) -> Int {
+    var seen = Set<String>()
+    return rootPaths.reduce(into: 0) { total, path in
+        let normalized = (path as NSString).standardizingPath
+        guard !normalized.isEmpty, seen.insert(normalized).inserted else { return }
+        total += seedMetroDirectories(rootPath: normalized)
+    }
+}
+
 /// Returns Metro projects discovered under any of the configured scan roots, deduplicated by path.
 func loadDevFolders(rootPaths: [String]) -> [URL] {
     var seen = Set<String>()

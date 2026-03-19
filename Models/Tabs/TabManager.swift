@@ -40,6 +40,7 @@ class TabManager: ObservableObject {
                 .filter { $0.linkedTaskID != nil }
                 .filter { TabManager.workspacePathExists($0.workspacePath) }
             let restoredProjects = saved.projects
+                .filter { $0.source == .manual }
                 .map { ProjectState(path: $0.path, source: $0.source) }
                 .filter { TabManager.workspacePathExists($0.path) }
             let tabProjects = filteredTabs.map { ProjectState(path: $0.workspacePath, source: .manual) }
@@ -72,7 +73,9 @@ class TabManager: ObservableObject {
             recentlyClosedTabs: recentlyClosedTabs
                 .filter { $0.linkedTaskID != nil && Self.workspacePathExists($0.workspacePath) },
             selectedTabID: selectedTabID,
-            projects: projects.map { SavedProject(path: $0.path, source: $0.source) },
+            projects: projects
+                .filter { $0.source == .manual }
+                .map { SavedProject(path: $0.path, source: $0.source) },
             selectedProjectPath: selectedProjectPath,
             selectedAddProjectView: selectedAddProjectView
         )

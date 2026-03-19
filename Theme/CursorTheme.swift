@@ -120,6 +120,8 @@ enum CursorTheme {
     static let spacingListItems: CGFloat = 8
     /// Vertical gap between major sections (e.g. Todo vs Backlog).
     static let gapBetweenSections: CGFloat = 20
+    /// Corner radius for the main popout window (clip and border).
+    static let radiusWindow: CGFloat = 28
     /// Corner radius for cards (task row, raised surfaces).
     static let radiusCard: CGFloat = 12
     /// Corner radius for panel tab bar selected pill (Tasks, Projects, Preview).
@@ -153,7 +155,7 @@ enum CursorTheme {
     static let fontTitleSmall: CGFloat = 17
     /// Title: panel headers, list section titles.
     static let fontTitle: CGFloat = 18
-    /// Title large: onboarding, prominent headings.
+    /// Title large: prominent headings.
     static let fontTitleLarge: CGFloat = 20
     /// Display small: splash headings.
     static let fontDisplaySmall: CGFloat = 22
