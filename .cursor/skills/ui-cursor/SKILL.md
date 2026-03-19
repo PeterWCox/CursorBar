@@ -22,7 +22,7 @@ Use **Theme/CursorTheme.swift** for all visual constants. Do not hardcode colors
    - Never use raw `Color.red`, `Color.gray`, or literal RGB in views.
 
 2. **Spacing and padding** – Use theme constants instead of magic numbers:
-   - **Padding:** `CursorTheme.paddingCard` (12), `CursorTheme.paddingPanel` (12), `paddingHeaderHorizontal` (16), `paddingHeaderVertical` (12), `paddingBadgeHorizontal` (5), `paddingBadgeVertical` (2)
+   - **Padding:** `CursorTheme.paddingCard` (12), `CursorTheme.paddingPanel` (12), `paddingChrome` (18) for window chrome and divider gutters, `paddingSidebarUniform` (75% of `paddingChrome`, sidebar interior only), `paddingHeaderHorizontal` (16), `paddingHeaderVertical` (12), `paddingBadgeHorizontal` (5), `paddingBadgeVertical` (2)
    - **Gaps:** `CursorTheme.gapSectionTitleToContent` (16), `gapBetweenSections` (20), `spacingListItems` (8)
    - **Scale:** `spaceXXS` (2), `spaceXS` (4), `spaceS` (8), `spaceM` (12), `spaceL` (16), `spaceXL` (24), `spaceXXL` (32)
    - Replace `.padding(12)` with `.padding(CursorTheme.paddingCard)` or `.padding(CursorTheme.paddingPanel)` as appropriate.

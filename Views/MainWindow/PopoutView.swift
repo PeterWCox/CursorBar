@@ -1374,7 +1374,7 @@ Build the initial app or service structure directly in this repository, choose s
                 .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusTabBarPill, style: .continuous))
             }
         }
-        .padding(.horizontal, CursorTheme.paddingHeaderHorizontal)
+        .padding(.horizontal, CursorTheme.paddingChrome)
         .padding(.vertical, CursorTheme.spaceXS)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(CursorTheme.chrome(for: colorScheme))
@@ -1450,64 +1450,64 @@ Build the initial app or service structure directly in this repository, choose s
 
     @ViewBuilder
     private var mainContentWithSidebar: some View {
-        GeometryReader { geometry in
-            let contentWidth = max(0, geometry.size.width)
-            let effectiveSidebarWidth = sidebarWidth
-            let agentWidth = isMainContentCollapsed ? 0 : max(0, contentWidth - effectiveSidebarWidth - 1) // 1 for divider
-            let sidebarColumn = VStack(spacing: 0) {
-                leftColumnHeader
-                tabSidebar
-            }
-            .frame(width: effectiveSidebarWidth)
-            .clipped()
-            .padding(isSidebarOnRight ? .leading : .trailing, CursorTheme.spaceS)
-            let dividerView = Group {
-                if !isMainContentCollapsed {
-                    Divider()
-                        .frame(width: 1)
-                        .background(CursorTheme.border(for: colorScheme))
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            let mainColumn = Group {
-                if isMainContentCollapsed {
-                    Color.clear.frame(width: 0).clipped()
-                } else {
-                    VStack(spacing: 0) {
-                        mainColumnHeaderArea
-                        if tabManager.selectedDashboardViewPath == selectedProjectPath, let path = selectedProjectPath, !path.isEmpty {
-                            dashboardPanelTabBar(workspacePath: path)
-                        }
-                        mainContentZStack
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .frame(width: agentWidth)
-            .clipped()
-            .padding(isSidebarOnRight ? .trailing : .leading, CursorTheme.spaceS)
-
-            HStack(alignment: .top, spacing: 0) {
-                if isSidebarOnRight {
-                    mainColumn
-                    dividerView
-                    sidebarColumn
-                } else {
-                    sidebarColumn
-                    dividerView
-                    mainColumn
-                }
-            }
-            .clipped()
-            .frame(maxWidth: .infinity, alignment: isSidebarOnRight ? .trailing : .leading)
+        let sidebarColumn = VStack(spacing: 0) {
+            leftColumnHeader
+            tabSidebar
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, CursorTheme.paddingSidebarUniform)
+        .padding(.vertical, CursorTheme.paddingChrome)
+        .frame(width: sidebarWidth)
+        .clipped()
+
+        if isMainContentCollapsed {
+            sidebarColumn
+        } else {
+            GeometryReader { geometry in
+                let contentWidth = max(0, geometry.size.width)
+                let dividerTrackWidth: CGFloat = 1
+                let agentWidth = max(0, contentWidth - sidebarWidth - dividerTrackWidth)
+                let dividerView = Divider()
+                    .frame(width: 1)
+                    .background(CursorTheme.border(for: colorScheme))
+                    .frame(maxHeight: .infinity)
+                let mainColumn = VStack(spacing: 0) {
+                    mainColumnHeaderArea
+                    if tabManager.selectedDashboardViewPath == selectedProjectPath, let path = selectedProjectPath, !path.isEmpty {
+                        dashboardPanelTabBar(workspacePath: path)
+                    }
+                    mainContentZStack
+                }
+                .frame(maxWidth: .infinity)
+                .frame(width: agentWidth)
+                .clipped()
+
+                HStack(alignment: .top, spacing: 0) {
+                    if isSidebarOnRight {
+                        mainColumn
+                        dividerView
+                        sidebarColumn
+                    } else {
+                        sidebarColumn
+                        dividerView
+                        mainColumn
+                    }
+                }
+                .clipped()
+                .frame(maxWidth: .infinity, alignment: isSidebarOnRight ? .trailing : .leading)
+            }
+            .frame(maxWidth: .infinity)
+        }
     }
 
     private var bodyWithDashboardPersistence: some View {
         bodyContent
-            .padding(16)
-            .frame(minWidth: isMainContentCollapsed ? 260 : (sidebarWidth + 110), maxWidth: .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
+            .padding(.vertical, CursorTheme.paddingChrome)
+            .padding(.horizontal, isMainContentCollapsed ? CursorTheme.paddingChrome : 0)
+            .padding(.leading, isMainContentCollapsed ? 0 : (isSidebarOnRight ? CursorTheme.paddingChrome : 0))
+            .padding(.trailing, isMainContentCollapsed ? 0 : (isSidebarOnRight ? 0 : CursorTheme.paddingChrome))
+            .frame(minWidth: isMainContentCollapsed ? (sidebarWidth + CursorTheme.paddingChrome * 2) : (sidebarWidth + 120))
+            .frame(width: isMainContentCollapsed ? (sidebarWidth + CursorTheme.paddingChrome * 2) : nil)
+            .frame(maxWidth: isMainContentCollapsed ? (sidebarWidth + CursorTheme.paddingChrome * 2) : .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
             .preferredColorScheme(resolvedColorScheme)
             .background(CursorTheme.panelGradient(for: colorScheme))
     }
@@ -1722,11 +1722,6 @@ Build the initial app or service structure directly in this repository, choose s
                 IconButton(icon: expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
             }
         }
-        .padding(.horizontal, isSidebarOnRight ? 0 : Self.sidebarHeaderPadding)
-        .padding(.leading, isSidebarOnRight ? CursorTheme.spaceS : 10)
-        .padding(.trailing, isSidebarOnRight ? CursorTheme.spaceM : Self.sidebarHeaderPadding)
-        .padding(.top, Self.sidebarHeaderVerticalPadding)
-        .padding(.bottom, Self.sidebarHeaderVerticalPadding)
     }
 
     /// Single title row: icon + header (e.g. Tasks / agent title) on the left, title bar buttons (collapse, sidebar, settings, minimise) on the right.
@@ -1742,8 +1737,7 @@ Build the initial app or service structure directly in this repository, choose s
             IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
             IconButton(icon: "minus", action: dismiss, help: "Minimise")
         }
-        .padding(.leading, CursorTheme.paddingHeaderHorizontal)
-        .padding(.trailing, CursorTheme.spaceS)
+        .padding(.horizontal, CursorTheme.paddingChrome)
         .padding(.vertical, CursorTheme.paddingHeaderVertical)
     }
 
@@ -1789,8 +1783,7 @@ Build the initial app or service structure directly in this repository, choose s
             }
             Spacer(minLength: 0)
         }
-        .padding(.leading, CursorTheme.paddingHeaderHorizontal)
-        .padding(.trailing, CursorTheme.spaceS)
+        .padding(.horizontal, CursorTheme.paddingChrome)
         .padding(.bottom, CursorTheme.paddingHeaderVertical)
     }
 
@@ -1913,10 +1906,6 @@ Build the initial app or service structure directly in this repository, choose s
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-
-    private static let sidebarContentPadding: CGFloat = 10
-    private static let sidebarHeaderPadding: CGFloat = 16
-    private static let sidebarHeaderVerticalPadding: CGFloat = 18
 
     private var tabSidebar: some View {
         VStack(spacing: 6) {
@@ -2072,10 +2061,8 @@ Build the initial app or service structure directly in this repository, choose s
             )
             .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, Self.sidebarContentPadding)
-        .frame(width: sidebarWidth)
+        .frame(maxWidth: .infinity)
         .clipped()
-        .padding(.trailing, 12)
     }
 
     // MARK: - Projects hub
@@ -2086,7 +2073,7 @@ Build the initial app or service structure directly in this repository, choose s
 
             if let message = projectHubErrorMessage, !message.isEmpty {
                 projectHubBanner(message, tint: CursorTheme.semanticErrorTint, border: CursorTheme.semanticError)
-                    .padding(.horizontal, CursorTheme.paddingPanel)
+                    .padding(.horizontal, CursorTheme.paddingChrome)
                     .padding(.top, CursorTheme.spaceS)
             }
 
@@ -2101,7 +2088,7 @@ Build the initial app or service structure directly in this repository, choose s
                         githubProjectSection
                     }
                 }
-                .padding(CursorTheme.paddingPanel)
+                .padding(CursorTheme.paddingChrome)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
@@ -2692,8 +2679,8 @@ Build the initial app or service structure directly in this repository, choose s
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(CursorTheme.semanticErrorTint)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, CursorTheme.paddingChrome)
+                        .padding(.vertical, CursorTheme.spaceM)
                         .background(cardBackground.opacity(0.96), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -2707,7 +2694,7 @@ Build the initial app or service structure directly in this repository, choose s
 
                 composerDock(tab: tab)
             }
-            .padding(.horizontal, CursorTheme.paddingPanel)
+            .padding(.horizontal, CursorTheme.paddingChrome)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2825,7 +2812,7 @@ Build the initial app or service structure directly in this repository, choose s
             }
             .scrollTargetLayout()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(CursorTheme.paddingChrome)
         }
     }
 
@@ -2870,13 +2857,13 @@ Build the initial app or service structure directly in this repository, choose s
                             )
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    .padding(.horizontal, CursorTheme.paddingChrome)
+                    .padding(.top, CursorTheme.spaceS)
+                    .padding(.bottom, CursorTheme.spaceXS)
                     Rectangle()
                         .fill(CursorTheme.border(for: colorScheme))
                         .frame(height: 1)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, CursorTheme.paddingChrome)
                 }
 
                 if tab.isRunning && !tab.followUpQueue.isEmpty {
@@ -2884,7 +2871,7 @@ Build the initial app or service structure directly in this repository, choose s
                     Rectangle()
                         .fill(CursorTheme.border(for: colorScheme))
                         .frame(height: 1)
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, CursorTheme.paddingChrome)
                 }
 
                 HStack(alignment: .bottom, spacing: 12) {
@@ -2926,8 +2913,8 @@ Build the initial app or service structure directly in this repository, choose s
                     sendStopButton(tab: tab)
                         .padding(.bottom, 2)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, CursorTheme.paddingChrome)
+                .padding(.vertical, CursorTheme.spaceS)
             }
             .background(CursorTheme.editor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
@@ -2987,7 +2974,7 @@ Build the initial app or service structure directly in this repository, choose s
                 UsageView()
             }
         }
-        .padding(14)
+        .padding(CursorTheme.paddingChrome)
         .background(cardBackground, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -3124,9 +3111,9 @@ Build the initial app or service structure directly in this repository, choose s
                 .background(CursorTheme.surfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.spaceXS, style: .continuous))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.horizontal, CursorTheme.paddingChrome)
+        .padding(.top, CursorTheme.spaceS)
+        .padding(.bottom, CursorTheme.spaceS)
     }
 
     /// Remove a queued follow-up at the given index.

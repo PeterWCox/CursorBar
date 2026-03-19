@@ -112,6 +112,10 @@ enum CursorTheme {
     static let paddingCard: CGFloat = 12
     /// Padding around scroll content or panel insets.
     static let paddingPanel: CGFloat = 12
+    /// Shared inset for outer window chrome and primary panel gutters.
+    static let paddingChrome: CGFloat = 18
+    /// Sidebar content inset. Keep this equal to `paddingChrome` so collapsed and expanded layouts use the same padding value.
+    static var paddingSidebarUniform: CGFloat { paddingChrome }
     /// Horizontal padding for list/section headers.
     static let paddingHeaderHorizontal: CGFloat = 16
     /// Vertical padding for list/section headers.
