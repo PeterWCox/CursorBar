@@ -41,6 +41,14 @@ enum CursorTheme {
     static func textPrimary(for colorScheme: ColorScheme) -> Color { colorScheme == .dark ? textPrimary : textPrimaryLight }
     static func textSecondary(for colorScheme: ColorScheme) -> Color { colorScheme == .dark ? textSecondary : textSecondaryLight }
     static func textTertiary(for colorScheme: ColorScheme) -> Color { colorScheme == .dark ? textTertiary : textTertiaryLight }
+    static func modelChipBackground(for colorScheme: ColorScheme, isAuto: Bool) -> Color {
+        guard !isAuto else { return surfaceMuted(for: colorScheme) }
+        return colorScheme == .dark ? brandPurple.opacity(0.20) : brandPurple.opacity(0.12)
+    }
+    static func modelChipBorder(for colorScheme: ColorScheme, isAuto: Bool) -> Color {
+        guard !isAuto else { return border(for: colorScheme) }
+        return colorScheme == .dark ? brandPurple.opacity(0.42) : brandPurple.opacity(0.24)
+    }
 
     static let brandBlue = Color(red: 0.40, green: 0.61, blue: 1.00)
     static let brandPurple = Color(red: 0.55, green: 0.40, blue: 0.98)
@@ -116,10 +124,19 @@ enum CursorTheme {
     static let paddingChrome: CGFloat = 18
     /// Sidebar content inset. Keep this equal to `paddingChrome` so collapsed and expanded layouts use the same padding value.
     static var paddingSidebarUniform: CGFloat { paddingChrome }
+    /// Additional outer gutter used when the sidebar is the only visible column.
+    static let paddingSidebarCollapsedOuter: CGFloat = 14
     /// Horizontal padding for list/section headers.
     static let paddingHeaderHorizontal: CGFloat = 16
     /// Vertical padding for list/section headers.
     static let paddingHeaderVertical: CGFloat = 12
+    /// Horizontal padding for sidebar rows such as Tasks, Preview, and agent tabs.
+    static let paddingSidebarRowHorizontal: CGFloat = 12
+    /// Vertical padding for sidebar rows such as Tasks, Preview, and agent tabs.
+    static let paddingSidebarRowVertical: CGFloat = 8
+    /// Padding for project accordion headers in the sidebar.
+    static let paddingSidebarGroupHeaderHorizontal: CGFloat = 8
+    static let paddingSidebarGroupHeaderVertical: CGFloat = 6
     /// Spacing between list items (e.g. task rows in a section).
     static let spacingListItems: CGFloat = 8
     /// Vertical gap between major sections (e.g. Todo vs Backlog).
@@ -128,8 +145,12 @@ enum CursorTheme {
     static let radiusWindow: CGFloat = 28
     /// Corner radius for cards (task row, raised surfaces).
     static let radiusCard: CGFloat = 12
+    /// Corner radius for sidebar chips and nav rows.
+    static let radiusSidebarRow: CGFloat = 10
     /// Corner radius for panel tab bar selected pill (Tasks, Projects, Preview).
     static let radiusTabBarPill: CGFloat = 6
+    /// Compact square chip size used in collapsed sidebar states.
+    static let sizeSidebarCompactChip: CGFloat = 32
     /// Small padding for badges and tags (horizontal).
     static let paddingBadgeHorizontal: CGFloat = 5
     /// Small padding for badges and tags (vertical).
@@ -227,31 +248,46 @@ enum AvailableModels {
 
     /// Model IDs enabled (shown in picker) out of the box when user has never changed preferences.
     static let defaultEnabledModelIds: Set<String> = [
-        "composer-1.5",
-        "gpt-5.3-codex",
+        "composer-2-fast",
+        "composer-2",
         "gpt-5.4-medium",
-        "sonnet-4.6",
-        "opus-4.6",
+        "claude-4.6-sonnet-medium",
+        "claude-4.6-opus-high",
     ]
 
     /// Model IDs to show in the Models settings list by default; "View All Models" shows the full list.
     static let defaultShownModelIds: Set<String> = [
+        "composer-2-fast",
+        "composer-2",
         "composer-1.5",
-        "composer-1",
         "gpt-5.3-codex",
-        "gpt-5.3-codex-low",
-        "gpt-5.3-codex-low-fast",
+        "gpt-5.3-codex-fast",
         "gpt-5.4-medium",
-        "sonnet-4.6",
-        "opus-4.6",
+        "gpt-5.4-medium-fast",
+        "claude-4.6-sonnet-medium",
+        "claude-4.6-sonnet-medium-thinking",
+        "claude-4.6-opus-high",
+        "claude-4.6-opus-high-thinking",
     ]
 
     /// Fallback when CLI is unavailable or fails; also used as initial value before load.
     static let fallback: [ModelOption] = [
         ModelOption(id: autoID, label: "Auto", isPremium: false),
-        ModelOption(id: "gpt-5.4-medium", label: "GPT-5.4", isPremium: true),
-        ModelOption(id: "composer-1.5", label: "Composer 1.5", isPremium: true),
+        ModelOption(id: "composer-2-fast", label: "Composer 2 Fast", isPremium: false),
+        ModelOption(id: "composer-2", label: "Composer 2", isPremium: false),
+        ModelOption(id: "gpt-5.4-medium", label: "GPT-5.4 1M", isPremium: true),
+        ModelOption(id: "claude-4.6-sonnet-medium", label: "Sonnet 4.6 1M", isPremium: true),
     ]
+
+    static var autoOption: ModelOption {
+        ModelOption(id: autoID, label: "Auto", isPremium: false)
+    }
+
+    static func isPremiumModel(id: String) -> Bool {
+        if id == autoID { return false }
+        if id.hasPrefix("composer-2") { return false }
+        return true
+    }
 
     static func model(for id: String, in list: [ModelOption]) -> ModelOption? {
         list.first { $0.id == id }

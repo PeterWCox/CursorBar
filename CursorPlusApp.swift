@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Carbon
 import Combine
 #if DEBUG
 import Inject
@@ -657,10 +658,29 @@ class FloatingPanel: NSPanel {
             NotificationCenter.default.post(name: FloatingPanel.requestNewTaskNotification, object: self)
             return true
         }
+        // US `[` / `]` keys; also match ANSI virtual keys when Option/layout changes charactersIgnoringModifiers.
+        if key == "[" || event.keyCode == UInt16(kVK_ANSI_LeftBracket) {
+            NotificationCenter.default.post(
+                name: FloatingPanel.cycleSidebarWorkspaceNotification,
+                object: self,
+                userInfo: [FloatingPanel.cycleSidebarDirectionUserInfoKey: -1]
+            )
+            return true
+        }
+        if key == "]" || event.keyCode == UInt16(kVK_ANSI_RightBracket) {
+            NotificationCenter.default.post(
+                name: FloatingPanel.cycleSidebarWorkspaceNotification,
+                object: self,
+                userInfo: [FloatingPanel.cycleSidebarDirectionUserInfoKey: 1]
+            )
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 
     static let requestNewTaskNotification = Notification.Name("FloatingPanelRequestNewTask")
+    static let cycleSidebarWorkspaceNotification = Notification.Name("FloatingPanelCycleSidebarWorkspace")
+    static let cycleSidebarDirectionUserInfoKey = "direction"
 }
 
 final class HangDiagnostics {

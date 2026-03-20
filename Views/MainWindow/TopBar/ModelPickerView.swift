@@ -1,56 +1,51 @@
 import SwiftUI
 
 // MARK: - Model selection menu
-// Styled like ActionButton.primary (surfaceMuted, textPrimary, border) for consistency.
-
-/// Red "!" in white circle — premium/alert indicator badge.
-fileprivate struct PremiumBadge: View {
-    var body: some View {
-        Text("!")
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(.red)
-            .frame(width: 18, height: 18)
-            .background(Circle().strokeBorder(Color.white, lineWidth: 1.5))
-    }
-}
+// Native `Menu` = standard macOS dropdown (rectangular); avoids custom popover chrome.
 
 struct ModelPickerView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var appState: AppState
 
     var selectedModelId: String
     var models: [ModelOption]
     var onSelect: (String) -> Void
 
     private var selectedModel: ModelOption {
-        models.first { $0.id == selectedModelId } ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
+        models.first { $0.id == selectedModelId } ?? AvailableModels.autoOption
+    }
+
+    private var autoModel: ModelOption {
+        models.first { $0.id == AvailableModels.autoID } ?? AvailableModels.autoOption
+    }
+
+    private var concreteModels: [ModelOption] {
+        models.filter { $0.id != AvailableModels.autoID }
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            if selectedModel.isPremium {
-                PremiumBadge()
-            }
+        HStack(spacing: CursorTheme.spaceS) {
             Menu {
-                ForEach(models, id: \.id) { model in
+                Button {
+                    onSelect(autoModel.id)
+                } label: {
+                    menuRowLabel(for: autoModel)
+                }
+
+                Divider()
+
+                ForEach(concreteModels, id: \.id) { model in
                     Button {
                         onSelect(model.id)
                     } label: {
-                        HStack(spacing: 8) {
-                            if model.id == selectedModelId {
-                                Image(systemName: "checkmark")
-                            } else {
-                                Image(systemName: model.isPremium ? "sparkles" : "circle")
-                                    .opacity(model.isPremium ? 0.9 : 0.2)
-                            }
-
-                            Text(model.label)
-
-                            if model.isPremium {
-                                Spacer(minLength: 12)
-                                PremiumBadge()
-                            }
-                        }
+                        menuRowLabel(for: model)
                     }
+                }
+
+                Divider()
+
+                Button("Add Models") {
+                    appState.showSettingsSheet = true
                 }
             } label: {
                 pickerLabel(for: selectedModel)
@@ -58,6 +53,45 @@ struct ModelPickerView: View {
             .menuStyle(.borderlessButton)
             .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    @ViewBuilder
+    private func menuRowLabel(for model: ModelOption) -> some View {
+        HStack(spacing: CursorTheme.spaceXS) {
+            modelMenuIcon(for: model)
+            Text(model.label)
+                .lineLimit(1)
+            Spacer(minLength: CursorTheme.spaceM)
+            if let speed = modelSpeedTag(for: model) {
+                Text(speed)
+                    .foregroundStyle(.secondary)
+            }
+            if model.id == selectedModelId {
+                Image(systemName: "checkmark")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func modelMenuIcon(for model: ModelOption) -> some View {
+        if model.id == AvailableModels.autoID {
+            Image(systemName: "sparkles")
+        } else {
+            Image(systemName: model.isPremium ? "brain.head.profile" : "bolt.fill")
+        }
+    }
+
+    private func modelSpeedTag(for model: ModelOption) -> String? {
+        let id = model.id
+        if id == AvailableModels.autoID { return nil }
+        if id.contains("fast") { return "Fast" }
+        if id.contains("thinking") || id.contains("xhigh") || id.contains("max") || id.contains("opus-high") {
+            return "High"
+        }
+        if id.contains("medium") || id.contains("high") || id == "composer-2" {
+            return "Medium"
+        }
+        return nil
     }
 
     private func pickerLabel(for model: ModelOption) -> some View {
@@ -69,15 +103,12 @@ struct ModelPickerView: View {
                 .lineLimit(1)
                 .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                 .fontWeight(.medium)
-            if model.isPremium {
-                PremiumBadge()
-            }
         }
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, CursorTheme.paddingCard)
         .padding(.vertical, CursorTheme.spaceS)
-        .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
-        .overlay(Capsule().stroke(CursorTheme.border(for: colorScheme), lineWidth: 1))
+        .background(CursorTheme.modelChipBackground(for: colorScheme, isAuto: model.id == AvailableModels.autoID), in: Capsule())
+        .overlay(Capsule().stroke(CursorTheme.modelChipBorder(for: colorScheme, isAuto: model.id == AvailableModels.autoID), lineWidth: 1))
         .fixedSize(horizontal: true, vertical: false)
     }
 }
@@ -100,15 +131,12 @@ struct ModelChipView: View {
                 .lineLimit(1)
                 .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                 .fontWeight(.medium)
-            if model.isPremium {
-                PremiumBadge()
-            }
         }
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, CursorTheme.paddingCard)
         .padding(.vertical, CursorTheme.spaceS)
-        .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
-        .overlay(Capsule().stroke(CursorTheme.border(for: colorScheme), lineWidth: 1))
+        .background(CursorTheme.modelChipBackground(for: colorScheme, isAuto: model.id == AvailableModels.autoID), in: Capsule())
+        .overlay(Capsule().stroke(CursorTheme.modelChipBorder(for: colorScheme, isAuto: model.id == AvailableModels.autoID), lineWidth: 1))
         .fixedSize(horizontal: true, vertical: false)
     }
 }

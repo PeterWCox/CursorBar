@@ -40,10 +40,12 @@ final class ProjectSettingsStore: ObservableObject {
     func reload(workspacePath: String) {
         let normalizedPath = normalizedWorkspacePath(workspacePath)
         guard !normalizedPath.isEmpty else { return }
-        snapshotsByWorkspace[normalizedPath] = ProjectSettingsSnapshot(
+        var next = snapshotsByWorkspace
+        next[normalizedPath] = ProjectSettingsSnapshot(
             debugURL: ProjectSettingsStorage.getDebugURL(workspacePath: normalizedPath) ?? "",
             startupScripts: ProjectSettingsStorage.getStartupScripts(workspacePath: normalizedPath)
         )
+        snapshotsByWorkspace = next
     }
 
     func snapshot(for workspacePath: String) -> ProjectSettingsSnapshot {

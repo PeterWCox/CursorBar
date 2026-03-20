@@ -44,7 +44,26 @@ Set up Cursor Metro for this project from scratch and make it fully runnable for
 7) For multi-service apps, create one script per long-running process (for example backend and frontend), and make each script robust enough that Preview runs it in a clean terminal session.
 
 8) Make the best reasonable choice from the repository contents and finish the setup instead of asking the user to do follow-up configuration. Always include `scriptLabels` so Preview tabs have clear names (e.g. "backend", "frontend" for multi-service apps, or "Preview" / the app name for a single script). After writing `.metro/project.json`, briefly summarize the exact scripts, scriptLabels, and debug URL you configured.
+
+9) **Metro Preview terminals:** The in-app Preview panel runs each entry in `.metro/project.json` `scripts` (with matching `scriptLabels`) as its own terminal tab, and uses `debugUrl` for “Open in Browser.” Completing this configuration is mandatory whenever you set up or regenerate project config—do not skip Preview so the user can run dev servers from Metro.
 """
+
+/// Builds the setup agent prompt, optionally appending git-commit instructions and user context (create/clone flows).
+private func makeProjectSetupPrompt(includeInitialGitCommit: Bool = false, userSupplement: String = "") -> String {
+    var parts: [String] = [projectSetupAgentPrompt.trimmingCharacters(in: .whitespacesAndNewlines)]
+    let extra = userSupplement.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !extra.isEmpty {
+        parts.append("\n\n— User context —\n\(extra)")
+    }
+    if includeInitialGitCommit {
+        parts.append("""
+
+— Git (requested) —
+If the workspace is not a git repository yet, run `git init`. After your setup changes, if there are uncommitted files, stage them and create an initial commit with a clear message (e.g. "Initial project setup"). If the repo already has meaningful history and the tree is clean, you may skip committing.
+""")
+    }
+    return parts.joined()
+}
 
 /// Installs Cmd+T key monitor when Tasks panel is visible so shortcuts work when focus is inside the list.
 /// Also handles appState.requestShowTasksAndNewTask (from panel performKeyEquivalent) so Cmd+T always works when the panel is key.
@@ -108,32 +127,21 @@ private struct TabSidebarGroup {
     let terminalTabs: [TerminalTab]
 }
 
+/// One navigable sidebar row, in the same order as `tabSidebar` (Tasks → Preview → visible agent tabs, per project).
+private enum SidebarCycleDestination: Equatable {
+    case tasks(path: String)
+    case preview(path: String)
+    case agentTab(id: UUID)
+}
+
 private struct GitBranchSnapshot: Equatable {
     let current: String
     let branches: [String]
 }
 
-private enum AddProjectMode: String, CaseIterable, Identifiable {
-    case existing
-    case new
-    case github
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .existing: return "Existing"
-        case .new: return "New"
-        case .github: return "GitHub"
-        }
-    }
-}
-
-/// Tab for the Projects panel (matches Agent/Preview style).
-private enum ProjectsPanelTab: String, CaseIterable, Identifiable {
-    case turnOnOff = "Projects"
-    case newProject = "New"
-    case github = "GitHub"
+private enum CreateProjectWorkflowMode: String, CaseIterable, Identifiable {
+    case newWithAgent
+    case cloneFromGitHub
 
     var id: String { rawValue }
 }
@@ -156,7 +164,7 @@ private struct TerminalTabChip: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 6) {
+            HStack(spacing: CursorTheme.spaceS) {
                 Image(systemName: "terminal")
                     .font(.system(size: 12))
                     .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
@@ -176,15 +184,20 @@ private struct TerminalTabChip: View {
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
+            .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
             .background(
-                isSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                isSelected
+                    ? CursorTheme.surfaceRaised(for: colorScheme)
+                    : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+                in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                    .stroke(
+                        isSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                        lineWidth: 1
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -232,8 +245,10 @@ private struct ObservedAgentTitleContent<Content: View>: View {
 
 private struct PopoutTasksListContent: View {
     let tasksPath: String
+    var workspaceDisplayName: String?
     @Binding var triggerAddNewTask: Bool
     let linkedStatuses: [UUID: AgentTaskState]
+    let userFollowUpsByTaskID: [UUID: [String]]
     let newTaskProviderID: AgentProviderID
     let modelsForProvider: (AgentProviderID) -> [ModelOption]
     let onSendToAgent: (String, UUID?, [String], AgentProviderID, String) -> Void
@@ -249,8 +264,10 @@ private struct PopoutTasksListContent: View {
     var body: some View {
         TasksListView(
             workspacePath: tasksPath,
+            workspaceDisplayName: workspaceDisplayName,
             triggerAddNewTask: $triggerAddNewTask,
             linkedStatuses: linkedStatuses,
+            userFollowUpsByTaskID: userFollowUpsByTaskID,
             newTaskProviderID: newTaskProviderID,
             modelsForProvider: modelsForProvider,
             onSendToAgent: onSendToAgent,
@@ -318,6 +335,7 @@ struct PopoutView: View {
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
     @AppStorage(AppPreferences.sidebarOnRightKey) private var isSidebarOnRight: Bool = false
+    @AppStorage(AppPreferences.sidebarWidthKey) private var sidebarWidthStored: Double = AppPreferences.defaultSidebarWidth
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject private var projectTasksStore: ProjectTasksStore
     @EnvironmentObject private var projectSettingsStore: ProjectSettingsStore
@@ -336,8 +354,6 @@ struct PopoutView: View {
     @State private var closeTabConfirmationTabID: UUID? = nil
     @State private var screenshotPreviewURLs: [URL] = []
     @State private var screenshotPreviewIndex: Int = 0
-    /// Workspace paths for groups that are collapsed in the sidebar (accordion).
-    @State private var collapsedGroupPaths: Set<String> = []
     /// When true, Cmd+T in Tasks view should add a new task; set by window-level shortcut and observed by TasksListView.
     @State private var tasksViewTriggerAddNew: Bool = false
     @StateObject private var tasksViewShortcutCoordinator = TasksViewShortcutCoordinator()
@@ -346,19 +362,49 @@ struct PopoutView: View {
     @State private var expandedPromptTabID: UUID? = nil
     /// How many of the most recent turns are mounted for each tab. `Int.max` means full history.
     @State private var visibleTurnLimitsByTabID: [UUID: Int] = [:]
-    @State private var projectsPanelTab: ProjectsPanelTab = .turnOnOff
-    @State private var selectedExistingProjectPath: String?
-    @State private var newProjectName: String = ""
-    @State private var newProjectParentPath: String = ""
-    @State private var newProjectIdea: String = ""
-    @State private var gitRepositoryURL: String = ""
-    @State private var gitCloneParentPath: String = ""
-    @State private var gitCloneFolderName: String = ""
-    @State private var projectHubErrorMessage: String?
-    @State private var projectHubStatusMessage: String?
-    @State private var isProjectHubBusy: Bool = false
+    @State private var showCreateProjectPage = false
+    @State private var createProjectMode: CreateProjectWorkflowMode = .newWithAgent
+    @State private var createProjectGitURL = ""
+    @State private var createProjectParentPath = ""
+    @State private var createProjectFolderName = ""
+    @State private var createProjectIdea = ""
+    @State private var createProjectInitialGitCommit = false
+    @State private var createProjectBusy = false
+    @State private var createProjectError: String?
+    @State private var addProjectError: String?
+    /// Baseline sidebar width when a drag begins (so translation stacks correctly).
+    @State private var sidebarDragStartWidth: CGFloat?
     /// When true, hide main agent content and show only title bar + tab sidebar (uses AppState so panel can resize).
     private var isMainContentCollapsed: Bool { appState.isMainContentCollapsed }
+
+    private var sidebarWidth: CGFloat { CGFloat(sidebarWidthStored) }
+    private var collapsedSidebarContentWidth: CGFloat { max(sidebarWidth, 320) }
+    private var collapsedSidebarWindowWidth: CGFloat {
+        collapsedSidebarContentWidth + (CursorTheme.paddingSidebarCollapsedOuter * 2)
+    }
+
+    private enum SidebarSplitMetrics {
+        static let minSidebar: CGFloat = 300
+        static let minMainColumn: CGFloat = 280
+        static let dragHandleWidth: CGFloat = 11
+    }
+
+    /// Keeps the project sidebar within bounds so the main agent column stays usable.
+    private func clampedSidebarWidth(totalWidth: CGFloat) -> CGFloat {
+        let minS = SidebarSplitMetrics.minSidebar
+        let minMain = SidebarSplitMetrics.minMainColumn
+        guard totalWidth > 1 else { return minS }
+        let maxSidebar = max(minS, totalWidth - minMain - 1)
+        return min(max(sidebarWidth, minS), maxSidebar)
+    }
+
+    /// Writes the clamped width to storage when the window is too narrow for the saved value (e.g. after resize).
+    private func syncSidebarWidthToClamped(totalWidth: CGFloat) {
+        let clamped = clampedSidebarWidth(totalWidth: totalWidth)
+        if abs(clamped - sidebarWidth) > 0.5 {
+            sidebarWidthStored = Double(clamped)
+        }
+    }
 
     private static let defaultVisibleTurnLimit = 20
     private static let visibleTurnPageSize = 30
@@ -373,23 +419,11 @@ struct PopoutView: View {
     }
 
     private var hasOpenProjects: Bool {
-        appState.openProjectCount > 0
+        tabManager.openProjectCount > 0
     }
 
     private var projectScanRoots: [String] {
         AppPreferences.resolvedProjectScanRoots(raw: projectScanRootsRaw, legacyRootPath: projectsRootPath)
-    }
-
-    /// Scan root that contains the given project path (longest matching root). Returns nil if path is not under any root.
-    private func scanRoot(for projectPath: String) -> String? {
-        let roots = projectScanRoots
-        let normalized = (projectPath as NSString).standardizingPath
-        return roots
-            .filter { root in
-                let r = (root as NSString).standardizingPath
-                return normalized == r || normalized.hasPrefix(r + "/")
-            }
-            .max(by: { $0.count < $1.count })
     }
 
     private var preferredProjectBrowserRoot: String {
@@ -554,6 +588,20 @@ struct PopoutView: View {
         for tab in tabManager.tabs where tab.workspacePath == workspacePath {
             guard let taskID = tab.linkedTaskID else { continue }
             result[taskID] = linkedTaskState(for: tab, taskStatesByID: taskStates)
+        }
+        return result
+    }
+
+    /// User prompts after the first message in the linked agent conversation (open tabs override recently closed).
+    private func userFollowUpsForWorkspace(_ workspacePath: String) -> [UUID: [String]] {
+        var result: [UUID: [String]] = [:]
+        for savedTab in tabManager.recentlyClosedTabs where savedTab.workspacePath == workspacePath {
+            guard let taskID = savedTab.linkedTaskID else { continue }
+            result[taskID] = savedTab.restoredTurns.userFollowUpPrompts
+        }
+        for tab in tabManager.tabs where tab.workspacePath == workspacePath {
+            guard let taskID = tab.linkedTaskID else { continue }
+            result[taskID] = tab.turns.userFollowUpPrompts
         }
         return result
     }
@@ -770,10 +818,14 @@ struct PopoutView: View {
 
     private func tasksListContent(tasksPath: String, triggerAddNewTask: Binding<Bool>) -> some View {
         let linkedStatuses = linkedStatusesForWorkspace(tasksPath)
+        let userFollowUpsByTaskID = userFollowUpsForWorkspace(tasksPath)
+        let displayName = appState.workspaceDisplayName(for: tasksPath)
         return PopoutTasksListContent(
             tasksPath: tasksPath,
+            workspaceDisplayName: displayName.isEmpty ? nil : displayName,
             triggerAddNewTask: triggerAddNewTask,
             linkedStatuses: linkedStatuses,
+            userFollowUpsByTaskID: userFollowUpsByTaskID,
             newTaskProviderID: appState.selectedAgentProviderID,
             modelsForProvider: { providerID in
                 modelPickerModels(for: providerID, including: nil)
@@ -798,23 +850,31 @@ struct PopoutView: View {
             onTasksDidUpdate: { appState.notifyTasksDidUpdate() },
             onDismiss: { tabManager.hideTasksView() },
             onLaunchSetupAgent: { path in
-                _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path)
+                _ = addNewAgentTab(initialPrompt: makeProjectSetupPrompt(), lastWorkspacePath: path)
             },
             showHeader: false
         )
     }
 
-    /// Opens Dashboard: in-app tabbed terminals running each startup script for the project.
+    /// Opens Preview and starts configured startup scripts immediately when needed.
     private func openDashboard(workspacePath path: String) {
         let root = projectRootForTerminal(workspacePath: path)
         let scripts = ProjectSettingsStorage.getStartupScripts(workspacePath: root)
-        guard !scripts.isEmpty else { return }
-        let labels = ProjectSettingsStorage.getStartupScriptDisplayLabels(workspacePath: root)
-        if tabManager.addDashboardTabs(workspacePath: path, scripts: scripts, labels: labels) {
-            if appState.isMainContentCollapsed {
-                withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-            }
+        let hasRunningPreviewTabs = !tabManager.dashboardTabs(for: path).isEmpty
+        if !scripts.isEmpty, !hasRunningPreviewTabs {
+            let labels = ProjectSettingsStorage.getStartupScriptDisplayLabels(workspacePath: root)
+            _ = tabManager.addDashboardTabs(workspacePath: path, scripts: scripts, labels: labels)
+        } else {
+            tabManager.showDashboardView(workspacePath: path)
         }
+        if appState.isMainContentCollapsed {
+            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+        }
+    }
+
+    private func stopDashboard(workspacePath path: String) {
+        tabManager.closeDashboardTabs(workspacePath: path)
+        tabManager.showTasksView(workspacePath: path)
     }
 
     /// Removes a project (all tabs for that workspace path) from the sidebar. Stops any running agents first.
@@ -826,24 +886,112 @@ struct PopoutView: View {
     }
 
     private func addProject() {
-        seedProjectHubDefaults()
-        tabManager.showAddProjectView()
+        showCreateProjectPage = false
+        addProjectError = nil
+        guard let path = selectFolder(
+            title: "Add project",
+            message: "Choose a folder to open as a project.",
+            startingAt: preferredProjectBrowserRoot
+        ) else { return }
+        let normalized = (path as NSString).standardizingPath
+        guard tabManager.addProject(path: normalized, select: true) else {
+            addProjectError = "Could not open that folder. Check that it exists and you have access."
+            return
+        }
+        updateProjectContext(to: normalized)
+        if appState.isMainContentCollapsed {
+            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+        }
     }
 
-    private func seedProjectHubDefaults() {
-        if newProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            newProjectParentPath = preferredProjectBrowserRoot
+    private func prepareCreateProjectForm() {
+        createProjectError = nil
+        if createProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            createProjectParentPath = preferredProjectBrowserRoot
         }
-        if gitCloneParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            gitCloneParentPath = preferredProjectBrowserRoot
+    }
+
+    private func openCreateProjectPage() {
+        prepareCreateProjectForm()
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showCreateProjectPage = true
         }
-        if let selectedExistingProjectPath,
-           !tabManager.projects.contains(where: { $0.path == selectedExistingProjectPath }),
-           selectedExistingProjectPath != currentWorkspacePath {
-            self.selectedExistingProjectPath = nil
+        if appState.isMainContentCollapsed {
+            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
         }
-        if selectedExistingProjectPath == nil {
-            selectedExistingProjectPath = tabManager.projects.first?.path ?? devFolders.first?.path
+    }
+
+    private func dismissCreateProjectPageIfNeeded() {
+        guard showCreateProjectPage else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showCreateProjectPage = false
+        }
+        createProjectError = nil
+    }
+
+    private func runCreateProjectSetup(path: String, supplement: String) {
+        let prompt = makeProjectSetupPrompt(
+            includeInitialGitCommit: createProjectInitialGitCommit,
+            userSupplement: supplement
+        )
+        tabManager.addProject(path: path, select: true)
+        updateProjectContext(to: path)
+        createProjectBusy = false
+        showCreateProjectPage = false
+        createProjectError = nil
+        if appState.isMainContentCollapsed {
+            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+        }
+        _ = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: path)
+    }
+
+    private func submitCreateProject() {
+        createProjectError = nil
+        switch createProjectMode {
+        case .newWithAgent:
+            let folder = createProjectFolderName
+            guard !sanitizedProjectName(folder).isEmpty else {
+                createProjectError = "Enter a project folder name."
+                return
+            }
+            createProjectBusy = true
+            switch createProjectDirectory(parentPath: createProjectParentPath, folderName: folder) {
+            case .success(let path):
+                let idea = createProjectIdea.trimmingCharacters(in: .whitespacesAndNewlines)
+                let supplement: String
+                if idea.isEmpty {
+                    supplement = "Create a new project in this empty folder. Scaffold a minimal runnable app from what you detect in the stack."
+                } else {
+                    supplement = "Create a new project in this empty folder based on this request: \(idea)"
+                }
+                runCreateProjectSetup(path: path, supplement: supplement)
+            case .failure(let error):
+                createProjectBusy = false
+                createProjectError = error.message
+            }
+        case .cloneFromGitHub:
+            let url = createProjectGitURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !url.isEmpty else {
+                createProjectError = "Enter a repository URL."
+                return
+            }
+            createProjectBusy = true
+            let parent = createProjectParentPath
+            let folder = createProjectFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let folderOpt: String? = folder.isEmpty ? nil : folder
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = cloneRepository(repositoryURL: url, destinationParentPath: parent, folderName: folderOpt)
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let path):
+                        let supplement = "This workspace was cloned from \(url). Configure Metro Preview terminals via `.metro/project.json` and finish setup."
+                        runCreateProjectSetup(path: path, supplement: supplement)
+                    case .failure(let error):
+                        createProjectBusy = false
+                        createProjectError = error.message
+                    }
+                }
+            }
         }
     }
 
@@ -867,7 +1015,14 @@ struct PopoutView: View {
         }
 
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        return url.path
+        let didAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        let resolved = url.resolvingSymlinksInPath()
+        return (resolved.path as NSString).standardizingPath
     }
 
     private func updateProjectContext(to path: String) {
@@ -893,80 +1048,6 @@ struct PopoutView: View {
         tabManager.addProject(path: trimmedPath, select: true)
         showTasksComposer(workspacePath: trimmedPath, startNewTask: true)
         updateProjectContext(to: trimmedPath)
-    }
-
-    private func launchProjectCreationAgent(in path: String, idea: String) {
-        let trimmedIdea = idea.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedIdea.isEmpty else {
-            openProjectInTasksView(path)
-            return
-        }
-        tabManager.addProject(path: path, select: true)
-        updateProjectContext(to: path)
-        let prompt = """
-Create a brand new project in this empty workspace based on the user's request: "\(trimmedIdea)".
-
-Build the initial app or service structure directly in this repository, choose sensible defaults, and make it runnable without making the user decide every low-level detail.
-
-\(projectSetupAgentPrompt)
-"""
-        _ = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: path)
-    }
-
-    private func createEmptyProjectFromHub() {
-        projectHubErrorMessage = nil
-        projectHubStatusMessage = nil
-        switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
-        case .success(let path):
-            projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
-            openProjectInTasksView(path)
-        case .failure(let error):
-            projectHubErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func createProjectWithAgentFromHub() {
-        projectHubErrorMessage = nil
-        projectHubStatusMessage = nil
-        switch createProjectDirectory(parentPath: newProjectParentPath, folderName: newProjectName) {
-        case .success(let path):
-            projectHubStatusMessage = "Created \(appState.workspaceDisplayName(for: path))."
-            launchProjectCreationAgent(in: path, idea: newProjectIdea)
-        case .failure(let error):
-            projectHubErrorMessage = error.localizedDescription
-        }
-    }
-
-    private func cloneProjectFromHub(runSetupAgent: Bool) {
-        projectHubErrorMessage = nil
-        projectHubStatusMessage = nil
-        isProjectHubBusy = true
-        let repositoryURL = gitRepositoryURL
-        let parentPath = gitCloneParentPath
-        let folderName = gitCloneFolderName
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = cloneRepository(
-                repositoryURL: repositoryURL,
-                destinationParentPath: parentPath,
-                folderName: folderName.isEmpty ? nil : folderName
-            )
-            DispatchQueue.main.async {
-                isProjectHubBusy = false
-                switch result {
-                case .success(let path):
-                    projectHubStatusMessage = "Cloned \(appState.workspaceDisplayName(for: path))."
-                    if runSetupAgent {
-                        tabManager.addProject(path: path, select: true)
-                        updateProjectContext(to: path)
-                        _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path)
-                    } else {
-                        openProjectInTasksView(path)
-                    }
-                case .failure(let error):
-                    projectHubErrorMessage = error.localizedDescription
-                }
-            }
-        }
     }
 
     private func openProjectInCursor(_ path: String) {
@@ -1038,6 +1119,15 @@ Build the initial app or service structure directly in this repository, choose s
 
             hiddenShortcutButton("Toggle main window", key: "s") {
                 toggleMainContentCollapsed()
+            }
+
+            if sidebarCycleDestinations().count > 1 {
+                hiddenShortcutButton("Previous in sidebar", key: "[", modifiers: .command) {
+                    cycleSidebarWorkspace(direction: -1)
+                }
+                hiddenShortcutButton("Next in sidebar", key: "]", modifiers: .command) {
+                    cycleSidebarWorkspace(direction: 1)
+                }
             }
         }
         .allowsHitTesting(false)
@@ -1149,6 +1239,9 @@ Build the initial app or service structure directly in this repository, choose s
            let current = appState.model(for: currentId, providerID: providerID) {
             visible = visible + [current]
         }
+        if !visible.contains(where: { $0.id == AvailableModels.autoID }) {
+            visible.insert(AvailableModels.autoOption, at: 0)
+        }
         return visible
     }
 
@@ -1234,8 +1327,6 @@ Build the initial app or service structure directly in this repository, choose s
             }
         }
     }
-
-    private let sidebarWidth: CGFloat = 250
 
     private enum SidebarEdge: Equatable {
         case leading
@@ -1323,6 +1414,79 @@ Build the initial app or service structure directly in this repository, choose s
             }
     }
 
+    /// Flat list of sidebar rows in visual order (Tasks → Preview → each visible agent tab, for each project group).
+    private func sidebarCycleDestinations() -> [SidebarCycleDestination] {
+        var result: [SidebarCycleDestination] = []
+        for group in tabGroups {
+            result.append(.tasks(path: group.path))
+            result.append(.preview(path: group.path))
+            for tab in group.tabs {
+                result.append(.agentTab(id: tab.id))
+            }
+        }
+        return result
+    }
+
+    private func terminalWorkspaceForSelectedTerminal() -> String? {
+        guard let tid = tabManager.selectedTerminalID else { return nil }
+        return tabManager.terminalTabs.first { $0.id == tid }?.workspacePath
+    }
+
+    private func destinationMatchesCurrentSelection(_ dest: SidebarCycleDestination) -> Bool {
+        switch dest {
+        case .tasks(let path):
+            guard tabManager.selectedTabID == nil else { return false }
+            return tabManager.selectedTasksViewPath == path
+        case .preview(let path):
+            guard tabManager.selectedTabID == nil else { return false }
+            guard tabManager.selectedTasksViewPath != path else { return false }
+            if tabManager.selectedDashboardViewPath == path { return true }
+            if let termPath = terminalWorkspaceForSelectedTerminal(), termPath == path { return true }
+            return false
+        case .agentTab(let id):
+            return tabManager.selectedTabID == id
+        }
+    }
+
+    private func sidebarCycleCurrentIndex(in list: [SidebarCycleDestination]) -> Int {
+        if let i = list.firstIndex(where: { destinationMatchesCurrentSelection($0) }) {
+            return i
+        }
+        if let sid = tabManager.selectedTabID,
+           let tab = tabManager.tabs.first(where: { $0.id == sid }) {
+            let p = tab.workspacePath
+            return list.firstIndex { dest in
+                if case .tasks(let path) = dest { return path == p }
+                return false
+            } ?? 0
+        }
+        return 0
+    }
+
+    private func applySidebarCycleDestination(_ dest: SidebarCycleDestination) {
+        switch dest {
+        case .tasks(let path):
+            tabManager.showTasksView(workspacePath: path)
+        case .preview(let path):
+            openDashboard(workspacePath: path)
+        case .agentTab(let id):
+            selectLinkedAgentTab(id)
+        }
+        if appState.isMainContentCollapsed {
+            withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+        }
+    }
+
+    private func cycleSidebarWorkspace(direction: Int) {
+        guard hasOpenProjects else { return }
+        let list = sidebarCycleDestinations()
+        guard list.count > 1 else { return }
+        let currentIdx = sidebarCycleCurrentIndex(in: list)
+        let n = list.count
+        let nextIdx = ((currentIdx + direction) % n + n) % n
+        applySidebarCycleDestination(list[nextIdx])
+    }
+
     /// Terminals for the current project when in Dashboard view (for panel tab bar).
     private func dashboardPanelTerminals(for workspacePath: String) -> [TerminalTab] {
         tabManager.terminalTabs.filter { $0.workspacePath == workspacePath }
@@ -1338,8 +1502,10 @@ Build the initial app or service structure directly in this repository, choose s
 
     @ViewBuilder
     private var mainContentZStack: some View {
-        if tabManager.selectedAddProjectView || !hasOpenProjects {
-            addProjectHubContent
+        if showCreateProjectPage {
+            createProjectContentArea()
+        } else if !hasOpenProjects {
+            splashContentArea()
         } else {
             let showingDashboardEmpty = selectedProjectPath != nil
                 && tabManager.selectedDashboardViewPath == selectedProjectPath
@@ -1373,14 +1539,18 @@ Build the initial app or service structure directly in this repository, choose s
     @ViewBuilder
     private func dashboardPanelTabBar(workspacePath path: String) -> some View {
         let terminals = dashboardPanelTerminals(for: path)
+        let previewDisplayName = appState.workspaceDisplayName(for: path)
         PanelChromeStrip(horizontalPadding: CursorTheme.paddingChrome) {
             HStack(spacing: 0) {
                 Button {
                     tabManager.selectedTerminalID = nil
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 13))
+                        WorkspaceAvatarView(
+                            workspacePath: path,
+                            displayName: previewDisplayName.isEmpty ? nil : previewDisplayName,
+                            size: 15
+                        )
                         Text("Preview")
                             .font(.system(size: 13, weight: tabManager.selectedTerminalID == nil ? .semibold : .medium))
                     }
@@ -1449,7 +1619,7 @@ Build the initial app or service structure directly in this repository, choose s
     /// Shown when Preview is selected but Run has not been clicked yet.
     private func dashboardEmptyStateView(workspacePath path: String) -> some View {
         let root = projectRootForTerminal(workspacePath: path)
-        let isConfigured = !ProjectSettingsStorage.getStartupScripts(workspacePath: root).isEmpty
+        let isConfigured = !projectSettingsStore.startupScripts(for: root).isEmpty
         return VStack(spacing: CursorTheme.spaceXL) {
             Image(systemName: "eye")
                 .font(.system(size: 48, weight: .medium))
@@ -1472,7 +1642,7 @@ Build the initial app or service structure directly in this repository, choose s
                 ActionButton(
                     title: isConfigured ? "Regenerate Setup" : "Configure Setup",
                     icon: "gearshape",
-                    action: { _ = addNewAgentTab(initialPrompt: projectSetupAgentPrompt, lastWorkspacePath: path) },
+                    action: { _ = addNewAgentTab(initialPrompt: makeProjectSetupPrompt(), lastWorkspacePath: path) },
                     help: isConfigured ? "Launch an agent to regenerate .metro/project.json scripts and debug URL" : "Launch an agent to set up .metro/project.json scripts and debug URL for this project",
                     style: .primary
                 )
@@ -1481,6 +1651,25 @@ Build the initial app or service structure directly in this repository, choose s
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            projectSettingsStore.reload(workspacePath: root)
+        }
+        .onChange(of: path) { _, newPath in
+            projectSettingsStore.reload(workspacePath: projectRootForTerminal(workspacePath: newPath))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            projectSettingsStore.reload(workspacePath: projectRootForTerminal(workspacePath: path))
+        }
+        // Setup agent writes project.json via the CLI (no in-app save → no storage notification). Poll briefly so Run appears when the file lands.
+        .task(id: path) {
+            let r = projectRootForTerminal(workspacePath: path)
+            for _ in 0..<90 {
+                if Task.isCancelled { return }
+                projectSettingsStore.reload(workspacePath: r)
+                if !projectSettingsStore.startupScripts(for: r).isEmpty { return }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1500,22 +1689,58 @@ Build the initial app or service structure directly in this repository, choose s
         mainContentWithSidebar
     }
 
-    private var sidebarColumn: some View {
+    private func sidebarColumn(width: CGFloat) -> some View {
         VStack(spacing: CursorTheme.gapSectionTitleToContent) {
             leftColumnHeader
             tabSidebar
         }
         .padding(.horizontal, CursorTheme.paddingSidebarUniform)
         .padding(.vertical, CursorTheme.paddingChrome)
-        .frame(width: sidebarWidth)
+        .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .clipped()
     }
 
-    private var splitDivider: some View {
-        Divider()
-            .background(CursorTheme.border(for: colorScheme))
-            .frame(maxHeight: .infinity)
+    private func splitDividerDrag(totalWidth: CGFloat) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(width: SidebarSplitMetrics.dragHandleWidth)
+                .contentShape(Rectangle())
+            Divider()
+                .background(CursorTheme.border(for: colorScheme))
+                .frame(maxHeight: .infinity)
+        }
+        .frame(width: SidebarSplitMetrics.dragHandleWidth)
+        .accessibilityLabel("Sidebar width")
+        .accessibilityHint("Drag left or right to resize the project sidebar")
+        .accessibilityAddTraits(.isButton)
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if sidebarDragStartWidth == nil {
+                        sidebarDragStartWidth = clampedSidebarWidth(totalWidth: totalWidth)
+                    }
+                    guard let start = sidebarDragStartWidth else { return }
+                    let minS = SidebarSplitMetrics.minSidebar
+                    let minMain = SidebarSplitMetrics.minMainColumn
+                    let maxSidebar = max(minS, totalWidth - minMain - 1)
+                    let proposed = start + value.translation.width
+                    let clamped = min(max(proposed, minS), maxSidebar)
+                    sidebarWidthStored = Double(clamped)
+                }
+                .onEnded { _ in
+                    sidebarDragStartWidth = nil
+                }
+        )
+        .onHover { hovering in
+            if hovering {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .help("Drag to resize sidebar")
     }
 
     @ViewBuilder
@@ -1549,27 +1774,31 @@ Build the initial app or service structure directly in this repository, choose s
     @ViewBuilder
     private var mainContentWithSidebar: some View {
         if isMainContentCollapsed {
-            sidebarColumn
+            sidebarColumn(width: collapsedSidebarContentWidth)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
             GeometryReader { geometry in
                 let contentWidth = max(0, geometry.size.width)
-                let agentWidth = max(0, contentWidth - sidebarWidth - 1)
+                let sidebarW = clampedSidebarWidth(totalWidth: contentWidth)
+                let agentWidth = max(0, contentWidth - sidebarW - 1)
 
                 HStack(alignment: .top, spacing: 0) {
                     if sidebarEdge == .trailing {
                         mainColumn
                             .frame(width: agentWidth)
-                        splitDivider
-                        sidebarColumn
+                        splitDividerDrag(totalWidth: contentWidth)
+                        sidebarColumn(width: sidebarW)
                     } else {
-                        sidebarColumn
-                        splitDivider
+                        sidebarColumn(width: sidebarW)
+                        splitDividerDrag(totalWidth: contentWidth)
                         mainColumn
                             .frame(width: agentWidth)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: sidebarEdge.alignment)
+                .onChange(of: contentWidth) { _, newWidth in
+                    syncSidebarWidthToClamped(totalWidth: newWidth)
+                }
             }
             .frame(maxWidth: .infinity)
         }
@@ -1578,11 +1807,11 @@ Build the initial app or service structure directly in this repository, choose s
     private var bodyWithDashboardPersistence: some View {
         bodyContent
             .padding(.vertical, CursorTheme.paddingChrome)
-            .padding(.leading, isMainContentCollapsed ? 0 : (sidebarEdge == .trailing ? CursorTheme.paddingChrome : 0))
-            .padding(.trailing, isMainContentCollapsed ? 0 : (sidebarEdge == .leading ? CursorTheme.paddingChrome : 0))
-            .frame(minWidth: isMainContentCollapsed ? sidebarWidth : (sidebarWidth + 120))
-            .frame(width: isMainContentCollapsed ? sidebarWidth : nil)
-            .frame(maxWidth: isMainContentCollapsed ? sidebarWidth : .infinity, minHeight: isMainContentCollapsed ? 280 : 400, maxHeight: .infinity)
+            .padding(.leading, isMainContentCollapsed ? CursorTheme.paddingSidebarCollapsedOuter : (sidebarEdge == .trailing ? CursorTheme.paddingChrome : 0))
+            .padding(.trailing, isMainContentCollapsed ? CursorTheme.paddingSidebarCollapsedOuter : (sidebarEdge == .leading ? CursorTheme.paddingChrome : 0))
+            .frame(minWidth: isMainContentCollapsed ? collapsedSidebarWindowWidth : (sidebarWidth + 120))
+            .frame(width: isMainContentCollapsed ? collapsedSidebarWindowWidth : nil)
+            .frame(maxWidth: isMainContentCollapsed ? collapsedSidebarWindowWidth : .infinity, minHeight: isMainContentCollapsed ? 300 : 400, maxHeight: .infinity)
             .preferredColorScheme(resolvedColorScheme)
             .background(CursorTheme.panelGradient(for: colorScheme))
     }
@@ -1617,7 +1846,7 @@ Build the initial app or service structure directly in this repository, choose s
         bodyWithShortcuts
         .onAppear {
             sanitizeSelectedModel()
-            reloadProjectDiscovery(showStatusMessage: false)
+            reloadProjectDiscovery()
             refreshQuickActions(for: currentWorkspacePath)
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
@@ -1627,11 +1856,11 @@ Build the initial app or service structure directly in this repository, choose s
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectScanRootsRaw) { _, _ in
-            reloadProjectDiscovery(showStatusMessage: false)
+            reloadProjectDiscovery()
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: projectsRootPath) { _, _ in
-            reloadProjectDiscovery(showStatusMessage: false)
+            reloadProjectDiscovery()
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: selectedModel) { _, _ in
@@ -1639,6 +1868,7 @@ Build the initial app or service structure directly in this repository, choose s
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: tabManager.selectedTabID) { _, _ in
+            dismissCreateProjectPageIfNeeded()
             refreshGitState(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
         }
@@ -1648,14 +1878,30 @@ Build the initial app or service structure directly in this repository, choose s
             refreshGitState(for: path)
             updateHangDiagnosticsSnapshot()
         }
-        .onChange(of: tabManager.selectedTasksViewPath) { _, _ in
+        .onChange(of: tabManager.selectedTasksViewPath) { _, newValue in
+            if newValue != nil {
+                dismissCreateProjectPageIfNeeded()
+            }
             updateHangDiagnosticsSnapshot()
         }
-        .onChange(of: tabManager.selectedTerminalID) { _, _ in
+        .onChange(of: tabManager.selectedTerminalID) { _, newValue in
+            if newValue != nil {
+                dismissCreateProjectPageIfNeeded()
+            }
+            updateHangDiagnosticsSnapshot()
+        }
+        .onChange(of: tabManager.selectedDashboardViewPath) { _, newValue in
+            if newValue != nil {
+                dismissCreateProjectPageIfNeeded()
+            }
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: appState.taskListRevision) { _, _ in
             updateHangDiagnosticsSnapshot()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: FloatingPanel.cycleSidebarWorkspaceNotification)) { notification in
+            let direction = (notification.userInfo?[FloatingPanel.cycleSidebarDirectionUserInfoKey] as? Int) ?? 1
+            cycleSidebarWorkspace(direction: direction)
         }
     }
 
@@ -1704,6 +1950,14 @@ Build the initial app or service structure directly in this repository, choose s
             }
         } message: {
             Text("This agent is still processing. Closing will cancel the current run. Are you sure you want to close this tab?")
+        }
+        .alert("Add project", isPresented: Binding(
+            get: { addProjectError != nil },
+            set: { if !$0 { addProjectError = nil } }
+        )) {
+            Button("OK", role: .cancel) { addProjectError = nil }
+        } message: {
+            Text(addProjectError ?? "")
         }
         .overlay {
             if !screenshotPreviewURLs.isEmpty {
@@ -1819,7 +2073,8 @@ Build the initial app or service structure directly in this repository, choose s
     private var mainColumnHeaderArea: some View {
         VStack(alignment: .leading, spacing: 0) {
             mainColumnTitleRow
-            if tabManager.selectedDashboardViewPath == selectedProjectPath,
+            if !showCreateProjectPage,
+               tabManager.selectedDashboardViewPath == selectedProjectPath,
                let path = selectedProjectPath, !path.isEmpty,
                !tabManager.dashboardTabs(for: path).isEmpty {
                 dashboardButtonsRow(workspacePath: path)
@@ -1837,7 +2092,7 @@ Build the initial app or service structure directly in this repository, choose s
                 ActionButton(
                     title: "Stop",
                     icon: "stop.fill",
-                    action: { tabManager.closeDashboardTabs(workspacePath: path) },
+                    action: { stopDashboard(workspacePath: path) },
                     help: "Close Preview tabs",
                     style: .primary
                 )
@@ -1862,8 +2117,10 @@ Build the initial app or service structure directly in this repository, choose s
 
     @ViewBuilder
     private var mainColumnTitleContent: some View {
-        if tabManager.selectedAddProjectView || !hasOpenProjects {
-            addProjectTitleContent()
+        if showCreateProjectPage {
+            createProjectTitleContent()
+        } else if !hasOpenProjects {
+            welcomeTitleContent()
         } else if let tasksPath = tabManager.selectedTasksViewPath, tasksPath == selectedProjectPath {
             tasksTitleContent(workspacePath: tasksPath)
         } else if (tabManager.selectedTerminalID != nil || tabManager.selectedDashboardViewPath == selectedProjectPath), let path = selectedProjectPath {
@@ -1877,12 +2134,29 @@ Build the initial app or service structure directly in this repository, choose s
         }
     }
 
-    private func addProjectTitleContent() -> some View {
-        PanelHeaderView(icon: "gearshape", title: "Projects") {
-            Text("Open an existing workspace, create a new one, or clone from GitHub.")
+    private func welcomeTitleContent() -> some View {
+        PanelHeaderView(title: "Cursor Metro") {
+            Image(systemName: "folder.badge.plus")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+        } subtitle: {
+            Text("Add an existing folder, or use Create to scaffold or clone and run the setup agent.")
                 .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 .lineLimit(2)
+        }
+    }
+
+    private func createProjectTitleContent() -> some View {
+        PanelHeaderView(title: "Create") {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .foregroundStyle(CursorTheme.brandBlue)
+        } subtitle: {
+            Text("Clone a repo or create a new folder, then the agent configures Preview and `.metro/project.json`.")
+                .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .lineLimit(3)
         }
     }
 
@@ -1890,7 +2164,14 @@ Build the initial app or service structure directly in this repository, choose s
         let projectColor = path.isEmpty
             ? CursorTheme.textTertiary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: path)
-        return PanelHeaderView(icon: "checklist", title: "Tasks") {
+        let displayName = appState.workspaceDisplayName(for: path)
+        return PanelHeaderView(title: "Tasks") {
+            WorkspaceAvatarView(
+                workspacePath: path,
+                displayName: displayName.isEmpty ? nil : displayName,
+                size: 32
+            )
+        } subtitle: {
             HStack(spacing: CursorTheme.spaceXS) {
                 Image(systemName: "folder")
                     .font(.system(size: CursorTheme.fontCaption, weight: .medium))
@@ -1908,7 +2189,14 @@ Build the initial app or service structure directly in this repository, choose s
         let projectColor = path.isEmpty
             ? CursorTheme.textTertiary(for: colorScheme)
             : CursorTheme.colorForWorkspace(path: path)
-        return PanelHeaderView(icon: "eye", title: "Preview") {
+        let displayName = appState.workspaceDisplayName(for: path)
+        return PanelHeaderView(title: "Preview") {
+            WorkspaceAvatarView(
+                workspacePath: path,
+                displayName: displayName.isEmpty ? nil : displayName,
+                size: 32
+            )
+        } subtitle: {
             HStack(spacing: CursorTheme.spaceXS) {
                 Image(systemName: "folder")
                     .font(.system(size: CursorTheme.fontCaption, weight: .medium))
@@ -1928,9 +2216,27 @@ Build the initial app or service structure directly in this repository, choose s
         let hasExpandablePrompt = !fullPrompt.isEmpty
         let isExpanded = expandedPromptTabID.wrappedValue == tab.id
         let displayTitle = (isExpanded && hasExpandablePrompt) ? userPromptDisplayText(from: fullPrompt) : tab.title
+        let agentProjectDisplay = appState.workspaceDisplayName(for: tab.workspacePath)
         return HStack(alignment: .top, spacing: CursorTheme.spaceM) {
-            agentStatusIcon(tab: tab, status: status)
-                .frame(width: 32, height: 32)
+            WorkspaceAvatarView(
+                workspacePath: tab.workspacePath,
+                displayName: agentProjectDisplay.isEmpty ? nil : agentProjectDisplay,
+                size: 32
+            )
+            .overlay(alignment: .topTrailing) {
+                agentStatusIcon(tab: tab, status: status, compact: true)
+                    .frame(width: 16, height: 16)
+                    .background(Circle().fill(CursorTheme.surfaceRaised(for: colorScheme)))
+                    .overlay(
+                        Circle()
+                            .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
+                    )
+                    .offset(x: CursorTheme.spaceXS, y: -CursorTheme.spaceXS)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "\(agentProjectDisplay.isEmpty ? (tab.workspacePath as NSString).lastPathComponent : agentProjectDisplay), \(status.label)"
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(displayTitle)
                     .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
@@ -1965,9 +2271,11 @@ Build the initial app or service structure directly in this repository, choose s
                     let projectColor = tab.workspacePath.isEmpty
                         ? CursorTheme.textTertiary(for: colorScheme)
                         : CursorTheme.colorForWorkspace(path: tab.workspacePath)
-                    Image(systemName: "folder")
-                        .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                        .foregroundStyle(projectColor)
+                    WorkspaceAvatarView(
+                        workspacePath: tab.workspacePath,
+                        displayName: agentProjectDisplay.isEmpty ? nil : agentProjectDisplay,
+                        size: 14
+                    )
                     Text((tab.workspacePath as NSString).lastPathComponent)
                         .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                         .foregroundStyle(projectColor)
@@ -1980,47 +2288,39 @@ Build the initial app or service structure directly in this repository, choose s
     }
 
     private var tabSidebar: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: CursorTheme.spaceS) {
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
                     ForEach(tabGroups, id: \.path) { group in
-                        let isCollapsed = collapsedGroupPaths.contains(group.path)
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 4) {
+                        VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                            HStack(spacing: CursorTheme.spaceS) {
                                 Button {
                                     tabManager.selectProject(group.path)
                                     if appState.isMainContentCollapsed {
                                         withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
                                     }
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        if isCollapsed {
-                                            collapsedGroupPaths.remove(group.path)
-                                        } else {
-                                            collapsedGroupPaths.insert(group.path)
-                                        }
-                                    }
                                 } label: {
-                                    HStack(spacing: 4) {
+                                    HStack(spacing: CursorTheme.spaceS + CursorTheme.spaceXS) {
+                                        if !group.path.isEmpty {
+                                            WorkspaceAvatarView(
+                                                workspacePath: group.path,
+                                                displayName: group.displayName,
+                                                size: 30
+                                            )
+                                        }
                                         VStack(alignment: .leading, spacing: 2) {
-                                            HStack(spacing: 4) {
-                                                if !group.path.isEmpty {
-                                                    Image(systemName: "folder")
-                                                        .font(.system(size: 12, weight: .medium))
-                                                        .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
-                                                }
-                                                Text(group.displayName)
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                    .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
-                                                    .lineLimit(1)
-                                                    .truncationMode(.middle)
-                                            }
+                                            Text(group.displayName)
+                                                .font(.system(size: CursorTheme.fontBodyEmphasis, weight: .semibold))
+                                                .foregroundStyle(CursorTheme.colorForWorkspace(path: group.path))
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
                                             let groupBranch = group.path == currentWorkspacePath ? currentBranch : (group.tabs.first?.currentBranch ?? "")
-                                            if !groupBranch.isEmpty && !isCollapsed {
+                                            if !groupBranch.isEmpty {
                                                 HStack(spacing: 4) {
                                                     Image(systemName: "arrow.triangle.branch")
-                                                        .font(.system(size: 9, weight: .medium))
+                                                        .font(.system(size: CursorTheme.fontTiny, weight: .medium))
                                                     Text(groupBranch)
-                                                        .font(.system(size: 11, weight: .regular))
+                                                        .font(.system(size: CursorTheme.fontSmall, weight: .regular))
                                                         .italic()
                                                 }
                                                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
@@ -2029,522 +2329,232 @@ Build the initial app or service structure directly in this repository, choose s
                                             }
                                         }
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                        Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 8, weight: .semibold))
-                                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                                            .frame(width: 10, alignment: .trailing)
                                     }
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 4)
 
+                                Menu {
+                                    Menu("Open in…", systemImage: "arrow.up.forward.app") {
+                                        Button("Cursor") {
+                                            openProjectInCursor(group.path)
+                                        }
+                                    }
+                                    Divider()
+                                    Button(role: .destructive) {
+                                        removeProject(workspacePath: group.path)
+                                    } label: {
+                                        Text("Remove")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                                        .frame(width: 18, height: 30)
+                                        .contentShape(Rectangle())
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .help("Project actions")
                             }
-                            if !isCollapsed {
-                                let isTasksSelected = tabManager.selectedTasksViewPath == group.path
-                                Button {
-                                    tabManager.showTasksView(workspacePath: group.path)
-                                    if appState.isMainContentCollapsed {
-                                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "checklist")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .frame(width: 16, height: 16, alignment: .center)
-                                        Text("Tasks")
-                                            .font(.system(size: 12, weight: isTasksSelected ? .semibold : .medium))
-                                            .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        isTasksSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isTasksSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                                    )
+                            .padding(.horizontal, CursorTheme.paddingSidebarGroupHeaderHorizontal)
+                            .padding(.vertical, CursorTheme.paddingSidebarGroupHeaderVertical)
+                            let isTasksSelected = tabManager.selectedTasksViewPath == group.path
+                            Button {
+                                tabManager.showTasksView(workspacePath: group.path)
+                                if appState.isMainContentCollapsed {
+                                    withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
                                 }
-                                .buttonStyle(.plain)
-                                .help("View tasks for this project")
-                                let isDashboardSelected = tabManager.selectedDashboardViewPath == group.path
-                                Button {
-                                    tabManager.showDashboardView(workspacePath: group.path)
-                                    if appState.isMainContentCollapsed {
-                                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
-                                    }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "eye")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .frame(width: 16, height: 16, alignment: .center)
-                                        Text("Preview")
-                                            .font(.system(size: 12, weight: isDashboardSelected ? .semibold : .medium))
-                                            .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                            .lineLimit(1)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        isDashboardSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                            .stroke(isDashboardSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                                    )
+                            } label: {
+                                HStack(spacing: CursorTheme.spaceS) {
+                                    Image(systemName: "checklist")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                        .frame(width: 16, height: 16, alignment: .center)
+                                    Text("Tasks")
+                                        .font(.system(size: 12, weight: isTasksSelected ? .semibold : .medium))
+                                        .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .buttonStyle(.plain)
-                                .help("Preview: run startup scripts in tabs")
-                                ForEach(group.tabs) { t in
-                                    ObservedTabChip(
-                                        tab: t,
-                                        isSelected: t.id == tabManager.selectedTabID,
-                                        showClose: true,
-                                        onSelect: {
-                                            selectLinkedAgentTab(t.id)
-                                        },
-                                        onClose: { requestCloseTab(t) }
-                                    )
-                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
+                                .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
+                                .background(
+                                    isTasksSelected
+                                        ? CursorTheme.surfaceRaised(for: colorScheme)
+                                        : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+                                    in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                                        .stroke(
+                                            isTasksSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                                            lineWidth: 1
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help("View tasks for this project")
+                            let isDashboardSelected = tabManager.selectedDashboardViewPath == group.path
+                            Button {
+                                    openDashboard(workspacePath: group.path)
+                            } label: {
+                                HStack(spacing: CursorTheme.spaceS) {
+                                    Image(systemName: "eye")
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                        .frame(width: 16, height: 16, alignment: .center)
+                                    Text("Preview")
+                                        .font(.system(size: 12, weight: isDashboardSelected ? .semibold : .medium))
+                                        .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                                .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
+                                .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
+                                .background(
+                                    isDashboardSelected
+                                        ? CursorTheme.surfaceRaised(for: colorScheme)
+                                        : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+                                    in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                                        .stroke(
+                                            isDashboardSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                                            lineWidth: 1
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Preview: run startup scripts in tabs")
+                            ForEach(group.tabs) { t in
+                                ObservedTabChip(
+                                    tab: t,
+                                    isSelected: t.id == tabManager.selectedTabID,
+                                    showClose: true,
+                                    onSelect: {
+                                        selectLinkedAgentTab(t.id)
+                                    },
+                                    onClose: { requestCloseTab(t) }
+                                )
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, CursorTheme.spaceXS)
             }
             .frame(maxHeight: .infinity)
 
-            ActionButton(
-                title: "Projects",
-                icon: "gearshape",
-                action: addProject,
-                help: "Projects",
-                style: .primary
-            )
-            .frame(maxWidth: .infinity)
+            HStack(spacing: CursorTheme.spaceS) {
+                ActionButton(
+                    title: "Add Project",
+                    icon: "folder.badge.plus",
+                    action: addProject,
+                    help: "Open an existing project folder",
+                    style: .primary
+                )
+                .frame(maxWidth: .infinity)
+                ActionButton(
+                    title: "Create",
+                    icon: "wand.and.stars",
+                    action: openCreateProjectPage,
+                    help: "Create or clone a project and run setup",
+                    style: .accent
+                )
+                .frame(maxWidth: .infinity)
+            }
         }
         .frame(maxWidth: .infinity)
         .clipped()
     }
 
-    // MARK: - Projects hub
+    private func reloadProjectDiscovery(using roots: [String]? = nil) {
+        let resolvedRoots = roots ?? projectScanRoots
+        _ = seedMetroDirectories(rootPaths: resolvedRoots)
+        devFolders = loadDevFolders(rootPaths: resolvedRoots)
+        tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
+    }
 
-    private var addProjectHubContent: some View {
-        VStack(spacing: 0) {
-            projectsPanelTabBar
+    // MARK: - Create page (scaffold / clone)
 
-            if let message = projectHubErrorMessage, !message.isEmpty {
-                projectHubBanner(message, tint: CursorTheme.semanticErrorTint, border: CursorTheme.semanticError)
-                    .padding(.horizontal, CursorTheme.paddingChrome)
-                    .padding(.top, CursorTheme.spaceS)
-            }
-
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
-                    switch projectsPanelTab {
-                    case .turnOnOff:
-                        turnOnOffProjectsSection
-                    case .newProject:
-                        newProjectSection
-                    case .github:
-                        githubProjectSection
-                    }
+    private func createProjectContentArea() -> some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
+                if let err = createProjectError, !err.isEmpty {
+                    Text(err)
+                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(CursorTheme.paddingCard)
+                        .background(CursorTheme.semanticErrorTint.opacity(0.2), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                .stroke(CursorTheme.semanticError.opacity(0.45), lineWidth: 1)
+                        )
                 }
-                .padding(CursorTheme.paddingChrome)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
 
-    /// Tab bar for Projects panel (shared PanelTabBarView style: chrome strip + pill).
-    private var projectsPanelTabBar: some View {
-        PanelTabBarView(
-            tabs: ProjectsPanelTab.allCases.map { PanelTabItem(id: $0, label: $0.rawValue, count: nil) },
-            selection: $projectsPanelTab,
-            onSelect: { projectsPanelTab = $0 },
-            horizontalPadding: CursorTheme.paddingChrome
-        )
-    }
-
-    private func projectHubBanner(_ message: String, tint: Color, border: Color) -> some View {
-        Text(message)
-            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(CursorTheme.paddingCard)
-            .background(tint, in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                    .stroke(border.opacity(0.45), lineWidth: 1)
-            )
-    }
-
-    /// Inline success toast for "Created X" / "Cloned X" in the Projects hub.
-    private func projectHubSuccessToast(_ message: String) -> some View {
-        HStack(spacing: CursorTheme.spaceS) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: CursorTheme.fontBodySmall))
-                .foregroundStyle(CursorTheme.semanticSuccess)
-            Text(message)
-                .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-        }
-        .padding(.horizontal, CursorTheme.paddingCard)
-        .padding(.vertical, CursorTheme.spaceS)
-        .background(CursorTheme.semanticSuccess.opacity(0.15), in: Capsule())
-    }
-
-    private var isProjectHubDiscoveryStatusMessageVisible: Bool {
-        guard let message = projectHubStatusMessage else { return false }
-        return message.hasPrefix("Prepared") || message.hasPrefix("Reloaded")
-    }
-
-    private func projectHubCard<Content: View>(
-        title: String,
-        subtitle: String? = nil,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                Text(title)
-                    .font(.system(size: CursorTheme.fontSubtitle, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: CursorTheme.fontBodySmall))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-
-            content()
-        }
-        .padding(CursorTheme.paddingCard)
-        .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-        )
-    }
-
-    /// "Projects" tab: turn projects on/off, add scan directories, open or browse.
-    /// Projects are ordered A–Z by display name and grouped by scan directory when more than one directory is configured.
-    private var turnOnOffProjectsSection: some View {
-        let roots = projectScanRoots
-        let projectGroups: [(sectionTitle: String, projects: [ProjectState])] = {
-            let all = tabManager.projects
-            guard !all.isEmpty else { return [] }
-            let byDisplayName: (ProjectState, ProjectState) -> Bool = { lhs, rhs in
-                appState.workspaceDisplayName(for: lhs.path).localizedStandardCompare(appState.workspaceDisplayName(for: rhs.path)) == .orderedAscending
-            }
-            if roots.count > 1 {
-                let grouped = Dictionary(grouping: all) { scanRoot(for: $0.path) ?? "" }
-                var result: [(String, [ProjectState])] = roots
-                    .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-                    .map { root in
-                        let title = (root as NSString).lastPathComponent
-                        let projects = (grouped[root] ?? []).sorted(by: byDisplayName)
-                        return (title, projects)
-                    }
-                if let other = grouped[""], !other.isEmpty {
-                    result.append(("Other", other.sorted(by: byDisplayName)))
-                }
-                return result
-            }
-            return [("", all.sorted(by: byDisplayName))]
-        }()
-        return VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
-            projectHubCard(
-                title: "Directories",
-                subtitle: "Folders to scan"
-            ) {
-                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
-                    if isProjectHubDiscoveryStatusMessageVisible, let message = projectHubStatusMessage {
-                        projectHubSuccessToast(message)
-                    }
-
-                    folderPickerRow
-                    scanRootsList
-                    HStack(spacing: CursorTheme.spaceS) {
-                        Spacer(minLength: 0)
+                Text("Source")
+                    .font(.system(size: CursorTheme.fontCaption, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                HStack(spacing: CursorTheme.spaceS) {
+                    ForEach(CreateProjectWorkflowMode.allCases) { mode in
+                        let isSelected = createProjectMode == mode
                         Button {
-                            reloadProjectDiscovery()
+                            createProjectMode = mode
+                            createProjectError = nil
                         } label: {
                             HStack(spacing: CursorTheme.spaceXS) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                                Text("Reload")
-                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            }
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Seed .metro folders and rescan all configured roots")
-                    }
-                }
-            }
-
-            projectHubCard(
-                title: "Projects",
-                subtitle: "Choose which workspaces appear in the sidebar."
-            ) {
-                if projectGroups.isEmpty {
-                    Text("No projects discovered yet. Add folders to scan in Directories.")
-                        .font(.system(size: CursorTheme.fontBodySmall))
-                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                } else {
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
-                        ForEach(Array(projectGroups.enumerated()), id: \.offset) { _, group in
-                            if !group.sectionTitle.isEmpty {
-                                Text(group.sectionTitle)
+                                Image(systemName: mode == .newWithAgent ? "wand.and.stars" : "arrow.down.doc")
                                     .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
-                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                    .padding(.top, group.sectionTitle == "Other" ? CursorTheme.spaceS : 0)
+                                Text(mode == .newWithAgent ? "New project" : "GitHub")
+                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
                             }
-                            ForEach(group.projects, id: \.path) { project in
-                            let isSelected = selectedExistingProjectPath == project.path
-                            let normalized = AppPreferences.normalizedProjectPath(project.path)
-                            let isVisible = !AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw).contains(normalized)
-                            HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-                                Button {
-                                    selectedExistingProjectPath = project.path
-                                } label: {
-                                    HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-                                        Image(systemName: "folder")
-                                            .font(.system(size: CursorTheme.fontBody, weight: .medium))
-                                            .foregroundStyle(CursorTheme.colorForWorkspace(path: project.path))
-                                            .frame(width: 18, height: 18)
-                                        Text(appState.workspaceDisplayName(for: project.path))
-                                            .font(.system(size: CursorTheme.fontBody, weight: .semibold))
-                                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                            .lineLimit(1)
-                                        Spacer(minLength: 0)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                Toggle("", isOn: Binding(
-                                    get: { isVisible },
-                                    set: { visible in
-                                        var hidden = AppPreferences.hiddenProjectPaths(from: hiddenProjectPathsRaw)
-                                        if visible {
-                                            hidden.remove(normalized)
-                                        } else {
-                                            hidden.insert(normalized)
-                                        }
-                                        hiddenProjectPathsRaw = AppPreferences.rawFrom(hiddenPaths: hidden)
-                                    }
-                                ))
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                                .labelsHidden()
-                                .help("Show in sidebar")
-                            }
-                            .padding(CursorTheme.paddingCard)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                            .padding(.horizontal, CursorTheme.paddingCard)
+                            .padding(.vertical, CursorTheme.spaceS)
                             .background(
-                                isSelected ? CursorTheme.surfaceMuted(for: colorScheme) : CursorTheme.editor(for: colorScheme),
+                                isSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
                                 in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                                    .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme), lineWidth: 1)
+                                    .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
                             )
                         }
-                            }
-                    }
-                }
-            }
-        }
-    }
-
-    private var scanRootsList: some View {
-        let roots = projectScanRoots
-        if roots.isEmpty {
-            return AnyView(
-                Text("No folders added yet. Use Add folder above, or set Projects root in Settings.")
-                    .font(.system(size: CursorTheme.fontBodySmall))
-                    .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-            )
-        }
-        return AnyView(
-            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                ForEach(roots, id: \.self) { path in
-                    HStack(spacing: CursorTheme.spaceS) {
-                        Button {
-                            pickReplacementScanRoot(for: path)
-                        } label: {
-                            HStack(spacing: CursorTheme.spaceS) {
-                                Text(path)
-                                    .font(.system(size: CursorTheme.fontSecondary))
-                                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: "tray.and.arrow.up.fill")
-                                    .font(.system(size: CursorTheme.fontIconList, weight: .medium))
-                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                                    .accessibilityLabel("Choose folder")
-                            }
-                            .padding(.horizontal, CursorTheme.spaceS)
-                            .padding(.vertical, CursorTheme.spaceXS)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(CursorTheme.editor(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                                    .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                        }
                         .buttonStyle(.plain)
-                        .help("Choose a different folder to scan")
-
-                        Button {
-                            removeProjectScanRoot(path)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Remove folder from scan")
                     }
+                    Spacer(minLength: 0)
                 }
-            }
-        )
-    }
 
-    private var folderPickerRow: some View {
-        HStack(alignment: .center, spacing: CursorTheme.spaceS) {
-            ActionButton(
-                title: "Add folder",
-                icon: "folder.badge.plus",
-                action: addProjectScanRoot,
-                help: "Add another top-level folder for project discovery",
-                style: .secondary
-            )
-            Text("Metro scans immediate subfolders inside each directory for projects.")
-                .font(.system(size: CursorTheme.fontCaption))
-                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-    }
-
-    private func addProjectScanRoot() {
-        let startPath = projectScanRoots.first ?? (projectsRootPath as NSString).expandingTildeInPath
-        if let path = selectFolder(
-            title: "Add folder to scan",
-            message: "Choose a folder. Its subfolders will be scanned for Metro projects.",
-            startingAt: startPath
-        ) {
-            projectHubErrorMessage = nil
-            var roots = projectScanRoots
-            let normalized = (path as NSString).standardizingPath
-            if !roots.contains(normalized) {
-                roots.append(normalized)
-                projectScanRootsRaw = AppPreferences.rawFrom(projectScanRoots: roots)
-            } else {
-                reloadProjectDiscovery(using: roots)
-            }
-        }
-    }
-
-    /// Opens the folder picker for an existing scan root; replaces that entry (deduped) and rescans.
-    private func pickReplacementScanRoot(for path: String) {
-        let prior = (path as NSString).standardizingPath
-        if let chosen = selectFolder(
-            title: "Choose folder to scan",
-            message: "Choose a folder. Its subfolders will be scanned for Metro projects.",
-            startingAt: prior
-        ) {
-            projectHubErrorMessage = nil
-            var roots = projectScanRoots
-            let normalized = (chosen as NSString).standardizingPath
-            guard let idx = roots.firstIndex(where: { ($0 as NSString).standardizingPath == prior }) else { return }
-            roots[idx] = normalized
-            var seen = Set<String>()
-            roots = roots.compactMap { root in
-                let n = (root as NSString).standardizingPath
-                guard !seen.contains(n) else { return nil }
-                seen.insert(n)
-                return n
-            }
-            projectScanRootsRaw = roots.isEmpty ? "" : AppPreferences.rawFrom(projectScanRoots: roots)
-            reloadProjectDiscovery(using: roots)
-        }
-    }
-
-    private func removeProjectScanRoot(_ path: String) {
-        var roots = projectScanRoots
-        roots.removeAll { ($0 as NSString).standardizingPath == (path as NSString).standardizingPath }
-        projectScanRootsRaw = roots.isEmpty ? "" : AppPreferences.rawFrom(projectScanRoots: roots)
-    }
-
-    private func reloadProjectDiscovery(using roots: [String]? = nil, showStatusMessage: Bool = true) {
-        let resolvedRoots = roots ?? projectScanRoots
-        let createdMetroCount = seedMetroDirectories(rootPaths: resolvedRoots)
-        devFolders = loadDevFolders(rootPaths: resolvedRoots)
-        tabManager.setDiscoveredProjectsFromPaths(devFolders.map(\.path))
-        seedProjectHubDefaults()
-
-        guard showStatusMessage else { return }
-        let projectCount = devFolders.count
-        if createdMetroCount > 0 {
-            projectHubStatusMessage = "Reloaded \(projectCount) project\(projectCount == 1 ? "" : "s") and prepared \(createdMetroCount) new folder\(createdMetroCount == 1 ? "" : "s")."
-        } else {
-            projectHubStatusMessage = "Reloaded \(projectCount) project\(projectCount == 1 ? "" : "s")."
-        }
-    }
-
-    private var newProjectSection: some View {
-        projectHubCard(
-            title: "Create New Project",
-            subtitle: "Let the agent scaffold the first version from your idea."
-        ) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
-                if let message = projectHubStatusMessage, message.hasPrefix("Created") {
-                    projectHubSuccessToast(message)
-                }
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Project name")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    TextField("my-app", text: Binding(
-                        get: { newProjectName },
-                        set: { newProjectName = sanitizedProjectName($0) }
-                    ))
-                        .textFieldStyle(.roundedBorder)
+                if createProjectMode == .cloneFromGitHub {
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Repository URL")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        TextField("https://github.com/owner/repo", text: $createProjectGitURL)
+                            .textFieldStyle(.roundedBorder)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Destination")
+                    Text("Parent folder")
                         .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
                         .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                     HStack(spacing: CursorTheme.spaceS) {
-                        TextField("~/dev", text: $newProjectParentPath)
+                        TextField("~/dev", text: $createProjectParentPath)
                             .textFieldStyle(.roundedBorder)
                         ActionButton(
                             title: "Browse",
                             icon: "folder",
                             action: {
-                                if let path = selectFolder(
-                                    title: "Choose New Project Destination",
-                                    message: "Choose where the new project folder should be created.",
-                                    startingAt: newProjectParentPath
+                                if let p = selectFolder(
+                                    title: "Choose parent folder",
+                                    message: "The project is created or cloned inside this folder.",
+                                    startingAt: createProjectParentPath
                                 ) {
-                                    newProjectParentPath = path
+                                    createProjectParentPath = p
                                 }
                             },
                             style: .secondary
@@ -2552,112 +2562,54 @@ Build the initial app or service structure directly in this repository, choose s
                     }
                 }
 
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("What should it be?")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    TextField("Example: a small Next.js app for tracking invoices", text: $newProjectIdea, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(3...6)
-                }
-
-                HStack(spacing: CursorTheme.spaceS) {
-                    ActionButton(
-                        title: "Create",
-                        icon: "wand.and.stars",
-                        action: createProjectWithAgentFromHub,
-                        isDisabled: sanitizedProjectName(newProjectName).isEmpty,
-                        help: "Create the folder and ask the agent to scaffold the project",
-                        style: .accent
-                    )
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-
-    private var githubProjectSection: some View {
-        projectHubCard(
-            title: "Clone From GitHub",
-            subtitle: "Clone a repository into one of your working directories, then open it directly in Cursor Metro."
-        ) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
-                if let message = projectHubStatusMessage, message.hasPrefix("Cloned") {
-                    projectHubSuccessToast(message)
-                }
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Repository URL")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    TextField("https://github.com/owner/repo", text: $gitRepositoryURL)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Clone into")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    HStack(spacing: CursorTheme.spaceS) {
-                        TextField("~/dev", text: $gitCloneParentPath)
+                if createProjectMode == .newWithAgent {
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Project folder name")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        TextField("my-app", text: $createProjectFolderName)
                             .textFieldStyle(.roundedBorder)
-                        ActionButton(
-                            title: "Browse",
-                            icon: "folder",
-                            action: {
-                                if let path = selectFolder(
-                                    title: "Choose Clone Destination",
-                                    message: "Choose the parent directory where the repository should be cloned.",
-                                    startingAt: gitCloneParentPath
-                                ) {
-                                    gitCloneParentPath = path
-                                }
-                            },
-                            style: .secondary
-                        )
+                    }
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("What should it be? (optional)")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        TextField("Example: a small Next.js app for invoices", text: $createProjectIdea, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(3...8)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Folder name (optional)")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        TextField("Override cloned folder name", text: $createProjectFolderName)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Folder name override")
+                Toggle(isOn: $createProjectInitialGitCommit) {
+                    Text("Create initial git commit after setup")
                         .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    TextField("Optional", text: $gitCloneFolderName)
-                        .textFieldStyle(.roundedBorder)
+                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                 }
+                .toggleStyle(.checkbox)
 
-                HStack(spacing: CursorTheme.spaceS) {
-                    ActionButton(
-                        title: isProjectHubBusy ? "Cloning..." : "Clone Project",
-                        icon: "arrow.down.doc",
-                        action: { cloneProjectFromHub(runSetupAgent: false) },
-                        isDisabled: isProjectHubBusy || gitRepositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                        help: "Clone the repository and open it in Tasks",
-                        style: .primary
-                    )
-                    ActionButton(
-                        title: isProjectHubBusy ? "Cloning..." : "Clone + Setup",
-                        icon: "wand.and.stars",
-                        action: { cloneProjectFromHub(runSetupAgent: true) },
-                        isDisabled: isProjectHubBusy || gitRepositoryURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                        help: "Clone the repository and launch the setup agent",
-                        style: .accent
-                    )
-                    Spacer(minLength: 0)
-                }
+                ActionButton(
+                    title: createProjectBusy ? "Working…" : (createProjectMode == .cloneFromGitHub ? "Clone & set up" : "Create & set up"),
+                    icon: "wand.and.stars",
+                    action: submitCreateProject,
+                    isDisabled: createProjectBusy,
+                    help: "Run the setup agent for `.metro/project.json` and Metro Preview",
+                    style: .accent
+                )
             }
+            .padding(CursorTheme.paddingChrome)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func projectHubTag(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: CursorTheme.fontCaption, weight: .medium))
-            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-            .padding(.horizontal, CursorTheme.paddingBadgeHorizontal)
-            .padding(.vertical, CursorTheme.paddingBadgeVertical)
-            .background(CursorTheme.surfaceMuted(for: colorScheme), in: Capsule())
-    }
-
-    // MARK: - Splash content (no projects: invite to add a project)
+    // MARK: - Splash content (no projects)
 
     private func splashContentArea() -> some View {
         VStack(spacing: 0) {
@@ -2674,21 +2626,33 @@ Build the initial app or service structure directly in this repository, choose s
                         .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .multilineTextAlignment(.center)
 
-                    Text("Choose a folder on your Mac to open as a project. You can then ask questions, run the agent, and use Cursor from the menu bar.")
+                    Text("Open an existing folder, or use Create to scaffold a new app or clone from GitHub—the agent configures Preview and `.metro/project.json`.")
                         .font(.system(size: 14, weight: .regular))
                         .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 320)
+                        .frame(maxWidth: 340)
                 }
 
-                ActionButton(
-                    title: "Projects",
-                    icon: "gearshape",
-                    action: addProject,
-                    help: "Projects",
-                    style: .primary
-                )
+                HStack(spacing: CursorTheme.spaceM) {
+                    ActionButton(
+                        title: "Add Project",
+                        icon: "folder.badge.plus",
+                        action: addProject,
+                        help: "Open an existing project folder",
+                        style: .primary
+                    )
+                    .frame(maxWidth: .infinity)
+                    ActionButton(
+                        title: "Create",
+                        icon: "wand.and.stars",
+                        action: openCreateProjectPage,
+                        help: "Create or clone a project and run setup",
+                        style: .accent
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(maxWidth: 360)
             }
             .padding(32)
             Spacer(minLength: 40)
@@ -2719,24 +2683,30 @@ Build the initial app or service structure directly in this repository, choose s
     }
 
     @ViewBuilder
-    private func agentStatusIcon(tab: AgentTab, status: (label: String, isProcessing: Bool, isPendingReview: Bool, isStopped: Bool, isCompleted: Bool)) -> some View {
+    private func agentStatusIcon(
+        tab: AgentTab,
+        status: (label: String, isProcessing: Bool, isPendingReview: Bool, isStopped: Bool, isCompleted: Bool),
+        compact: Bool = false
+    ) -> some View {
+        let spinnerSize = compact ? CursorTheme.fontSmall : CursorTheme.fontIconList - 4
+        let symbolSize = compact ? CursorTheme.fontSmall : CursorTheme.fontIconList
         if status.isProcessing {
-            LightBlueSpinner(size: CursorTheme.fontIconList - 4)
+            LightBlueSpinner(size: spinnerSize)
         } else if status.isStopped {
             Image(systemName: "square.fill")
-                .font(.system(size: CursorTheme.fontIconList - 2, weight: .semibold))
+                .font(.system(size: compact ? symbolSize - 1 : symbolSize - 2, weight: .semibold))
                 .foregroundStyle(CursorTheme.semanticError)
         } else if status.isPendingReview {
             Image(systemName: "clock.fill")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(CursorTheme.semanticReview)
         } else if status.isCompleted {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: CursorTheme.fontIconList))
+                .font(.system(size: symbolSize))
                 .foregroundStyle(CursorTheme.brandBlue)
         } else {
             Image(systemName: "person.crop.circle")
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                .font(.system(size: symbolSize, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
         }
     }

@@ -8,6 +8,8 @@ class TabManager: ObservableObject {
         let linkedTaskID: UUID
         let isRunning: Bool
         let lastTurnState: ConversationTurnDisplayState?
+        /// So the Tasks list can refresh when new user turns are appended while the tasks panel is open.
+        let conversationTurnCount: Int
     }
 
     @Published private(set) var projects: [ProjectState] = []
@@ -17,7 +19,6 @@ class TabManager: ObservableObject {
     @Published var selectedTerminalID: UUID?
     @Published var selectedTasksViewPath: String?
     @Published var selectedDashboardViewPath: String?
-    @Published var selectedAddProjectView: Bool = false
     @Published var selectedProjectPath: String?
     @Published private(set) var recentlyClosedTabs: [SavedAgentTab] = []
     private static let maxRecentlyClosedTabs = 20
@@ -50,7 +51,6 @@ class TabManager: ObservableObject {
             projects = Self.mergeProjects(savedProjects: restoredProjects, tabProjects: tabProjects)
             selectedTabID = saved.selectedTabID
             selectedProjectPath = saved.selectedProjectPath
-            selectedAddProjectView = saved.selectedAddProjectView
         }
         reconcileSelection()
         bindTabChanges()
@@ -76,8 +76,7 @@ class TabManager: ObservableObject {
             projects: projects
                 .filter { $0.source == .manual }
                 .map { SavedProject(path: $0.path, source: $0.source) },
-            selectedProjectPath: selectedProjectPath,
-            selectedAddProjectView: selectedAddProjectView
+            selectedProjectPath: selectedProjectPath
         )
         TabManagerPersistence.save(state)
     }
@@ -112,12 +111,6 @@ class TabManager: ObservableObject {
             }
             .store(in: &persistenceSubscriptions)
 
-        $selectedAddProjectView
-            .dropFirst()
-            .sink { [weak self] _ in
-                self?.scheduleSaveState()
-            }
-            .store(in: &persistenceSubscriptions)
     }
 
     private func scheduleSaveState() {
@@ -162,19 +155,22 @@ class TabManager: ObservableObject {
         reconcileSelection(preferredProjectPath: selectedProjectPath)
     }
 
-    func addProject(path: String, select: Bool = true) {
+    /// Returns false if the path is missing or not a directory (must assign `projects` instead of in-place append so `@Published` notifies SwiftUI).
+    @discardableResult
+    func addProject(path: String, select: Bool = true) -> Bool {
         let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard Self.workspacePathExists(normalizedPath) else { return }
+        guard Self.workspacePathExists(normalizedPath) else { return false }
         if let index = projects.firstIndex(where: { $0.path == normalizedPath }) {
             if projects[index].source != .manual {
-                projects[index].source = .manual
+                var next = projects
+                next[index].source = .manual
+                projects = next
             }
         } else {
-            projects.append(ProjectState(path: normalizedPath, source: .manual))
+            projects = projects + [ProjectState(path: normalizedPath, source: .manual)]
         }
         if select {
             selectedProjectPath = normalizedPath
-            selectedAddProjectView = false
             if let existingTab = activeTab, existingTab.workspacePath == normalizedPath {
                 selectedTabID = existingTab.id
                 selectedTerminalID = nil
@@ -188,12 +184,12 @@ class TabManager: ObservableObject {
             }
         }
         reconcileSelection(preferredProjectPath: normalizedPath)
+        return true
     }
 
     func selectProject(_ path: String) {
         guard projects.contains(where: { $0.path == path }) else { return }
         selectedProjectPath = path
-        selectedAddProjectView = false
         if selectedDashboardViewPath != path {
             selectedDashboardViewPath = nil
         }
@@ -219,7 +215,6 @@ class TabManager: ObservableObject {
         let resolved = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard projects.contains(where: { $0.path == resolved }) else { return }
         selectedProjectPath = resolved
-        selectedAddProjectView = false
         selectedTasksViewPath = resolved
         selectedDashboardViewPath = nil
         selectedTabID = nil
@@ -231,7 +226,6 @@ class TabManager: ObservableObject {
         guard projects.contains(where: { $0.path == resolved }) else { return }
         addProject(path: resolved, select: false)
         selectedProjectPath = resolved
-        selectedAddProjectView = false
         selectedTasksViewPath = nil
         selectedDashboardViewPath = resolved
         selectedTabID = nil
@@ -242,18 +236,9 @@ class TabManager: ObservableObject {
         }
     }
 
-    func showAddProjectView() {
-        selectedAddProjectView = true
-        selectedTabID = nil
-        selectedTerminalID = nil
-        selectedTasksViewPath = nil
-        selectedDashboardViewPath = nil
-    }
-
     @discardableResult
     func selectAgentTab(id: UUID) -> Bool {
         guard let tab = tabs.first(where: { $0.id == id }) else { return false }
-        selectedAddProjectView = false
         selectedTabID = tab.id
         selectedTerminalID = nil
         selectedTasksViewPath = nil
@@ -288,7 +273,6 @@ class TabManager: ObservableObject {
             selectedTabID = tab.id
             selectedTerminalID = nil
             selectedTasksViewPath = nil
-            selectedAddProjectView = false
             selectedProjectPath = resolved
         }
         return tab
@@ -306,7 +290,6 @@ class TabManager: ObservableObject {
         selectedTabID = nil
         selectedTasksViewPath = nil
         selectedDashboardViewPath = nil
-        selectedAddProjectView = false
         selectedProjectPath = resolved
         return tab
     }
@@ -322,13 +305,11 @@ class TabManager: ObservableObject {
                 selectedTerminalID = replacement.id
                 selectedTasksViewPath = nil
                 selectedDashboardViewPath = tabToClose.isDashboardTab ? closedPath : (replacement.isDashboardTab ? closedPath : nil)
-                selectedAddProjectView = false
             } else if let firstAgent = tabs.first(where: { $0.workspacePath == closedPath }) {
                 selectedTerminalID = nil
                 selectedTabID = firstAgent.id
                 selectedTasksViewPath = nil
                 selectedDashboardViewPath = nil
-                selectedAddProjectView = false
             } else {
                 selectedTerminalID = nil
                 selectedTasksViewPath = (selectedTasksViewPath == closedPath ? closedPath : selectedTasksViewPath)
@@ -363,7 +344,6 @@ class TabManager: ObservableObject {
             selectedTerminalID = first.id
             selectedTabID = nil
             selectedTasksViewPath = nil
-            selectedAddProjectView = false
             selectedProjectPath = resolved
         }
         return true
@@ -400,13 +380,11 @@ class TabManager: ObservableObject {
                     selectedTerminalID = nil
                     selectedTasksViewPath = nil
                     selectedProjectPath = replacement.workspacePath
-                    selectedAddProjectView = false
                 } else if let firstTerminal = terminalTabs.first(where: { $0.workspacePath == closedProjectPath }) {
                     selectedTabID = nil
                     selectedTerminalID = firstTerminal.id
                     selectedTasksViewPath = nil
                     selectedProjectPath = closedProjectPath
-                    selectedAddProjectView = false
                 } else {
                     selectedTabID = nil
                     selectedTerminalID = nil
@@ -437,7 +415,7 @@ class TabManager: ObservableObject {
         let selectedProjectWasRemoved = selectedProjectPath == path
         tabs.removeAll { $0.workspacePath == path }
         terminalTabs.removeAll { $0.workspacePath == path }
-        projects.removeAll { $0.path == path }
+        projects = projects.filter { $0.path != path }
 
         if selectedProjectWasRemoved {
             selectedProjectPath = nil
@@ -526,7 +504,8 @@ class TabManager: ObservableObject {
         return LinkedTaskStatusSignature(
             linkedTaskID: linkedTaskID,
             isRunning: tab.isRunning,
-            lastTurnState: tab.turns.last?.displayState
+            lastTurnState: tab.turns.last?.displayState,
+            conversationTurnCount: tab.turns.count
         )
     }
 

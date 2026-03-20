@@ -28,6 +28,8 @@ struct KeyboardShortcutsContentView: View {
         ]),
         ("Navigation", [
             ShortcutRow(keys: ["⇥ Tab"], action: "Focus prompt input"),
+            ShortcutRow(keys: ["⌘["], action: "Previous in sidebar (Tasks → Preview → agents, then next project)"),
+            ShortcutRow(keys: ["⌘]"], action: "Next in sidebar (Tasks → Preview → agents, then next project)"),
         ]),
         ("Composer", [
             ShortcutRow(keys: ["↵ Return"], action: "Send message"),

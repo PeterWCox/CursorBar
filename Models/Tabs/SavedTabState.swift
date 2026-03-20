@@ -9,15 +9,13 @@ struct SavedTabState: Codable {
     var selectedTabID: UUID?
     var projects: [SavedProject]
     var selectedProjectPath: String?
-    var selectedAddProjectView: Bool
 
     init(
         tabs: [SavedAgentTab],
         recentlyClosedTabs: [SavedAgentTab],
         selectedTabID: UUID?,
         projects: [SavedProject],
-        selectedProjectPath: String?,
-        selectedAddProjectView: Bool
+        selectedProjectPath: String?
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.tabs = tabs
@@ -25,7 +23,6 @@ struct SavedTabState: Codable {
         self.selectedTabID = selectedTabID
         self.projects = projects
         self.selectedProjectPath = selectedProjectPath
-        self.selectedAddProjectView = selectedAddProjectView
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -46,6 +43,16 @@ struct SavedTabState: Codable {
         selectedTabID = try container.decodeIfPresent(UUID.self, forKey: .selectedTabID)
         projects = try container.decodeIfPresent([SavedProject].self, forKey: .projects) ?? []
         selectedProjectPath = try container.decodeIfPresent(String.self, forKey: .selectedProjectPath)
-        selectedAddProjectView = try container.decodeIfPresent(Bool.self, forKey: .selectedAddProjectView) ?? false
+        _ = try container.decodeIfPresent(Bool.self, forKey: .selectedAddProjectView)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(tabs, forKey: .tabs)
+        try container.encode(recentlyClosedTabs, forKey: .recentlyClosedTabs)
+        try container.encode(selectedTabID, forKey: .selectedTabID)
+        try container.encode(projects, forKey: .projects)
+        try container.encode(selectedProjectPath, forKey: .selectedProjectPath)
     }
 }

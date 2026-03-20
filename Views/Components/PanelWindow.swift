@@ -2,25 +2,23 @@ import SwiftUI
 
 // MARK: - Reusable panel layout (Projects, Tasks, Preview, Agent)
 
-/// Shared header for panel windows: icon + title + optional subtitle (e.g. project name with color).
-struct PanelHeaderView<Subtitle: View>: View {
+/// Shared header for panel windows: leading visual + title + optional subtitle (e.g. project name with color).
+struct PanelHeaderView<Leading: View, Subtitle: View>: View {
     @Environment(\.colorScheme) private var colorScheme
 
-    var icon: String
+    @ViewBuilder var leading: () -> Leading
     var title: String
     @ViewBuilder var subtitle: () -> Subtitle
 
-    init(icon: String, title: String, @ViewBuilder subtitle: @escaping () -> Subtitle) {
-        self.icon = icon
+    init(title: String, @ViewBuilder leading: @escaping () -> Leading, @ViewBuilder subtitle: @escaping () -> Subtitle) {
+        self.leading = leading
         self.title = title
         self.subtitle = subtitle
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: CursorTheme.spaceM) {
-            Image(systemName: icon)
-                .font(.system(size: CursorTheme.fontIconList, weight: .medium))
-                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            leading()
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -35,8 +33,8 @@ struct PanelHeaderView<Subtitle: View>: View {
 }
 
 extension PanelHeaderView where Subtitle == EmptyView {
-    init(icon: String, title: String) {
-        self.icon = icon
+    init(title: String, @ViewBuilder leading: @escaping () -> Leading) {
+        self.leading = leading
         self.title = title
         self.subtitle = { EmptyView() }
     }

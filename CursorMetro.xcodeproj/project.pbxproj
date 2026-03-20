@@ -35,6 +35,7 @@
 		A1000010 /* SubmittableTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000010 /* SubmittableTextEditor.swift */; };
 		A1000011 /* BrandMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000011 /* BrandMark.swift */; };
 		A1000012 /* TabChip.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000012 /* TabChip.swift */; };
+		A1000088 /* WorkspaceAvatarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000088 /* WorkspaceAvatarView.swift */; };
 		A1000013 /* OutputScrollView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000013 /* OutputScrollView.swift */; };
 		A1000014 /* ConversationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000014 /* ConversationViews.swift */; };
 		A1000015 /* QuickActionButtonsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000015 /* QuickActionButtonsView.swift */; };
@@ -119,6 +120,7 @@
 		A2000010 /* SubmittableTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubmittableTextEditor.swift; sourceTree = "<group>"; };
 		A2000011 /* BrandMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandMark.swift; sourceTree = "<group>"; };
 		A2000012 /* TabChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabChip.swift; sourceTree = "<group>"; };
+		A2000088 /* WorkspaceAvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceAvatarView.swift; sourceTree = "<group>"; };
 		A2000013 /* OutputScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutputScrollView.swift; sourceTree = "<group>"; };
 		A2000014 /* ConversationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationViews.swift; sourceTree = "<group>"; };
 		A2000015 /* QuickActionButtonsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickActionButtonsView.swift; sourceTree = "<group>"; };
@@ -254,6 +256,7 @@
 			isa = PBXGroup;
 			children = (
 				A2000012 /* TabChip.swift */,
+				A2000088 /* WorkspaceAvatarView.swift */,
 				A2000016 /* WorkspacePickerView.swift */,
 				A2000018 /* GitBranchPickerView.swift */,
 			);
@@ -575,6 +578,7 @@
 				A1000010 /* SubmittableTextEditor.swift in Sources */,
 				A1000011 /* BrandMark.swift in Sources */,
 				A1000012 /* TabChip.swift in Sources */,
+				A1000088 /* WorkspaceAvatarView.swift in Sources */,
 				A1000013 /* OutputScrollView.swift in Sources */,
 				A1000014 /* ConversationViews.swift in Sources */,
 				A1000015 /* QuickActionButtonsView.swift in Sources */,

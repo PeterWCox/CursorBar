@@ -315,12 +315,6 @@ final class CursorAgentProvider: AgentProvider {
 
     /// Parses `agent models` stdout: lines like "id - Label" or "id - Label  (current)".
     nonisolated private static func parseModelsOutput(_ output: String) -> [ModelOption] {
-        let knownPremiumIds: Set<String> = [
-            "gpt-5.4-medium", "gpt-5.4-high", "gpt-5.4-xhigh", "gpt-5.4-medium-fast", "gpt-5.4-high-fast", "gpt-5.4-xhigh-fast",
-            "composer-1.5", "composer-1",
-            "opus-4.6", "opus-4.6-thinking", "opus-4.5", "opus-4.5-thinking",
-            "sonnet-4.6", "sonnet-4.6-thinking", "sonnet-4.5", "sonnet-4.5-thinking",
-        ]
         func stripANSI(_ s: String) -> String {
             let pattern = "\\x1B\\[[0-9;]*[a-zA-Z]"
             return s.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
@@ -342,7 +336,7 @@ final class CursorAgentProvider: AgentProvider {
             result.append(ModelOption(
                 id: id,
                 label: label,
-                isPremium: knownPremiumIds.contains(id)
+                isPremium: AvailableModels.isPremiumModel(id: id)
             ))
         }
         return result
@@ -365,7 +359,11 @@ final class CursorAgentProvider: AgentProvider {
         if let conversationId = request.conversationID, !conversationId.isEmpty {
             args += ["--resume", conversationId]
         }
-        if let model = request.modelID, !model.isEmpty {
+        // Recent headless Cursor CLI builds reject `--model auto` even though
+        // Auto still exists as a user-facing concept in Cursor's UI/docs.
+        // Treat Auto as "use the CLI's current/default model" by omitting
+        // the flag entirely.
+        if let model = request.modelID, !model.isEmpty, model != AvailableModels.autoID {
             args += ["--model", model]
         }
         process.arguments = args

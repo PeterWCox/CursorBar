@@ -1,5 +1,4 @@
 import SwiftUI
-import AppKit
 
 // MARK: - Light blue spinner (SwiftUI ProgressView can ignore tint on macOS)
 
@@ -53,31 +52,34 @@ struct TabChip: View {
     private var compactContent: some View {
         Group {
             if isRunning {
-                LightBlueSpinner(size: 14)
+                LightBlueSpinner(size: 15)
             } else if latestTurnState == .stopped {
                 Image(systemName: "square.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(CursorTheme.semanticError)
             } else if hasPrompted {
                 Image(systemName: "clock.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(isSelected ? CursorTheme.brandBlue : CursorTheme.semanticReview)
             } else {
                 Image(systemName: "bubble.left")
-                    .font(.system(size: 14))
+                    .font(.system(size: 15))
                     .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
             }
         }
-        .frame(width: 28, height: 28)
+        .frame(width: CursorTheme.sizeSidebarCompactChip, height: CursorTheme.sizeSidebarCompactChip)
         .background(
             isSelected
                 ? CursorTheme.surfaceRaised(for: colorScheme)
-                : CursorTheme.surfaceMuted(for: colorScheme),
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+            in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+            RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                .stroke(
+                    isSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                    lineWidth: 1
+                )
         )
     }
 
@@ -85,7 +87,7 @@ struct TabChip: View {
     private static let iconContainerWidth: CGFloat = 16
 
     private var fullContent: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: CursorTheme.spaceS) {
             Group {
                 if isRunning {
                     LightBlueSpinner(size: 10)
@@ -116,8 +118,7 @@ struct TabChip: View {
                     }
                     HStack(spacing: 4) {
                         if let path = workspacePath, !path.isEmpty {
-                            ProjectIconView(path: path)
-                                .frame(width: 12, height: 12)
+                            WorkspaceAvatarView(workspacePath: path, displayName: nil, size: 12)
                         }
                         Text(sub)
                             .font(.system(size: 10, weight: .regular))
@@ -182,38 +183,21 @@ struct TabChip: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, CursorTheme.paddingCard)
-        .padding(.vertical, CursorTheme.spaceS)
+        .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
+        .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
         .background(
             isSelected
                 ? CursorTheme.surfaceRaised(for: colorScheme)
-                : CursorTheme.surfaceMuted(for: colorScheme),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+            in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+            RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                .stroke(
+                    isSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                    lineWidth: 1
+                )
         )
     }
 
-}
-
-// MARK: - Project / folder icon from path (uses system icon, including custom folder icons)
-
-struct ProjectIconView: View {
-    let path: String
-    @State private var icon: NSImage?
-
-    var body: some View {
-        Group {
-            if let icon {
-                Image(nsImage: icon)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-            }
-        }
-        .task(id: path) {
-            icon = ImageAssetCache.shared.projectIcon(for: path)
-        }
-    }
 }

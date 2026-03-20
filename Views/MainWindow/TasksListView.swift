@@ -79,10 +79,14 @@ private struct DraftTaskScreenshot: Identifiable {
 struct TasksListView: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
+    /// Shown in the standalone header avatar initials when non-nil (matches main window workspace display name).
+    var workspaceDisplayName: String? = nil
     /// When set to true from outside (e.g. Cmd+T), show the add-new-task row and focus it.
     var triggerAddNewTask: Binding<Bool> = .constant(false)
     /// Linked agent status per task ID so the task row can show review/processing state separately from task lifecycle.
     var linkedStatuses: [UUID: AgentTaskState] = [:]
+    /// User follow-up prompts from the linked agent conversation (after the first turn), keyed by task ID.
+    var userFollowUpsByTaskID: [UUID: [String]] = [:]
     /// Provider used for new tasks created from this Tasks view.
     var newTaskProviderID: AgentProviderID
     /// Returns visible model options for the given provider.
@@ -653,6 +657,7 @@ struct TasksListView: View {
             workspacePath: workspacePath,
             models: models(for: task.providerID),
             agentTaskState: linkedStatuses[task.id] ?? .none,
+            userFollowUps: userFollowUpsByTaskID[task.id] ?? [],
             isEditing: store.editingTask?.id == task.id,
             editDraft: $store.editingDraft,
             editScreenshots: store.editingTask?.id == task.id ? editDraftScreenshots : [],
@@ -753,7 +758,7 @@ struct TasksListView: View {
     private var header: some View {
         HStack(spacing: CursorTheme.spaceM) {
             Button(action: onDismiss) {
-                Image(systemName: "checklist")
+                Image(systemName: "chevron.backward")
                     .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                     .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                     .frame(width: 32, height: 32)
@@ -761,6 +766,12 @@ struct TasksListView: View {
             }
             .buttonStyle(.plain)
             .help("Back")
+
+            WorkspaceAvatarView(
+                workspacePath: workspacePath,
+                displayName: workspaceDisplayName,
+                size: 32
+            )
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Tasks")
@@ -1048,6 +1059,8 @@ private struct TaskRowView: View {
     var models: [ModelOption] = []
     /// Agent state is independent from the task lifecycle and drives the In Progress grouping.
     var agentTaskState: AgentTaskState = .none
+    /// User messages after the first turn in the linked agent tab (empty = no disclosure control).
+    var userFollowUps: [String] = []
     var isEditing: Bool = false
     @Binding var editDraft: String
     var editScreenshots: [DraftTaskScreenshot] = []
@@ -1086,8 +1099,11 @@ private struct TaskRowView: View {
     private var canMoveToBacklog: Bool { task.taskState == .inProgress && (agentTaskState == .none || agentTaskState == .todo) }
     private var firstScreenshotPath: String? { task.screenshotPaths.first }
     private var hasScreenshotSummary: Bool { !isEditing && firstScreenshotPath != nil }
+    private var followUpDisclosureWidth: CGFloat { userFollowUps.isEmpty ? 0 : 22 }
+
     private var trailingContentReservedWidth: CGFloat {
-        hasScreenshotSummary ? 92 : 40
+        let base: CGFloat = hasScreenshotSummary ? 92 : 40
+        return base + followUpDisclosureWidth
     }
     private var selectedModel: ModelOption {
         models.first { $0.id == task.modelId }
@@ -1095,8 +1111,54 @@ private struct TaskRowView: View {
             ?? ModelOption(id: AvailableModels.autoID, label: "Auto", isPremium: false)
     }
     @State private var focusEditor: (() -> Void)?
+    @State private var followUpsExpanded = false
 
-    /// Trailing menu shown in an overlay so it sits exactly halfway down the card.
+    @ViewBuilder
+    private var followUpDisclosureButton: some View {
+        if !userFollowUps.isEmpty {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    followUpsExpanded.toggle()
+                }
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    .rotationEffect(.degrees(followUpsExpanded ? 90 : 0))
+                    .frame(width: 22, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(followUpsExpanded ? "Hide follow-up questions" : "Show \(userFollowUps.count) follow-up question\(userFollowUps.count == 1 ? "" : "s")")
+        }
+    }
+
+    @ViewBuilder
+    private var followUpsChildrenBlock: some View {
+        if followUpsExpanded && !userFollowUps.isEmpty {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                ForEach(Array(userFollowUps.enumerated()), id: \.offset) { _, prompt in
+                    HStack(alignment: .top, spacing: CursorTheme.spaceS) {
+                        Image(systemName: "arrow.turn.down.right")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                            .frame(width: 14, alignment: .leading)
+                            .padding(.top, 2)
+                        Text(prompt)
+                            .font(.system(size: CursorTheme.fontCaption, weight: .regular))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .padding(.leading, CursorTheme.spaceXS)
+            .padding(.top, CursorTheme.spaceS)
+        }
+    }
+
+    /// Trailing menu shown in an overlay so it sits halfway down the primary row.
     @ViewBuilder
     private var trailingControls: some View {
         HStack(spacing: CursorTheme.spaceS) {
@@ -1111,6 +1173,8 @@ private struct TaskRowView: View {
                     }
                 )
             }
+
+            followUpDisclosureButton
 
             if isProcessing, let onStopAgent {
                 Menu {
@@ -1172,50 +1236,82 @@ private struct TaskRowView: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: CursorTheme.spaceS) {
-            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                if isEditing && !task.completed {
-                    SubmittableTextEditor(
-                        text: $editDraft,
-                        isDisabled: false,
-                        onSubmit: onCommitEdit,
-                        onPasteImage: onPasteEditScreenshot,
-                        onHeightChange: { onEditEditorHeightChange?($0) },
-                        onFocusRequested: { focus, _ in
-                            focusEditor = focus
-                            if isEditing {
-                                DispatchQueue.main.async {
-                                    focus()
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: CursorTheme.spaceS) {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                    if isEditing && !task.completed {
+                        SubmittableTextEditor(
+                            text: $editDraft,
+                            isDisabled: false,
+                            onSubmit: onCommitEdit,
+                            onPasteImage: onPasteEditScreenshot,
+                            onHeightChange: { onEditEditorHeightChange?($0) },
+                            onFocusRequested: { focus, _ in
+                                focusEditor = focus
+                                if isEditing {
+                                    DispatchQueue.main.async {
+                                        focus()
+                                    }
+                                }
+                            },
+                            colorScheme: colorScheme,
+                            font: NSFont.systemFont(ofSize: 14, weight: .regular),
+                            textContainerInset: NSSize(width: 0, height: 4)
+                        )
+                            .frame(minWidth: 0, maxWidth: .infinity)
+                            .frame(height: min(400, max(36, editEditorHeight)))
+                            .onKeyPress(.escape) {
+                                onCancelEdit()
+                                return .handled
+                            }
+                        if !editScreenshots.isEmpty {
+                            HStack(alignment: .center, spacing: 6) {
+                                ForEach(editScreenshots) { item in
+                                    ScreenshotThumbnailView(
+                                        image: item.image,
+                                        size: CGSize(width: 56, height: 56),
+                                        cornerRadius: 6,
+                                        onTapPreview: { onPreviewEditScreenshot?(item.image) },
+                                        onDelete: {
+                                            onRemoveEditScreenshot?(item.id)
+                                        }
+                                    )
                                 }
                             }
-                        },
-                        colorScheme: colorScheme,
-                        font: NSFont.systemFont(ofSize: 14, weight: .regular),
-                        textContainerInset: NSSize(width: 0, height: 4)
-                    )
-                        .frame(minWidth: 0, maxWidth: .infinity)
-                        .frame(height: min(400, max(36, editEditorHeight)))
-                        .onKeyPress(.escape) {
-                            onCancelEdit()
-                            return .handled
+                            .padding(.top, CursorTheme.spaceXS)
                         }
-                    if !editScreenshots.isEmpty {
-                        HStack(alignment: .center, spacing: 6) {
-                            ForEach(editScreenshots) { item in
-                                ScreenshotThumbnailView(
-                                    image: item.image,
-                                    size: CGSize(width: 56, height: 56),
-                                    cornerRadius: 6,
-                                    onTapPreview: { onPreviewEditScreenshot?(item.image) },
-                                    onDelete: {
-                                        onRemoveEditScreenshot?(item.id)
-                                    }
-                                )
+                        if !models.isEmpty {
+                            Group {
+                                if canEditAgentModel {
+                                    ModelPickerView(
+                                        selectedModelId: task.modelId,
+                                        models: models,
+                                        onSelect: { onModelChange?($0) }
+                                    )
+                                } else {
+                                    ModelChipView(model: selectedModel)
+                                }
                             }
+                            .padding(.top, CursorTheme.spaceS)
                         }
-                        .padding(.top, CursorTheme.spaceXS)
+                    } else {
+                        Text(task.content)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
+                            .strikethrough(task.completed)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(4)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if canOpenLinkedAgent {
+                                    onTap()
+                                }
+                            }
+                            .onTapGesture(count: 2) { if !task.completed { onTap() } }
                     }
-                    if !models.isEmpty {
+                    if !task.completed, !models.isEmpty, !isEditing {
                         Group {
                             if canEditAgentModel {
                                 ModelPickerView(
@@ -1229,41 +1325,16 @@ private struct TaskRowView: View {
                         }
                         .padding(.top, CursorTheme.spaceS)
                     }
-                } else {
-                    // Task text only; screenshot strip and menu are in trailing overlay (vertically centered)
-                    Text(task.content)
-                        .font(.system(size: 14, weight: .regular))
-                        .foregroundStyle(task.completed ? CursorTheme.textTertiary(for: colorScheme) : CursorTheme.textPrimary(for: colorScheme))
-                        .strikethrough(task.completed)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(4)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if canOpenLinkedAgent {
-                                onTap()
-                            }
-                        }
-                        .onTapGesture(count: 2) { if !task.completed { onTap() } }
                 }
-                if !task.completed, !models.isEmpty, !isEditing {
-                    Group {
-                        if canEditAgentModel {
-                            ModelPickerView(
-                                selectedModelId: task.modelId,
-                                models: models,
-                                onSelect: { onModelChange?($0) }
-                            )
-                        } else {
-                            ModelChipView(model: selectedModel)
-                        }
-                    }
-                    .padding(.top, CursorTheme.spaceS)
-                }
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, trailingContentReservedWidth)
             }
-            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, trailingContentReservedWidth)
+            .overlay(alignment: .trailing) {
+                trailingControls
+                    .padding(.trailing, CursorTheme.paddingCard)
+            }
+
+            followUpsChildrenBlock
         }
         .padding(CursorTheme.paddingCard)
         .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
@@ -1271,10 +1342,6 @@ private struct TaskRowView: View {
             RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
                 .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
         )
-        .overlay(alignment: .trailing) {
-            trailingControls
-                .padding(.trailing, CursorTheme.paddingCard)
-        }
         .contextMenu {
             if canOpenLinkedAgent {
                 Button("Review", systemImage: "person") {
@@ -1316,6 +1383,9 @@ private struct TaskRowView: View {
             DispatchQueue.main.async {
                 focusEditor?()
             }
+        }
+        .onChange(of: userFollowUps.isEmpty) { _, empty in
+            if empty { followUpsExpanded = false }
         }
     }
 
@@ -1556,6 +1626,10 @@ private struct TaskRowScreenshotStatesPreview: View {
                 workspacePath: TasksStorybookData.workspace.path,
                 models: TasksStorybookData.models,
                 agentTaskState: .none,
+                userFollowUps: [
+                    "Can you also verify the empty state?",
+                    "Use the design tokens from Theme.swift."
+                ],
                 isEditing: false,
                 editDraft: $editDraft,
                 onTap: {},

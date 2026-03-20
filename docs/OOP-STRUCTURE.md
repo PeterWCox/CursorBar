@@ -39,7 +39,7 @@ High-level object-oriented structure of the Cursor Metro macOS app: entry point,
 
 Root content is **PopoutView**, which can show:
 
-- **Sidebar** — Groups by project; each group has **ObservedTabChip** (agent tabs), **TerminalTabChip** (terminal tabs), and a “Tasks” entry. **TabChip** shows title, optional **linkedTaskStatus** badge, and uses **LightBlueSpinner** when running. **WorkspacePickerView** and **GitBranchPickerView** live in the main flow; **ProjectIconView** shows folder icon from path.
+- **Sidebar** — Groups by project; each group has **ObservedTabChip** (agent tabs), **TerminalTabChip** (terminal tabs), and “Tasks” / “Preview” entries. **TabChip** shows title, optional **linkedTaskStatus** badge, and uses **LightBlueSpinner** when running. **WorkspacePickerView** and **GitBranchPickerView** live in the main flow; **WorkspaceAvatarView** shows a repo logo (when present) or initials in a tinted square.
 - **Main content** — Either:
   - **TasksListView** for the selected project (task list, add/edit/complete, send to agent), which uses **TaskRowView**, **TaskScreenshotThumbnailView**, **TaskScreenshotDraftView**, etc., or
   - Agent content: top bar (**BrandMark**, **ModelPickerView**, **QuickActionButtonsView**), composer (**SubmittableTextEditor**, **ComposerActionButtonsView**, **PinnedQuestionsView**, **CreateDebugScriptSheet**), and output (**OutputScrollView**, **ConversationViews**: **ConversationTurnView**, **ConversationSegmentView**, **ProcessingPlaceholderView**, **StoppedPlaceholderView**; **ScreenshotCardView**, **ScreenshotPreviewModal**), or
@@ -122,7 +122,7 @@ Views:
       TerminalTabChip: "chip for terminal tab"
       WorkspacePickerView: "workspace/folder picker"
       GitBranchPickerView: "branch picker; NewBranchSheet"
-      ProjectIconView: "folder icon from path"
+      WorkspaceAvatarView: "repo image or initials from workspace path / display name"
     TopBar:
       BrandMark: "logo/title"
       ModelPickerView: "model selector"
