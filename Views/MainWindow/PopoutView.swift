@@ -146,6 +146,131 @@ private enum CreateProjectWorkflowMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+private enum CreateProjectInspirationType: String, CaseIterable, Identifiable {
+    case webApp
+    case game
+    case stack
+    case api
+    case mobileApp
+    case cli
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .webApp: return "Web App"
+        case .game: return "Game"
+        case .stack: return "Stack"
+        case .api: return "API"
+        case .mobileApp: return "Mobile App"
+        case .cli: return "CLI"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .webApp: return "globe"
+        case .game: return "gamecontroller"
+        case .stack: return "square.3.layers.3d"
+        case .api: return "server.rack"
+        case .mobileApp: return "iphone"
+        case .cli: return "terminal"
+        }
+    }
+
+    var promptLabel: String {
+        switch self {
+        case .webApp: return "web app"
+        case .game: return "game"
+        case .stack: return "full-stack app"
+        case .api: return "developer-friendly API"
+        case .mobileApp: return "mobile app"
+        case .cli: return "CLI tool"
+        }
+    }
+
+    var fallbackFolderName: String {
+        switch self {
+        case .webApp: return "web-app"
+        case .game: return "game-project"
+        case .stack: return "full-stack-app"
+        case .api: return "api-service"
+        case .mobileApp: return "mobile-app"
+        case .cli: return "cli-tool"
+        }
+    }
+
+    var placeholderIdea: String {
+        switch self {
+        case .webApp:
+            return "A small Next.js app for invoices"
+        case .game:
+            return "A cozy browser puzzle game with daily challenges"
+        case .stack:
+            return "A full-stack app for managing local events"
+        case .api:
+            return "An API for a recipe app with auth and search"
+        case .mobileApp:
+            return "A habit tracker app with streaks and reminders"
+        case .cli:
+            return "A CLI to summarize git activity across repos"
+        }
+    }
+
+    var surpriseIdeas: [String] {
+        switch self {
+        case .webApp:
+            return [
+                "A lightweight kanban board for projects",
+                "A notes app with markdown and search",
+                "A dashboard for tracking freelance invoices",
+                "A local-first recipe organizer with smart filters",
+                "A simple booking page for a neighborhood studio"
+            ]
+        case .game:
+            return [
+                "A cozy word puzzle game with daily challenges",
+                "A memory card game with unlockable themes",
+                "A top-down dungeon crawler with simple upgrades",
+                "A browser tower defense game with short rounds",
+                "A pixel-art trivia game with score streaks"
+            ]
+        case .stack:
+            return [
+                "A full-stack habit tracker with streaks and shared teams",
+                "A marketplace for digital products with seller dashboards",
+                "A CRM for small agencies with notes and follow-ups",
+                "A project portal with an API, admin panel, and worker jobs",
+                "A meal planner with auth, syncing, and shopping lists"
+            ]
+        case .api:
+            return [
+                "An API for a note-taking app with auth and search",
+                "A webhook relay service with retries and logs",
+                "A backend for habit tracking with streak analytics",
+                "An inventory API with roles, audit history, and exports",
+                "A subscriptions API with billing-ready data models"
+            ]
+        case .mobileApp:
+            return [
+                "A mobile habit tracker with reminders and streaks",
+                "A running log with maps, splits, and weekly goals",
+                "A focus timer app with sessions and reflections",
+                "A travel checklist app with offline packing lists",
+                "A shared grocery list app with quick add widgets"
+            ]
+        case .cli:
+            return [
+                "A CLI to scaffold release notes from merged PRs",
+                "A terminal tool to inspect local ports and processes",
+                "A repo health CLI for stale branches and TODOs",
+                "A developer CLI to bootstrap feature folders and tests",
+                "A command-line dashboard for personal finance CSVs"
+            ]
+        }
+    }
+}
+
 /// Wrapper that observes a single tab so only this subtree re-renders when that tab streams.
 /// Use for the active-tab content area so background tabs don't invalidate the whole window.
 private struct ObservedTabView<Content: View>: View {
@@ -372,6 +497,8 @@ struct PopoutView: View {
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
     @AppStorage(AppPreferences.defaultModelIdKey) private var appDefaultModelId: String = AppPreferences.defaultDefaultModelId
     @AppStorage(AppPreferences.hiddenProjectPathsKey) private var hiddenProjectPathsRaw: String = AppPreferences.defaultHiddenProjectPathsRaw
+    @AppStorage(AppPreferences.createProjectPreferredTypeKey) private var createProjectPreferredTypeRaw: String = AppPreferences.defaultCreateProjectPreferredTypeRaw
+    @AppStorage(AppPreferences.createProjectTypeUsageKey) private var createProjectTypeUsageRaw: String = AppPreferences.defaultCreateProjectTypeUsageRaw
     @AppStorage("selectedModel") private var selectedModel: String = AvailableModels.autoID
     @AppStorage("messagesSentForUsage") private var messagesSentForUsage: Int = 0
     @AppStorage("showPinnedQuestionsPanel") private var showPinnedQuestionsPanel: Bool = true
@@ -410,6 +537,7 @@ struct PopoutView: View {
     @State private var createProjectFolderName = ""
     @State private var createProjectFolderNameEditedByUser = false
     @State private var createProjectIdea = ""
+    @State private var createProjectSelectedTypeRaw = ""
     @State private var createProjectInitialGitCommit = false
     @State private var createProjectBusy = false
     @State private var createProjectError: String?
@@ -424,10 +552,16 @@ struct PopoutView: View {
     private var collapsedSidebarWindowWidth: CGFloat {
         collapsedSidebarContentWidth + (CursorTheme.paddingSidebarCollapsedOuter * 2)
     }
+    private var minimumExpandedWindowWidth: CGFloat {
+        max(sidebarWidth, SidebarSplitMetrics.minSidebar)
+            + SidebarSplitMetrics.dragHandleWidth
+            + SidebarSplitMetrics.minMainColumn
+            + CursorTheme.paddingChrome
+    }
 
     private enum SidebarSplitMetrics {
         static let minSidebar: CGFloat = 300
-        static let minMainColumn: CGFloat = 280
+        static let minMainColumn: CGFloat = 420
         static let dragHandleWidth: CGFloat = 11
     }
 
@@ -951,6 +1085,9 @@ struct PopoutView: View {
         if createProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             createProjectParentPath = preferredProjectBrowserRoot
         }
+        if createProjectSelectedTypeRaw.isEmpty {
+            createProjectSelectedTypeRaw = createProjectPreferredTypeRaw
+        }
         if createProjectMode == .newWithAgent {
             syncFolderNameFromIdeaIfNeeded()
         }
@@ -1003,11 +1140,23 @@ struct PopoutView: View {
             switch createProjectDirectory(parentPath: createProjectParentPath, folderName: folder) {
             case .success(let path):
                 let idea = createProjectIdea.trimmingCharacters(in: .whitespacesAndNewlines)
+                let selectedType = createProjectSelectedType ?? preferredCreateProjectType
+                if let selectedType {
+                    rememberCreateProjectType(selectedType, weight: 2)
+                }
                 let supplement: String
                 if idea.isEmpty {
-                    supplement = "Create a new project in this empty folder. Scaffold a minimal runnable app from what you detect in the stack."
+                    if let selectedType {
+                        supplement = "Create a new project in this empty folder. Build a \(selectedType.promptLabel) and choose a thoughtful concept that fits the user's Create preferences. Scaffold a minimal runnable starting point."
+                    } else {
+                        supplement = "Create a new project in this empty folder. Scaffold a minimal runnable app from what you detect in the stack."
+                    }
                 } else {
-                    supplement = "Create a new project in this empty folder based on this request: \(idea)"
+                    if let selectedType {
+                        supplement = "Create a new project in this empty folder based on this request: \(idea). Favor a \(selectedType.promptLabel) unless the request clearly implies a different shape."
+                    } else {
+                        supplement = "Create a new project in this empty folder based on this request: \(idea)"
+                    }
                 }
                 runCreateProjectSetup(path: path, supplement: supplement)
             case .failure(let error):
@@ -1116,10 +1265,6 @@ struct PopoutView: View {
         Group {
             hiddenShortcutButton("Settings", key: ",") {
                 appState.showSettingsSheet = true
-            }
-
-            hiddenShortcutButton("Open in Browser", key: "o") {
-                openInBrowserOrShowSetURLSheet()
             }
 
             hiddenShortcutButton("Open in Cursor", key: ".") {
@@ -1874,7 +2019,7 @@ struct PopoutView: View {
             .padding(.vertical, CursorTheme.paddingChrome)
             .padding(.leading, isMainContentCollapsed ? CursorTheme.paddingSidebarCollapsedOuter : (sidebarEdge == .trailing ? CursorTheme.paddingChrome : 0))
             .padding(.trailing, isMainContentCollapsed ? CursorTheme.paddingSidebarCollapsedOuter : (sidebarEdge == .leading ? CursorTheme.paddingChrome : 0))
-            .frame(minWidth: isMainContentCollapsed ? collapsedSidebarWindowWidth : (sidebarWidth + 120))
+            .frame(minWidth: isMainContentCollapsed ? collapsedSidebarWindowWidth : minimumExpandedWindowWidth)
             .frame(width: isMainContentCollapsed ? collapsedSidebarWindowWidth : nil)
             .frame(maxWidth: isMainContentCollapsed ? collapsedSidebarWindowWidth : .infinity, minHeight: isMainContentCollapsed ? 300 : 400, maxHeight: .infinity)
             .preferredColorScheme(resolvedColorScheme)
@@ -2225,10 +2370,10 @@ struct PopoutView: View {
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                 .foregroundStyle(CursorTheme.brandBlue)
         } subtitle: {
-            Text("Clone a repo or create a new folder, then the agent configures Preview and `.metro/project.json`.")
+            Text("Create a folder or clone a repo, then Metro sets up Preview.")
                 .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                .lineLimit(3)
+                .lineLimit(2)
         }
     }
 
@@ -2507,18 +2652,34 @@ struct PopoutView: View {
     // MARK: - Create page (scaffold / clone)
 
     private var createIdeaSuggestions: [String] {
-        [
-            "A sleek todo app with tags and due dates",
-            "A personal finance dashboard with charts",
-            "A minimal habit tracker with streaks",
-            "A notes app with markdown and search",
-            "A lightweight kanban board for projects"
-        ]
+        if let type = createProjectSelectedType ?? preferredCreateProjectType {
+            return type.surpriseIdeas
+        }
+
+        return Array(CreateProjectInspirationType.allCases.compactMap { $0.surpriseIdeas.first }.prefix(5))
+    }
+
+    private var createProjectSelectedType: CreateProjectInspirationType? {
+        CreateProjectInspirationType(rawValue: createProjectSelectedTypeRaw)
+    }
+
+    private var preferredCreateProjectType: CreateProjectInspirationType? {
+        CreateProjectInspirationType(rawValue: createProjectPreferredTypeRaw)
+    }
+
+    private var createProjectIdeaPlaceholder: String {
+        (createProjectSelectedType ?? preferredCreateProjectType)?.placeholderIdea ?? "A small Next.js app for invoices"
     }
 
     private var suggestedFolderNameFromIdea: String {
         let sanitized = sanitizedProjectName(createProjectIdea)
-        return sanitized.isEmpty ? "my-app" : sanitized
+        if !sanitized.isEmpty {
+            return sanitized
+        }
+
+        return createProjectSelectedType?.fallbackFolderName
+            ?? preferredCreateProjectType?.fallbackFolderName
+            ?? "my-app"
     }
 
     private func syncFolderNameFromIdeaIfNeeded() {
@@ -2532,6 +2693,48 @@ struct PopoutView: View {
     private func applyCreateIdeaSuggestion(_ suggestion: String) {
         createProjectIdea = suggestion
         syncFolderNameFromIdeaIfNeeded()
+    }
+
+    private func applyCreateProjectType(_ type: CreateProjectInspirationType) {
+        createProjectSelectedTypeRaw = type.rawValue
+        rememberCreateProjectType(type)
+        syncFolderNameFromIdeaIfNeeded()
+    }
+
+    private func rememberCreateProjectType(_ type: CreateProjectInspirationType, weight: Int = 1) {
+        createProjectPreferredTypeRaw = type.rawValue
+
+        var usage = AppPreferences.createProjectTypeUsage(from: createProjectTypeUsageRaw)
+        usage[type.rawValue, default: 0] += max(1, weight)
+        createProjectTypeUsageRaw = AppPreferences.rawFrom(createProjectTypeUsage: usage)
+    }
+
+    private func surpriseCreateProjectType() -> CreateProjectInspirationType {
+        if let selected = createProjectSelectedType {
+            return selected
+        }
+
+        let usage = AppPreferences.createProjectTypeUsage(from: createProjectTypeUsageRaw)
+        let weightedTypes = CreateProjectInspirationType.allCases.flatMap { type in
+            let usageWeight = min(usage[type.rawValue, default: 0], 5)
+            let preferredWeight = preferredCreateProjectType == type ? 2 : 0
+            return Array(repeating: type, count: max(1, 1 + usageWeight + preferredWeight))
+        }
+
+        return weightedTypes.randomElement() ?? preferredCreateProjectType ?? .webApp
+    }
+
+    private func surpriseCreateIdea(for type: CreateProjectInspirationType) -> String {
+        let currentIdea = createProjectIdea.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidates = type.surpriseIdeas.filter { $0 != currentIdea }
+        return candidates.randomElement() ?? type.surpriseIdeas.first ?? type.placeholderIdea
+    }
+
+    private func applySurpriseCreateIdea() {
+        let type = surpriseCreateProjectType()
+        createProjectSelectedTypeRaw = type.rawValue
+        rememberCreateProjectType(type, weight: 2)
+        applyCreateIdeaSuggestion(surpriseCreateIdea(for: type))
     }
 
     private func createProjectContentArea() -> some View {
@@ -2604,19 +2807,103 @@ struct PopoutView: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                     } else {
-                        VStack(alignment: .center, spacing: CursorTheme.spaceM) {
+                        VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
                             Text("What should it be?")
                                 .font(.system(size: CursorTheme.fontTitleLarge, weight: .semibold))
                                 .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                                 .frame(maxWidth: .infinity, alignment: .center)
 
-                            TextField(
-                                "A small Next.js app for invoices",
-                                text: $createProjectIdea,
-                                axis: .vertical
-                            )
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(4...10)
+                            Text("Pick a type, add details if you want, or let Metro surprise you.")
+                                .font(.system(size: CursorTheme.fontBodySmall, weight: .regular))
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                .frame(maxWidth: .infinity, alignment: .center)
+
+                            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                                HStack(spacing: CursorTheme.spaceS) {
+                                    Text("Type")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                                    Spacer(minLength: 0)
+                                    Button {
+                                        applySurpriseCreateIdea()
+                                    } label: {
+                                        HStack(spacing: CursorTheme.spaceXS) {
+                                            Image(systemName: "sparkles")
+                                                .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                            Text("Surprise me")
+                                                .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                        }
+                                        .foregroundStyle(CursorTheme.brandBlue)
+                                        .padding(.horizontal, CursorTheme.spaceM)
+                                        .padding(.vertical, CursorTheme.spaceXS)
+                                        .background(
+                                            CursorTheme.brandBlue.opacity(0.12),
+                                            in: Capsule()
+                                        )
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(CursorTheme.brandBlue.opacity(0.35), lineWidth: 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: CursorTheme.spaceS) {
+                                        ForEach(CreateProjectInspirationType.allCases) { type in
+                                            let isSelected = createProjectSelectedType == type
+                                            Button {
+                                                applyCreateProjectType(type)
+                                            } label: {
+                                                HStack(spacing: CursorTheme.spaceXS) {
+                                                    Image(systemName: type.icon)
+                                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                                    Text(type.title)
+                                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                                }
+                                                .foregroundStyle(
+                                                    isSelected
+                                                        ? CursorTheme.brandBlue
+                                                        : CursorTheme.textPrimary(for: colorScheme)
+                                                )
+                                                .padding(.horizontal, CursorTheme.spaceM)
+                                                .padding(.vertical, CursorTheme.spaceXS)
+                                                .background(
+                                                    isSelected
+                                                        ? CursorTheme.brandBlue.opacity(0.12)
+                                                        : CursorTheme.surfaceMuted(for: colorScheme),
+                                                    in: Capsule()
+                                                )
+                                                .overlay(
+                                                    Capsule()
+                                                        .stroke(
+                                                            isSelected
+                                                                ? CursorTheme.brandBlue.opacity(0.35)
+                                                                : CursorTheme.border(for: colorScheme),
+                                                            lineWidth: 1
+                                                        )
+                                                )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .padding(.vertical, 1)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                                Text("Description (optional)")
+                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+
+                                TextField(
+                                    createProjectIdeaPlaceholder,
+                                    text: $createProjectIdea,
+                                    axis: .vertical
+                                )
+                                .textFieldStyle(.roundedBorder)
+                                .lineLimit(4...10)
+                            }
 
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: CursorTheme.spaceS) {
@@ -2698,7 +2985,7 @@ struct PopoutView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
-                            Text("Example from description: \(suggestedFolderNameFromIdea)")
+                            Text("Suggested from your idea or type: \(suggestedFolderNameFromIdea)")
                                 .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                                 .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                         } else {
@@ -3164,7 +3451,7 @@ struct PopoutView: View {
         }
     }
 
-    /// Cmd+O: open in browser if URL is set, otherwise open workspace in Finder. With no project, opens Add Project so the shortcut always does something.
+    /// Opens the current preview URL when configured; otherwise reveals the workspace in Finder.
     private func openInBrowserOrShowSetURLSheet() {
         guard hasOpenProjects else {
             addProject()

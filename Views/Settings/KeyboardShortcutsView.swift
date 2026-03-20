@@ -21,7 +21,6 @@ struct KeyboardShortcutsContentView: View {
         ("Tabs", [
             ShortcutRow(keys: ["⌘T"], action: "Add task"),
             ShortcutRow(keys: ["⌘G"], action: "Focus Git tab for current project"),
-            ShortcutRow(keys: ["⌘O"], action: "Open in Browser (or set URL)"),
             ShortcutRow(keys: ["⌘."], action: "Open current project in Cursor"),
             ShortcutRow(keys: ["⌘W"], action: "Close tab or terminal"),
             ShortcutRow(keys: ["⌘⇧T"], action: "Reopen closed tab"),
@@ -41,6 +40,10 @@ struct KeyboardShortcutsContentView: View {
         ]),
         ("Window", [
             ShortcutRow(keys: ["⌘B", "⌘S"], action: "Collapse/expand main content"),
+            ShortcutRow(keys: ["⌘L"], action: "Collapse with sidebar on the left"),
+            ShortcutRow(keys: ["⌘R"], action: "Collapse with sidebar on the right"),
+            ShortcutRow(keys: ["⌘O"], action: "Expand; press again to flip sidebar sides"),
+            ShortcutRow(keys: ["⌘`"], action: "Cycle layouts: left collapsed -> left expanded -> right expanded -> right collapsed"),
         ]),
     ]
 

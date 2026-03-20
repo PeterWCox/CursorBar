@@ -210,14 +210,28 @@ private final class StatusItemView: NSView {
 }
 
 /// Width of the panel when collapsed to sidebar-only (title bar + tab sidebar).
-private let collapsedPanelWidth: CGFloat = 310
+private var collapsedPanelWidth: CGFloat {
+    let storedSidebarWidth = UserDefaults.standard.object(forKey: AppPreferences.sidebarWidthKey) as? Double
+        ?? AppPreferences.defaultSidebarWidth
+    let collapsedSidebarContentWidth = max(CGFloat(storedSidebarWidth), 320)
+    return collapsedSidebarContentWidth + (CursorTheme.paddingSidebarCollapsedOuter * 2)
+}
 /// Minimum height when collapsed so the window can shrink and avoid empty space below the sidebar.
 private let collapsedPanelMinHeight: CGFloat = 280
+/// Minimum width reserved for the main/agent column when the sidebar is expanded.
+private let minExpandedMainColumnWidth: CGFloat = 420
 /// Minimum width when expanded; prevents shrinking below a usable size (e.g. comfortable on 14" MacBook).
-private let minExpandedPanelWidth: CGFloat = 440
+private var minExpandedPanelWidth: CGFloat {
+    let storedSidebarWidth = UserDefaults.standard.object(forKey: AppPreferences.sidebarWidthKey) as? Double
+        ?? AppPreferences.defaultSidebarWidth
+    let expandedSidebarWidth = max(CGFloat(storedSidebarWidth), 300)
+    return expandedSidebarWidth + 11 + minExpandedMainColumnWidth + CursorTheme.paddingChrome
+}
+/// Preferred width when Cmd+O restores the full workspace layout.
+private let preferredOpenPanelWidth: CGFloat = 980
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem!
     var panel: FloatingPanel!
     let appState = AppState()
@@ -225,11 +239,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let projectSettingsStore = ProjectSettingsStore()
     private var cancellables = Set<AnyCancellable>()
     private var requestNewTaskObserver: NSObjectProtocol?
+    private var sidebarShortcutObserver: NSObjectProtocol?
     private var tasksStorageObserver: NSObjectProtocol?
-    private var openInBrowserKeyMonitor: Any?
+    private var sidebarLayoutKeyMonitor: Any?
     private var openInCursorKeyMonitor: Any?
     private var savedExpandedPanelWidth: CGFloat = 720
     private var savedExpandedPanelHeight: CGFloat?
+    private var pendingPanelDockOnRight: Bool?
+    private var pendingCenterExpandedPanel: Bool = false
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard appState.tabManager.runningAgentCount > 0 else {
@@ -287,6 +304,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.view = view
 
         panel = FloatingPanel()
+        panel.delegate = self
         if let expanded = PanelFrameStorage.loadExpandedSize() {
             savedExpandedPanelWidth = expanded.width
             savedExpandedPanelHeight = expanded.height
@@ -343,15 +361,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self?.appState.requestShowTasksAndNewTask = true
         }
 
-        openInBrowserKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            let isCmdO = event.modifierFlags.contains(.command)
-                && event.charactersIgnoringModifiers?.lowercased() == "o"
-            if isCmdO {
-                self.handleOpenInBrowser()
-                return nil
+        sidebarShortcutObserver = NotificationCenter.default.addObserver(
+            forName: FloatingPanel.sidebarShortcutNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] notification in
+            guard
+                let self,
+                let rawAction = notification.userInfo?[FloatingPanel.sidebarShortcutActionUserInfoKey] as? String,
+                let action = FloatingPanel.SidebarShortcutAction(rawValue: rawAction)
+            else {
+                return
             }
-            return event
+            self.applySidebarShortcut(action)
+        }
+
+        sidebarLayoutKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard mods == .command else { return event }
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "l":
+                self.handleSidebarShortcut(.collapseLeft)
+                return nil
+            case "r":
+                self.handleSidebarShortcut(.collapseRight)
+                return nil
+            case "o":
+                self.handleSidebarShortcut(.expandOrFlip)
+                return nil
+            case "`":
+                self.handleSidebarShortcut(.cycleLayouts)
+                return nil
+            default:
+                if event.keyCode == UInt16(kVK_ANSI_Grave) {
+                    self.handleSidebarShortcut(.cycleLayouts)
+                    return nil
+                }
+                return event
+            }
         }
 
         openInCursorKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -369,25 +417,78 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         refreshDockBadge()
     }
 
-    func applicationWillUpdate(_ notification: Notification) {
-        // Steer Cmd+O (File > Open) to our "Open in Browser" so the system doesn't show the file picker when no project or URL is set.
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            let fileMenu = NSApplication.shared.mainMenu?.item(withTitle: "File")
-            let openItem = fileMenu?.submenu?.item(withTitle: "Open…")
-            ?? fileMenu?.submenu?.item(withTitle: "Open")
-            if let openItem {
-                openItem.target = self
-                openItem.action = #selector(self.handleOpenInBrowser)
+    private func handleSidebarShortcut(_ action: FloatingPanel.SidebarShortcutAction) {
+        if !panel.isVisible {
+            togglePanel()
+        }
+        applySidebarShortcut(action)
+    }
+
+    private func applySidebarShortcut(_ action: FloatingPanel.SidebarShortcutAction) {
+        switch action {
+        case .collapseLeft:
+            UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+            pendingPanelDockOnRight = false
+            appState.isMainContentCollapsed = true
+        case .collapseRight:
+            UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+            pendingPanelDockOnRight = true
+            appState.isMainContentCollapsed = true
+        case .expandOrFlip:
+            if appState.isMainContentCollapsed {
+                pendingCenterExpandedPanel = true
+                appState.isMainContentCollapsed = false
+            } else {
+                let newSidebarOnRight = !UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+                UserDefaults.standard.set(newSidebarOnRight, forKey: AppPreferences.sidebarOnRightKey)
+            }
+        case .cycleLayouts:
+            let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+            switch (appState.isMainContentCollapsed, isSidebarOnRight) {
+            case (true, false):
+                pendingCenterExpandedPanel = true
+                appState.isMainContentCollapsed = false
+            case (false, false):
+                UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+            case (false, true):
+                pendingPanelDockOnRight = true
+                appState.isMainContentCollapsed = true
+            case (true, true):
+                UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+                pendingPanelDockOnRight = false
+                appState.isMainContentCollapsed = true
             }
         }
     }
 
-    @objc func handleOpenInBrowser() {
-        if !panel.isVisible {
-            togglePanel()
-        }
-        appState.requestOpenInBrowser = true
+    private func dockPanelToScreenEdge(sidebarOnRight: Bool, animated: Bool) {
+        guard let screen = bestScreenForPanelFrame() ?? preferredPanelScreen() else { return }
+        let visibleFrame = screen.visibleFrame
+        var frame = panel.frame
+        frame.origin.x = sidebarOnRight ? (visibleFrame.maxX - frame.width) : visibleFrame.minX
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+        panel.setFrame(frame, display: true, animate: animated)
+        PanelFrameStorage.save(frame)
+    }
+
+    private func centerExpandedPanel(animated: Bool) {
+        guard let screen = bestScreenForPanelFrame() ?? preferredPanelScreen() else { return }
+        let visibleFrame = screen.visibleFrame
+        var frame = panel.frame
+        frame.size.width = min(visibleFrame.width, max(frame.width, preferredOpenPanelWidth))
+        frame.size.height = min(frame.height, visibleFrame.height)
+        frame.origin.x = visibleFrame.midX - frame.width / 2
+        frame.origin.y = visibleFrame.midY - frame.height / 2
+        panel.setFrame(frame, display: true, animate: animated)
+        PanelFrameStorage.save(frame)
+    }
+
+    private func expandedWidthTarget(for visibleFrame: NSRect) -> CGFloat {
+        let halfScreenWidth = visibleFrame.width / 2
+        return min(
+            visibleFrame.width,
+            max(minExpandedPanelWidth, savedExpandedPanelWidth, halfScreenWidth)
+        )
     }
 
     @objc func handleOpenInCursor() {
@@ -420,16 +521,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             panel.styleMask = style
             panel.contentMinSize = NSSize(width: minExpandedPanelWidth, height: 400)
             var frame = panel.frame
+            let screen = bestScreenForPanelFrame() ?? preferredPanelScreen()
+            let visibleFrame = screen?.visibleFrame ?? frame
             let trailingEdgeX = frame.maxX
-            frame.size.width = max(minExpandedPanelWidth, savedExpandedPanelWidth)
+            frame.size.width = expandedWidthTarget(for: visibleFrame)
             if preserveTrailingEdge {
                 frame.origin.x = trailingEdgeX - frame.width
             }
             if let h = savedExpandedPanelHeight, h >= 400 {
                 frame.size.height = h
             }
+            frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
             savedExpandedPanelHeight = nil
             panel.setFrame(frame, display: true, animate: true)
+        }
+        if let dockOnRight = pendingPanelDockOnRight {
+            pendingPanelDockOnRight = nil
+            dockPanelToScreenEdge(sidebarOnRight: dockOnRight, animated: true)
+        } else if pendingCenterExpandedPanel, !collapsed {
+            pendingCenterExpandedPanel = false
+            centerExpandedPanel(animated: true)
         }
     }
 
@@ -559,6 +670,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             positionNearStatusItem()
         }
     }
+
+    func windowDidMove(_ notification: Notification) {
+        guard let movedWindow = notification.object as? NSWindow, movedWindow === panel else { return }
+        PanelFrameStorage.save(panel.frame)
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        guard let resizedWindow = notification.object as? NSWindow, resizedWindow === panel else { return }
+        PanelFrameStorage.save(panel.frame)
+    }
 }
 
 // MARK: - Panel frame persistence
@@ -602,6 +723,13 @@ private enum PanelFrameStorage {
 }
 
 class FloatingPanel: NSPanel {
+    enum SidebarShortcutAction: String {
+        case collapseLeft
+        case collapseRight
+        case expandOrFlip
+        case cycleLayouts
+    }
+
     private static let defaultWidth: CGFloat = 720
     private static let defaultHeight: CGFloat = 960
 
@@ -654,6 +782,38 @@ class FloatingPanel: NSPanel {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         guard mods.contains(.command), !mods.contains(.shift) else { return super.performKeyEquivalent(with: event) }
         let key = event.charactersIgnoringModifiers?.lowercased()
+        if key == "l" {
+            NotificationCenter.default.post(
+                name: FloatingPanel.sidebarShortcutNotification,
+                object: self,
+                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.collapseLeft.rawValue]
+            )
+            return true
+        }
+        if key == "r" {
+            NotificationCenter.default.post(
+                name: FloatingPanel.sidebarShortcutNotification,
+                object: self,
+                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.collapseRight.rawValue]
+            )
+            return true
+        }
+        if key == "o" {
+            NotificationCenter.default.post(
+                name: FloatingPanel.sidebarShortcutNotification,
+                object: self,
+                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.expandOrFlip.rawValue]
+            )
+            return true
+        }
+        if key == "`" || event.keyCode == UInt16(kVK_ANSI_Grave) {
+            NotificationCenter.default.post(
+                name: FloatingPanel.sidebarShortcutNotification,
+                object: self,
+                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.cycleLayouts.rawValue]
+            )
+            return true
+        }
         if key == "t" {
             NotificationCenter.default.post(name: FloatingPanel.requestNewTaskNotification, object: self)
             return true
@@ -681,6 +841,8 @@ class FloatingPanel: NSPanel {
     static let requestNewTaskNotification = Notification.Name("FloatingPanelRequestNewTask")
     static let cycleSidebarWorkspaceNotification = Notification.Name("FloatingPanelCycleSidebarWorkspace")
     static let cycleSidebarDirectionUserInfoKey = "direction"
+    static let sidebarShortcutNotification = Notification.Name("FloatingPanelSidebarShortcut")
+    static let sidebarShortcutActionUserInfoKey = "action"
 }
 
 final class HangDiagnostics {
@@ -797,7 +959,7 @@ class AppState: ObservableObject {
     @Published var showSettingsSheet: Bool = false
     /// Incremented when tasks are updated (e.g. completed) so the sidebar can hide agent tabs for completed tasks.
     @Published var taskListRevision: UUID = UUID()
-    /// When true, PopoutView should run "Open in Browser" (used when File > Open / Cmd+O is triggered so we handle it instead of the system file picker).
+    /// When true, PopoutView should run "Open in Browser" in response to a programmatic request.
     @Published var requestOpenInBrowser: Bool = false
     /// When true, PopoutView should open the current project in Cursor (triggered by Cmd+.).
     @Published var requestOpenInCursor: Bool = false
