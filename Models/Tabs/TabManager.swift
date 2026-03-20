@@ -141,9 +141,13 @@ class TabManager: ObservableObject {
     }
 
     func setDiscoveredProjectsFromPaths(_ paths: [String]) {
+        let hiddenRaw = UserDefaults.standard.string(forKey: AppPreferences.hiddenProjectPathsKey) ?? AppPreferences.defaultHiddenProjectPathsRaw
+        let hiddenPaths = AppPreferences.hiddenProjectPaths(from: hiddenRaw)
         let normalized = paths
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { AppPreferences.normalizedProjectPath($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { !$0.isEmpty }
             .filter { Self.workspacePathExists($0) }
+            .filter { !hiddenPaths.contains($0) }
         let discoveredProjects = normalized.map { ProjectState(path: $0, source: .discovered) }
         let manualProjects = projects.filter { $0.source == .manual && Self.workspacePathExists($0.path) }
         let tabProjects = tabs.map { ProjectState(path: $0.workspacePath, source: .manual) }
@@ -160,6 +164,7 @@ class TabManager: ObservableObject {
     func addProject(path: String, select: Bool = true) -> Bool {
         let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.workspacePathExists(normalizedPath) else { return false }
+        AppPreferences.removeHiddenProjectPath(normalizedPath)
         if let index = projects.firstIndex(where: { $0.path == normalizedPath }) {
             if projects[index].source != .manual {
                 var next = projects
@@ -299,12 +304,13 @@ class TabManager: ObservableObject {
         let tabToClose = terminalTabs[index]
         let wasSelected = selectedTerminalID == id
         let closedPath = tabToClose.workspacePath
+        let wasViewingDashboardForPath = selectedDashboardViewPath == closedPath
         terminalTabs.remove(at: index)
         if wasSelected {
             if let replacement = terminalTabs.first(where: { $0.workspacePath == closedPath }) {
                 selectedTerminalID = replacement.id
                 selectedTasksViewPath = nil
-                selectedDashboardViewPath = tabToClose.isDashboardTab ? closedPath : (replacement.isDashboardTab ? closedPath : nil)
+                selectedDashboardViewPath = wasViewingDashboardForPath || tabToClose.isDashboardTab || replacement.isDashboardTab ? closedPath : nil
             } else if let firstAgent = tabs.first(where: { $0.workspacePath == closedPath }) {
                 selectedTerminalID = nil
                 selectedTabID = firstAgent.id
@@ -313,7 +319,7 @@ class TabManager: ObservableObject {
             } else {
                 selectedTerminalID = nil
                 selectedTasksViewPath = (selectedTasksViewPath == closedPath ? closedPath : selectedTasksViewPath)
-                selectedDashboardViewPath = tabToClose.isDashboardTab ? closedPath : nil
+                selectedDashboardViewPath = (wasViewingDashboardForPath || tabToClose.isDashboardTab) ? closedPath : nil
             }
             selectedProjectPath = closedPath
         }
@@ -416,6 +422,7 @@ class TabManager: ObservableObject {
         tabs.removeAll { $0.workspacePath == path }
         terminalTabs.removeAll { $0.workspacePath == path }
         projects = projects.filter { $0.path != path }
+        AppPreferences.addHiddenProjectPath(path)
 
         if selectedProjectWasRemoved {
             selectedProjectPath = nil

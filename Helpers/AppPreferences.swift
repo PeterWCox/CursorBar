@@ -143,6 +143,26 @@ enum AppPreferences {
         hiddenPaths.map(normalizedProjectPath).filter { !$0.isEmpty }.sorted().joined(separator: ",")
     }
 
+    /// Persists a path so folder discovery does not re-add it after the user removes it from the sidebar.
+    static func addHiddenProjectPath(_ path: String) {
+        let normalized = normalizedProjectPath(path)
+        guard !normalized.isEmpty else { return }
+        let raw = UserDefaults.standard.string(forKey: hiddenProjectPathsKey) ?? defaultHiddenProjectPathsRaw
+        var hidden = hiddenProjectPaths(from: raw)
+        guard hidden.insert(normalized).inserted else { return }
+        UserDefaults.standard.set(rawFrom(hiddenPaths: hidden), forKey: hiddenProjectPathsKey)
+    }
+
+    /// Clears a path when the user explicitly adds the project again (e.g. Import).
+    static func removeHiddenProjectPath(_ path: String) {
+        let normalized = normalizedProjectPath(path)
+        guard !normalized.isEmpty else { return }
+        let raw = UserDefaults.standard.string(forKey: hiddenProjectPathsKey) ?? defaultHiddenProjectPathsRaw
+        var hidden = hiddenProjectPaths(from: raw)
+        guard hidden.remove(normalized) != nil else { return }
+        UserDefaults.standard.set(rawFrom(hiddenPaths: hidden), forKey: hiddenProjectPathsKey)
+    }
+
     /// Normalizes a project path for storage and comparison (e.g. expand tilde).
     static func normalizedProjectPath(_ path: String) -> String {
         let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)

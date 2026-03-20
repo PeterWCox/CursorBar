@@ -408,6 +408,7 @@ struct PopoutView: View {
     @State private var createProjectGitURL = ""
     @State private var createProjectParentPath = ""
     @State private var createProjectFolderName = ""
+    @State private var createProjectFolderNameEditedByUser = false
     @State private var createProjectIdea = ""
     @State private var createProjectInitialGitCommit = false
     @State private var createProjectBusy = false
@@ -949,6 +950,9 @@ struct PopoutView: View {
         createProjectError = nil
         if createProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             createProjectParentPath = preferredProjectBrowserRoot
+        }
+        if createProjectMode == .newWithAgent {
+            syncFolderNameFromIdeaIfNeeded()
         }
     }
 
@@ -1623,7 +1627,7 @@ struct PopoutView: View {
                             tabManager.selectedTabID = nil
                             tabManager.selectedTasksViewPath = nil
                             tabManager.selectedProjectPath = term.workspacePath
-                            tabManager.selectedDashboardViewPath = term.isDashboardTab ? term.workspacePath : nil
+                            tabManager.selectedDashboardViewPath = term.workspacePath
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "terminal")
@@ -2469,9 +2473,9 @@ struct PopoutView: View {
             }
             .frame(maxHeight: .infinity)
 
-            HStack(spacing: CursorTheme.spaceS) {
+            VStack(spacing: CursorTheme.spaceS) {
                 ActionButton(
-                    title: "Add Project",
+                    title: "Import",
                     icon: "folder.badge.plus",
                     action: addProject,
                     help: "Open an existing project folder",
@@ -2483,7 +2487,7 @@ struct PopoutView: View {
                     icon: "wand.and.stars",
                     action: openCreateProjectPage,
                     help: "Create or clone a project and run setup",
-                    style: .accent
+                    style: .secondary
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -2502,6 +2506,34 @@ struct PopoutView: View {
 
     // MARK: - Create page (scaffold / clone)
 
+    private var createIdeaSuggestions: [String] {
+        [
+            "A sleek todo app with tags and due dates",
+            "A personal finance dashboard with charts",
+            "A minimal habit tracker with streaks",
+            "A notes app with markdown and search",
+            "A lightweight kanban board for projects"
+        ]
+    }
+
+    private var suggestedFolderNameFromIdea: String {
+        let sanitized = sanitizedProjectName(createProjectIdea)
+        return sanitized.isEmpty ? "my-app" : sanitized
+    }
+
+    private func syncFolderNameFromIdeaIfNeeded() {
+        guard createProjectMode == .newWithAgent else { return }
+        guard !createProjectFolderNameEditedByUser || createProjectFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        createProjectFolderName = suggestedFolderNameFromIdea
+    }
+
+    private func applyCreateIdeaSuggestion(_ suggestion: String) {
+        createProjectIdea = suggestion
+        syncFolderNameFromIdeaIfNeeded()
+    }
+
     private func createProjectContentArea() -> some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: CursorTheme.gapBetweenSections) {
@@ -2518,115 +2550,191 @@ struct PopoutView: View {
                         )
                 }
 
-                Text("Source")
-                    .font(.system(size: CursorTheme.fontCaption, weight: .semibold))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                HStack(spacing: CursorTheme.spaceS) {
-                    ForEach(CreateProjectWorkflowMode.allCases) { mode in
-                        let isSelected = createProjectMode == mode
-                        Button {
-                            createProjectMode = mode
-                            createProjectError = nil
-                        } label: {
-                            HStack(spacing: CursorTheme.spaceXS) {
-                                Image(systemName: mode == .newWithAgent ? "wand.and.stars" : "arrow.down.doc")
-                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
-                                Text(mode == .newWithAgent ? "New project" : "GitHub")
-                                    .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
-                            }
-                            .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                            .padding(.horizontal, CursorTheme.paddingCard)
-                            .padding(.vertical, CursorTheme.spaceS)
-                            .background(
-                                isSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
-                                in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
-                                    .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    Spacer(minLength: 0)
-                }
-
-                if createProjectMode == .cloneFromGitHub {
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                        Text("Repository URL")
-                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        TextField("https://github.com/owner/repo", text: $createProjectGitURL)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-
-                VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                    Text("Parent folder")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                    Text("Source")
+                        .font(.system(size: CursorTheme.fontCaption, weight: .semibold))
                         .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                     HStack(spacing: CursorTheme.spaceS) {
-                        TextField("~/dev", text: $createProjectParentPath)
-                            .textFieldStyle(.roundedBorder)
-                        ActionButton(
-                            title: "Browse",
-                            icon: "folder",
-                            action: {
-                                if let p = selectFolder(
-                                    title: "Choose parent folder",
-                                    message: "The project is created or cloned inside this folder.",
-                                    startingAt: createProjectParentPath
-                                ) {
-                                    createProjectParentPath = p
+                        ForEach(CreateProjectWorkflowMode.allCases) { mode in
+                            let isSelected = createProjectMode == mode
+                            Button {
+                                createProjectMode = mode
+                                createProjectError = nil
+                                if mode == .newWithAgent {
+                                    syncFolderNameFromIdeaIfNeeded()
                                 }
-                            },
-                            style: .secondary
+                            } label: {
+                                HStack(spacing: CursorTheme.spaceXS) {
+                                    Image(systemName: mode == .newWithAgent ? "wand.and.stars" : "arrow.down.doc")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                    Text(mode == .newWithAgent ? "New project" : "GitHub")
+                                        .font(.system(size: CursorTheme.fontBodySmall, weight: .semibold))
+                                }
+                                .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                                .padding(.horizontal, CursorTheme.paddingCard)
+                                .padding(.vertical, CursorTheme.spaceS)
+                                .background(
+                                    isSelected ? CursorTheme.surfaceRaised(for: colorScheme) : CursorTheme.surfaceMuted(for: colorScheme),
+                                    in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                                        .stroke(isSelected ? CursorTheme.borderStrong(for: colorScheme) : CursorTheme.border(for: colorScheme).opacity(0.6), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(CursorTheme.paddingCard)
+                .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                    if createProjectMode == .cloneFromGitHub {
+                        VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                            Text("Repository URL")
+                                .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                            TextField("https://github.com/owner/repo", text: $createProjectGitURL)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    } else {
+                        VStack(alignment: .center, spacing: CursorTheme.spaceM) {
+                            Text("What should it be?")
+                                .font(.system(size: CursorTheme.fontTitleLarge, weight: .semibold))
+                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                .frame(maxWidth: .infinity, alignment: .center)
+
+                            TextField(
+                                "A small Next.js app for invoices",
+                                text: $createProjectIdea,
+                                axis: .vertical
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(4...10)
+
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: CursorTheme.spaceS) {
+                                    ForEach(createIdeaSuggestions, id: \.self) { suggestion in
+                                        Button {
+                                            applyCreateIdeaSuggestion(suggestion)
+                                        } label: {
+                                            Text(suggestion)
+                                                .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                                .padding(.horizontal, CursorTheme.spaceM)
+                                                .padding(.vertical, CursorTheme.spaceXS)
+                                                .background(
+                                                    CursorTheme.surfaceMuted(for: colorScheme),
+                                                    in: Capsule()
+                                                )
+                                                .overlay(
+                                                    Capsule()
+                                                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                                                )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(CursorTheme.paddingCard)
+                .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+                .onChange(of: createProjectIdea) { _, _ in
+                    syncFolderNameFromIdeaIfNeeded()
+                }
+
+                Spacer(minLength: CursorTheme.spaceL)
+
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Default directory")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        HStack(spacing: CursorTheme.spaceS) {
+                            TextField("~/dev", text: $createProjectParentPath)
+                                .textFieldStyle(.roundedBorder)
+                            ActionButton(
+                                title: "Browse",
+                                icon: "folder",
+                                action: {
+                                    if let p = selectFolder(
+                                        title: "Choose parent folder",
+                                        message: "The project is created or cloned inside this folder.",
+                                        startingAt: createProjectParentPath
+                                    ) {
+                                        createProjectParentPath = p
+                                    }
+                                },
+                                style: .secondary
+                            )
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Folder name")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        if createProjectMode == .newWithAgent {
+                            TextField(
+                                suggestedFolderNameFromIdea,
+                                text: Binding(
+                                    get: { createProjectFolderName },
+                                    set: { newValue in
+                                        createProjectFolderName = newValue
+                                        createProjectFolderNameEditedByUser = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            Text("Example from description: \(suggestedFolderNameFromIdea)")
+                                .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        } else {
+                            TextField("Override cloned folder name", text: $createProjectFolderName)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    Toggle(isOn: $createProjectInitialGitCommit) {
+                        Text("Create initial git commit after setup")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    }
+                    .toggleStyle(.checkbox)
+
+                    HStack(spacing: CursorTheme.spaceS) {
+                        Spacer(minLength: 0)
+                        ActionButton(
+                            title: createProjectBusy ? "Working…" : (createProjectMode == .cloneFromGitHub ? "Clone & set up" : "Create & set up"),
+                            icon: "wand.and.stars",
+                            action: submitCreateProject,
+                            isDisabled: createProjectBusy,
+                            help: "Run the setup agent for `.metro/project.json` and Metro Preview",
+                            style: .accent
                         )
                     }
                 }
-
-                if createProjectMode == .newWithAgent {
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                        Text("Project folder name")
-                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        TextField("my-app", text: $createProjectFolderName)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                        Text("What should it be? (optional)")
-                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        TextField("Example: a small Next.js app for invoices", text: $createProjectIdea, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(3...8)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
-                        Text("Folder name (optional)")
-                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                        TextField("Override cloned folder name", text: $createProjectFolderName)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                }
-
-                Toggle(isOn: $createProjectInitialGitCommit) {
-                    Text("Create initial git commit after setup")
-                        .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
-                        .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                }
-                .toggleStyle(.checkbox)
-
-                ActionButton(
-                    title: createProjectBusy ? "Working…" : (createProjectMode == .cloneFromGitHub ? "Clone & set up" : "Create & set up"),
-                    icon: "wand.and.stars",
-                    action: submitCreateProject,
-                    isDisabled: createProjectBusy,
-                    help: "Run the setup agent for `.metro/project.json` and Metro Preview",
-                    style: .accent
+                .padding(CursorTheme.paddingCard)
+                .background(CursorTheme.surfaceRaised(for: colorScheme), in: RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
                 )
             }
+            .frame(maxWidth: 760)
+            .frame(maxWidth: .infinity, alignment: .center)
             .padding(CursorTheme.paddingChrome)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -2657,9 +2765,9 @@ struct PopoutView: View {
                         .frame(maxWidth: 340)
                 }
 
-                HStack(spacing: CursorTheme.spaceM) {
+                VStack(spacing: CursorTheme.spaceM) {
                     ActionButton(
-                        title: "Add Project",
+                        title: "Import",
                         icon: "folder.badge.plus",
                         action: addProject,
                         help: "Open an existing project folder",
@@ -2671,7 +2779,7 @@ struct PopoutView: View {
                         icon: "wand.and.stars",
                         action: openCreateProjectPage,
                         help: "Create or clone a project and run setup",
-                        style: .accent
+                        style: .secondary
                     )
                     .frame(maxWidth: .infinity)
                 }

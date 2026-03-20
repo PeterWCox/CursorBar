@@ -123,8 +123,8 @@ struct TasksListView: View {
     @State private var taskScreenshotPreviewIndex: Int = 0
     /// Delete callback for the task whose screenshots are being previewed; used by modal X to remove a screenshot.
     @State private var taskScreenshotPreviewOnDelete: ((String) -> Void)? = nil
-    /// In-memory image for full-screen preview (new-task draft screenshots before save).
-    @State private var taskScreenshotPreviewImage: NSImage? = nil
+    /// In-memory images for full-screen preview (new/edit task draft screenshots before save).
+    @State private var taskScreenshotPreviewImages: [NSImage] = []
     /// Draft screenshots for the new task row (paste before commit). Shown with same thumbnail + preview as existing tasks.
     @State private var newTaskDraftScreenshots: [DraftTaskScreenshot] = []
     /// Draft screenshots while editing an existing task. Existing screenshots are loaded into memory and replaced on save.
@@ -201,9 +201,18 @@ struct TasksListView: View {
         DispatchQueue.main.async {
             store.editingDraft = content
             editDraftScreenshots = screenshots
-            taskScreenshotPreviewImage = nil
+            taskScreenshotPreviewImages = []
             store.editingTask = task
         }
+    }
+
+    private func showDraftScreenshotPreview(_ screenshots: [DraftTaskScreenshot], selectedID: UUID) {
+        guard let selectedIndex = screenshots.firstIndex(where: { $0.id == selectedID }) else { return }
+        taskScreenshotPreviewURLs = []
+        taskScreenshotPreviewPaths = []
+        taskScreenshotPreviewOnDelete = nil
+        taskScreenshotPreviewImages = screenshots.map(\.image)
+        taskScreenshotPreviewIndex = selectedIndex
     }
 
     private func commitNewTask() {
@@ -218,20 +227,20 @@ struct TasksListView: View {
     private func cancelNewTask() {
         store.cancelNewTask()
         newTaskDraftScreenshots = []
-        taskScreenshotPreviewImage = nil
+        taskScreenshotPreviewImages = []
         focusNewTaskField = nil
     }
 
     private func commitEdit() {
         store.commitEdit(screenshotData: editDraftScreenshots.map(\.pngData))
         editDraftScreenshots = []
-        taskScreenshotPreviewImage = nil
+        taskScreenshotPreviewImages = []
     }
 
     private func cancelEdit() {
         store.editingTask = nil
         editDraftScreenshots = []
-        taskScreenshotPreviewImage = nil
+        taskScreenshotPreviewImages = []
     }
 
     private func showNewTaskComposer(selecting tab: TasksListTab? = nil) {
@@ -239,7 +248,7 @@ struct TasksListView: View {
         newTaskComposerSessionID = UUID()
         store.showNewTaskComposer(selecting: tab)
         newTaskDraftScreenshots = []
-        taskScreenshotPreviewImage = nil
+        taskScreenshotPreviewImages = []
         syncNewTaskModelSelection()
     }
 
@@ -248,7 +257,7 @@ struct TasksListView: View {
         store.selectTasksTab(tab)
         if wasAddingNewTask && !store.isAddingNewTask {
             newTaskDraftScreenshots = []
-            taskScreenshotPreviewImage = nil
+            taskScreenshotPreviewImages = []
         }
     }
 
@@ -324,14 +333,22 @@ struct TasksListView: View {
             }
         }
         .overlay {
-            if !taskScreenshotPreviewURLs.isEmpty || taskScreenshotPreviewImage != nil {
+            if !taskScreenshotPreviewURLs.isEmpty || !taskScreenshotPreviewImages.isEmpty {
                 ScreenshotPreviewModal(
                     imageURLs: taskScreenshotPreviewURLs.isEmpty ? nil : taskScreenshotPreviewURLs,
+                    images: taskScreenshotPreviewImages.isEmpty ? nil : taskScreenshotPreviewImages,
                     initialIndex: taskScreenshotPreviewIndex,
-                    image: taskScreenshotPreviewImage,
                     isPresented: Binding(
                         get: { true },
-                        set: { if !$0 { taskScreenshotPreviewURLs = []; taskScreenshotPreviewPaths = []; taskScreenshotPreviewIndex = 0; taskScreenshotPreviewImage = nil; taskScreenshotPreviewOnDelete = nil } }
+                        set: {
+                            if !$0 {
+                                taskScreenshotPreviewURLs = []
+                                taskScreenshotPreviewPaths = []
+                                taskScreenshotPreviewImages = []
+                                taskScreenshotPreviewIndex = 0
+                                taskScreenshotPreviewOnDelete = nil
+                            }
+                        }
                     ),
                     onDeleteScreenshotAtIndex: taskScreenshotPreviewOnDelete != nil && !taskScreenshotPreviewPaths.isEmpty ? { index in
                         guard index >= 0, index < taskScreenshotPreviewPaths.count else { return }
@@ -688,14 +705,11 @@ struct TasksListView: View {
                 store.removeTaskScreenshot(taskID: task.id, screenshotPath: path)
             } : nil,
             onPasteEditScreenshot: store.editingTask?.id == task.id ? pasteEditScreenshot : nil,
-            onPreviewEditScreenshot: { image in
-                taskScreenshotPreviewImage = image
+            onPreviewEditScreenshot: { screenshotID in
+                showDraftScreenshotPreview(editDraftScreenshots, selectedID: screenshotID)
             },
             onRemoveEditScreenshot: { screenshotID in
-                if let screenshot = editDraftScreenshots.first(where: { $0.id == screenshotID }),
-                   taskScreenshotPreviewImage === screenshot.image {
-                    taskScreenshotPreviewImage = nil
-                }
+                taskScreenshotPreviewImages = []
                 editDraftScreenshots.removeAll { $0.id == screenshotID }
             },
             onStopAgent: linkedStatuses[task.id] == .processing ? { onStopAgent(task) } : nil,
@@ -914,9 +928,9 @@ struct TasksListView: View {
                             image: item.image,
                             size: CGSize(width: 56, height: 56),
                             cornerRadius: 6,
-                            onTapPreview: { taskScreenshotPreviewImage = item.image },
+                            onTapPreview: { showDraftScreenshotPreview(newTaskDraftScreenshots, selectedID: item.id) },
                             onDelete: {
-                                if taskScreenshotPreviewImage === item.image { taskScreenshotPreviewImage = nil }
+                                taskScreenshotPreviewImages = []
                                 newTaskDraftScreenshots.removeAll { $0.id == item.id }
                             }
                         )
@@ -1073,7 +1087,7 @@ private struct TaskRowView: View {
     var onPreviewScreenshot: (([String], String, ((String) -> Void)?) -> Void)? = nil
     var onDeleteScreenshot: ((String) -> Void)? = nil
     var onPasteEditScreenshot: (() -> Void)? = nil
-    var onPreviewEditScreenshot: ((NSImage) -> Void)? = nil
+    var onPreviewEditScreenshot: ((UUID) -> Void)? = nil
     var onRemoveEditScreenshot: ((UUID) -> Void)? = nil
     /// When non-nil (processing tasks), the row shows a 3-dot menu with a single "Stop" item.
     var onStopAgent: (() -> Void)? = nil
@@ -1271,7 +1285,7 @@ private struct TaskRowView: View {
                                         image: item.image,
                                         size: CGSize(width: 56, height: 56),
                                         cornerRadius: 6,
-                                        onTapPreview: { onPreviewEditScreenshot?(item.image) },
+                                        onTapPreview: { onPreviewEditScreenshot?(item.id) },
                                         onDelete: {
                                             onRemoveEditScreenshot?(item.id)
                                         }

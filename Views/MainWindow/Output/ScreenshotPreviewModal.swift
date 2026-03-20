@@ -9,6 +9,8 @@ import AppKit
 struct ScreenshotPreviewModal: View {
     /// Multiple saved screenshots (e.g. task with several screenshots). Shown side by side.
     var imageURLs: [URL]? = nil
+    /// Multiple in-memory screenshots (e.g. create/edit task drafts before save).
+    var images: [NSImage]? = nil
     /// Initial index when showing imageURLs. Ignored when imageURLs is nil or empty.
     var initialIndex: Int = 0
     /// Single saved screenshot (file URL). Used when previewing one image from PopoutView/conversation.
@@ -28,10 +30,21 @@ struct ScreenshotPreviewModal: View {
         return []
     }
 
-    private var hasMultiple: Bool { urls.count > 1 }
+    private var inMemoryImages: [NSImage] {
+        if let images, !images.isEmpty { return images }
+        if let image { return [image] }
+        return []
+    }
+
+    private var displayCount: Int {
+        if !inMemoryImages.isEmpty { return inMemoryImages.count }
+        return urls.count
+    }
+
+    private var hasMultiple: Bool { displayCount > 1 }
     private var selectedIndex: Int {
-        guard !urls.isEmpty else { return 0 }
-        return min(max(currentIndex, 0), urls.count - 1)
+        guard displayCount > 0 else { return 0 }
+        return min(max(currentIndex, 0), displayCount - 1)
     }
     private var selectedURL: URL? {
         guard !urls.isEmpty else { return nil }
@@ -39,13 +52,16 @@ struct ScreenshotPreviewModal: View {
     }
 
     private var currentDisplayImage: NSImage? {
-        if let image { return image }
+        if !inMemoryImages.isEmpty {
+            return inMemoryImages[selectedIndex]
+        }
         guard let url = selectedURL else { return nil }
         return ImageAssetCache.shared.screenshot(for: url)
     }
 
     init(
         imageURLs: [URL]? = nil,
+        images: [NSImage]? = nil,
         initialIndex: Int = 0,
         imageURL: URL? = nil,
         image: NSImage? = nil,
@@ -53,6 +69,7 @@ struct ScreenshotPreviewModal: View {
         onDeleteScreenshotAtIndex: ((Int) -> Void)? = nil
     ) {
         self.imageURLs = imageURLs
+        self.images = images
         self.initialIndex = initialIndex
         self.imageURL = imageURL
         self.image = image
@@ -146,12 +163,12 @@ struct ScreenshotPreviewModal: View {
 
     private func showPreviousScreenshot() {
         guard hasMultiple else { return }
-        currentIndex = selectedIndex == 0 ? urls.count - 1 : selectedIndex - 1
+        currentIndex = selectedIndex == 0 ? displayCount - 1 : selectedIndex - 1
     }
 
     private func showNextScreenshot() {
         guard hasMultiple else { return }
-        currentIndex = selectedIndex == urls.count - 1 ? 0 : selectedIndex + 1
+        currentIndex = selectedIndex == displayCount - 1 ? 0 : selectedIndex + 1
     }
 
     @ViewBuilder
@@ -175,7 +192,7 @@ struct ScreenshotPreviewModal: View {
         Image(nsImage: nsImage)
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(maxWidth: 900, maxHeight: 700)
+            .frame(maxWidth: 1280, maxHeight: 860)
             .fixedSize(horizontal: true, vertical: true)
             .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
             .overlay(
@@ -185,7 +202,7 @@ struct ScreenshotPreviewModal: View {
             .overlay(alignment: .topTrailing) {
                 HStack(spacing: CursorTheme.spaceS) {
                     if hasMultiple {
-                        Text("\(selectedIndex + 1) / \(urls.count)")
+                        Text("\(selectedIndex + 1) / \(displayCount)")
                             .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.92))
                             .padding(.horizontal, CursorTheme.spaceS)
