@@ -1311,6 +1311,12 @@ struct PopoutView: View {
                 toggleMainContentCollapsed()
             }
 
+            ForEach(WindowLayoutOption.allCases) { layout in
+                hiddenShortcutButton(layout.title, key: layout.shortcutKey) {
+                    applyWindowLayout(layout)
+                }
+            }
+
             if sidebarCycleDestinations().count > 1 {
                 hiddenShortcutButton("Previous in sidebar", key: "[", modifiers: .command) {
                     cycleSidebarWorkspace(direction: -1)
@@ -1341,9 +1347,9 @@ struct PopoutView: View {
         }
     }
 
-    private func openProjectOnGitHub(_ path: String) {
-        guard let githubURL = gitHubRepositoryURL(workspacePath: path) else { return }
-        NSWorkspace.shared.open(githubURL)
+    private func openProjectHostingRemote(_ path: String) {
+        guard let destination = repositoryHostingDestination(workspacePath: path) else { return }
+        NSWorkspace.shared.open(destination.url)
     }
 
     private func runGitInit(workspacePath path: String) {
@@ -1532,45 +1538,166 @@ struct PopoutView: View {
                 return .trailing
             }
         }
+    }
 
-        var expandChevron: String {
+    private enum WindowLayoutOption: String, CaseIterable, Identifiable {
+        case dockLeft
+        case expandedLeft
+        case expandedRight
+        case dockRight
+
+        var id: String { rawValue }
+
+        var title: String {
             switch self {
-            case .leading:
-                return "chevron.right.2"
-            case .trailing:
-                return "chevron.left.2"
+            case .dockLeft:
+                return "Dock Left"
+            case .expandedLeft:
+                return "Expanded Left"
+            case .expandedRight:
+                return "Expanded Right"
+            case .dockRight:
+                return "Dock Right"
             }
         }
 
-        var collapseChevron: String {
+        var icon: String {
             switch self {
-            case .leading:
-                return "chevron.left.2"
-            case .trailing:
-                return "chevron.right.2"
-            }
-        }
-
-        var moveSidebarIcon: String {
-            switch self {
-            case .leading:
-                return "sidebar.trailing"
-            case .trailing:
+            case .dockLeft:
+                return "rectangle.leadinghalf.inset.filled"
+            case .expandedLeft:
                 return "sidebar.leading"
+            case .expandedRight:
+                return "sidebar.leading"
+            case .dockRight:
+                return "rectangle.trailinghalf.inset.filled"
             }
         }
 
-        var moveSidebarHelp: String {
+        var mirrorsIconHorizontally: Bool {
+            self == .expandedRight
+        }
+
+        var shortcutKey: KeyEquivalent {
             switch self {
-            case .leading:
-                return "Move sidebar to right"
-            case .trailing:
-                return "Move sidebar to left"
+            case .dockLeft:
+                return "1"
+            case .expandedLeft:
+                return "2"
+            case .expandedRight:
+                return "3"
+            case .dockRight:
+                return "4"
+            }
+        }
+
+        var shortcutDisplay: String {
+            switch self {
+            case .dockLeft:
+                return "⌘1"
+            case .expandedLeft:
+                return "⌘2"
+            case .expandedRight:
+                return "⌘3"
+            case .dockRight:
+                return "⌘4"
+            }
+        }
+
+        var shortcutAction: FloatingPanel.SidebarShortcutAction {
+            switch self {
+            case .dockLeft:
+                return .collapseLeft
+            case .expandedLeft:
+                return .expandLeft
+            case .expandedRight:
+                return .expandRight
+            case .dockRight:
+                return .collapseRight
             }
         }
     }
 
     private var sidebarEdge: SidebarEdge { isSidebarOnRight ? .trailing : .leading }
+
+    private var selectedWindowLayout: WindowLayoutOption {
+        switch (isMainContentCollapsed, isSidebarOnRight) {
+        case (true, false):
+            return .dockLeft
+        case (false, false):
+            return .expandedLeft
+        case (false, true):
+            return .expandedRight
+        case (true, true):
+            return .dockRight
+        }
+    }
+
+    private func applyWindowLayout(_ layout: WindowLayoutOption) {
+        NotificationCenter.default.post(
+            name: FloatingPanel.sidebarShortcutNotification,
+            object: nil,
+            userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: layout.shortcutAction.rawValue]
+        )
+    }
+
+    @ViewBuilder
+    private func layoutMenuIcon(_ layout: WindowLayoutOption, isSelected: Bool = false) -> some View {
+        if isSelected {
+            Image(systemName: "checkmark")
+        } else {
+            Image(systemName: layout.icon)
+                .scaleEffect(x: layout.mirrorsIconHorizontally ? -1 : 1, y: 1)
+        }
+    }
+
+    private var layoutCycleHintRow: some View {
+        Button {} label: {
+            HStack(spacing: CursorTheme.spaceS) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    .frame(width: CursorTheme.spaceL)
+                Text("Cycle (cmd+`)")
+                Spacer(minLength: 0)
+            }
+            .font(.system(size: CursorTheme.fontBody, weight: .regular))
+        }
+        .disabled(true)
+    }
+
+    private var layoutMenuButton: some View {
+        Menu {
+            ForEach(WindowLayoutOption.allCases) { layout in
+                Button {
+                    applyWindowLayout(layout)
+                } label: {
+                    HStack(spacing: CursorTheme.spaceS) {
+                        layoutMenuIcon(layout, isSelected: layout == selectedWindowLayout)
+                            .frame(width: CursorTheme.spaceL)
+                        Text(layout.title)
+                        Spacer(minLength: CursorTheme.spaceL)
+                        Text(layout.shortcutDisplay)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Divider()
+            layoutCycleHintRow
+        } label: {
+            layoutMenuIcon(selectedWindowLayout)
+                .font(.system(size: IconButton.Size.medium.iconFontSize, weight: .semibold))
+                .symbolRenderingMode(.monochrome)
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .frame(width: IconButton.Size.medium.dimension, height: IconButton.Size.medium.dimension)
+                .background(CursorTheme.surfaceMuted(for: colorScheme), in: Circle())
+                .contentShape(Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .tint(CursorTheme.textPrimary(for: colorScheme))
+        .fixedSize()
+        .help("View layout")
+    }
 
     /// Tab focuses the prompt input; these are set by SubmittableTextEditor via onFocusRequested.
     @State private var focusPromptInput: (() -> Void)?
@@ -2237,27 +2364,10 @@ struct PopoutView: View {
             }
 
             Spacer(minLength: 0)
-            if sidebarEdge == .trailing, isMainContentCollapsed {
-                IconButton(icon: sidebarEdge.expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
-                ThreeDotMenuButton(size: .medium, help: "More options") {
-                    Button(action: { appState.showSettingsSheet = true }) {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    Button(action: dismiss) {
-                        Label("Minimise", systemImage: "minus")
-                    }
-                }
-            }
-            if sidebarEdge == .leading, isMainContentCollapsed {
-                ThreeDotMenuButton(size: .medium, help: "More options") {
-                    Button(action: { appState.showSettingsSheet = true }) {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    Button(action: dismiss) {
-                        Label("Minimise", systemImage: "minus")
-                    }
-                }
-                IconButton(icon: sidebarEdge.expandChevron, action: { withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed.toggle() } }, help: "Expand")
+            if isMainContentCollapsed {
+                layoutMenuButton
+                IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
+                IconButton(icon: "minus", action: dismiss, help: "Minimise")
             }
         }
     }
@@ -2267,10 +2377,7 @@ struct PopoutView: View {
         return HStack(alignment: .center, spacing: 0) {
             mainColumnTitleContent
                 .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-            IconButton(icon: sidebarEdge.collapseChevron, action: toggleMainContentCollapsed, help: "Collapse")
-            IconButton(icon: sidebarEdge.moveSidebarIcon, action: {
-                withAnimation(.easeInOut(duration: 0.2)) { isSidebarOnRight.toggle() }
-            }, help: sidebarEdge.moveSidebarHelp)
+            layoutMenuButton
             IconButton(icon: "gearshape", action: { appState.showSettingsSheet = true }, help: "Settings")
             IconButton(icon: "minus", action: dismiss, help: "Minimise")
         }
@@ -2551,10 +2658,16 @@ struct PopoutView: View {
                                 }
                                 .buttonStyle(.plain)
 
+                                let hostingDestination = repositoryHostingDestination(workspacePath: group.path)
                                 Menu {
                                     Menu("Open in…", systemImage: "arrow.up.forward.app") {
                                         Button("Cursor") {
                                             openProjectInCursor(group.path)
+                                        }
+                                        if let hostingDestination {
+                                            Button(hostingDestination.provider.menuTitle, systemImage: "link") {
+                                                openProjectHostingRemote(group.path)
+                                            }
                                         }
                                     }
                                     Divider()

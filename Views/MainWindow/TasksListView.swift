@@ -127,8 +127,10 @@ struct TasksListView: View {
     @State private var taskScreenshotPreviewImages: [NSImage] = []
     /// Draft screenshots for the new task row (paste before commit). Shown with same thumbnail + preview as existing tasks.
     @State private var newTaskDraftScreenshots: [DraftTaskScreenshot] = []
+    @State private var newTaskDraftSelectedScreenshotIndex: Int = 0
     /// Draft screenshots while editing an existing task. Existing screenshots are loaded into memory and replaced on save.
     @State private var editDraftScreenshots: [DraftTaskScreenshot] = []
+    @State private var editDraftSelectedScreenshotIndex: Int = 0
     /// Height of the edit-task text editor; grows with content so multi-line draft is fully visible.
     @State private var editTaskEditorHeight: CGFloat = 36
 
@@ -176,22 +178,41 @@ struct TasksListView: View {
         return screenshot
     }
 
-    private func appendScreenshot(to screenshots: inout [DraftTaskScreenshot], from pasteboard: NSPasteboard = .general) {
+    private func appendScreenshot(to screenshots: inout [DraftTaskScreenshot], from pasteboard: NSPasteboard = .general) -> Bool {
         guard screenshots.count < AppLimits.maxScreenshots,
               let pastedImage = SubmittableTextEditor.imageFromPasteboard(pasteboard),
               let image = materializedScreenshot(from: pastedImage) else {
-            return
+            return false
         }
 
         screenshots.append(image)
+        return true
     }
 
     private func pasteNewTaskScreenshot() {
-        appendScreenshot(to: &newTaskDraftScreenshots)
+        if appendScreenshot(to: &newTaskDraftScreenshots) {
+            newTaskDraftSelectedScreenshotIndex = max(0, newTaskDraftScreenshots.count - 1)
+        }
     }
 
     private func pasteEditScreenshot() {
-        appendScreenshot(to: &editDraftScreenshots)
+        if appendScreenshot(to: &editDraftScreenshots) {
+            editDraftSelectedScreenshotIndex = max(0, editDraftScreenshots.count - 1)
+        }
+    }
+
+    private func removeDraftScreenshot(
+        from screenshots: inout [DraftTaskScreenshot],
+        selectedIndex: inout Int,
+        screenshotID: UUID
+    ) {
+        guard let removeIndex = screenshots.firstIndex(where: { $0.id == screenshotID }) else { return }
+        screenshots.remove(at: removeIndex)
+        if screenshots.isEmpty {
+            selectedIndex = 0
+        } else if selectedIndex >= screenshots.count {
+            selectedIndex = screenshots.count - 1
+        }
     }
 
     private func beginEditing(_ task: ProjectTask) {
@@ -201,6 +222,7 @@ struct TasksListView: View {
         DispatchQueue.main.async {
             store.editingDraft = content
             editDraftScreenshots = screenshots
+            editDraftSelectedScreenshotIndex = 0
             taskScreenshotPreviewImages = []
             store.editingTask = task
         }
@@ -222,11 +244,13 @@ struct TasksListView: View {
             providerID: newTaskProviderID
         )
         newTaskDraftScreenshots = []
+        newTaskDraftSelectedScreenshotIndex = 0
     }
 
     private func cancelNewTask() {
         store.cancelNewTask()
         newTaskDraftScreenshots = []
+        newTaskDraftSelectedScreenshotIndex = 0
         taskScreenshotPreviewImages = []
         focusNewTaskField = nil
     }
@@ -234,12 +258,14 @@ struct TasksListView: View {
     private func commitEdit() {
         store.commitEdit(screenshotData: editDraftScreenshots.map(\.pngData))
         editDraftScreenshots = []
+        editDraftSelectedScreenshotIndex = 0
         taskScreenshotPreviewImages = []
     }
 
     private func cancelEdit() {
         store.editingTask = nil
         editDraftScreenshots = []
+        editDraftSelectedScreenshotIndex = 0
         taskScreenshotPreviewImages = []
     }
 
@@ -248,6 +274,7 @@ struct TasksListView: View {
         newTaskComposerSessionID = UUID()
         store.showNewTaskComposer(selecting: tab)
         newTaskDraftScreenshots = []
+        newTaskDraftSelectedScreenshotIndex = 0
         taskScreenshotPreviewImages = []
         syncNewTaskModelSelection()
     }
@@ -257,6 +284,7 @@ struct TasksListView: View {
         store.selectTasksTab(tab)
         if wasAddingNewTask && !store.isAddingNewTask {
             newTaskDraftScreenshots = []
+            newTaskDraftSelectedScreenshotIndex = 0
             taskScreenshotPreviewImages = []
         }
     }
@@ -678,6 +706,7 @@ struct TasksListView: View {
             isEditing: store.editingTask?.id == task.id,
             editDraft: $store.editingDraft,
             editScreenshots: store.editingTask?.id == task.id ? editDraftScreenshots : [],
+            editSelectedScreenshotIndex: $editDraftSelectedScreenshotIndex,
             onTap: {
                 if let linkedState = linkedStatuses[task.id], linkedState != AgentTaskState.none {
                     onOpenLinkedAgent(task)
@@ -922,20 +951,21 @@ struct TasksListView: View {
             }
 
             if !newTaskDraftScreenshots.isEmpty {
-                HStack(alignment: .center, spacing: 6) {
-                    ForEach(newTaskDraftScreenshots, id: \.id) { item in
-                        ScreenshotThumbnailView(
-                            image: item.image,
-                            size: CGSize(width: 56, height: 56),
-                            cornerRadius: 6,
-                            onTapPreview: { showDraftScreenshotPreview(newTaskDraftScreenshots, selectedID: item.id) },
-                            onDelete: {
-                                taskScreenshotPreviewImages = []
-                                newTaskDraftScreenshots.removeAll { $0.id == item.id }
-                            }
+                DraftScreenshotGalleryView(
+                    screenshots: newTaskDraftScreenshots,
+                    selectedIndex: $newTaskDraftSelectedScreenshotIndex,
+                    onOpenPreview: { screenshotID in
+                        showDraftScreenshotPreview(newTaskDraftScreenshots, selectedID: screenshotID)
+                    },
+                    onDelete: { screenshotID in
+                        taskScreenshotPreviewImages = []
+                        removeDraftScreenshot(
+                            from: &newTaskDraftScreenshots,
+                            selectedIndex: &newTaskDraftSelectedScreenshotIndex,
+                            screenshotID: screenshotID
                         )
                     }
-                }
+                )
             }
 
             HStack(alignment: .center, spacing: CursorTheme.spaceS + CursorTheme.spaceXXS) {
@@ -1062,6 +1092,135 @@ private struct TaskScreenshotSummaryView: View {
     }
 }
 
+private struct DraftScreenshotGalleryView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let screenshots: [DraftTaskScreenshot]
+    @Binding var selectedIndex: Int
+    var onOpenPreview: ((UUID) -> Void)? = nil
+    var onDelete: ((UUID) -> Void)? = nil
+
+    private var clampedSelectedIndex: Int {
+        guard !screenshots.isEmpty else { return 0 }
+        return min(max(selectedIndex, 0), screenshots.count - 1)
+    }
+
+    private var selectedScreenshot: DraftTaskScreenshot? {
+        guard !screenshots.isEmpty else { return nil }
+        return screenshots[clampedSelectedIndex]
+    }
+
+    private var hasMultiple: Bool { screenshots.count > 1 }
+
+    var body: some View {
+        if let selectedScreenshot {
+            VStack(alignment: .leading, spacing: CursorTheme.spaceS) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        .fill(CursorTheme.surfaceMuted(for: colorScheme))
+
+                    Image(nsImage: selectedScreenshot.image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: 420)
+                        .padding(CursorTheme.spaceS)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            onOpenPreview?(selectedScreenshot.id)
+                        }
+                }
+                .frame(maxWidth: .infinity, minHeight: 260, maxHeight: 440)
+                .clipShape(RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: CursorTheme.radiusCard, style: .continuous)
+                        .stroke(CursorTheme.border(for: colorScheme), lineWidth: 1)
+                )
+                .overlay(alignment: .leading) {
+                    if hasMultiple {
+                        draftGalleryNavButton(systemName: "chevron.left") {
+                            selectedIndex = clampedSelectedIndex == 0 ? screenshots.count - 1 : clampedSelectedIndex - 1
+                        }
+                        .padding(CursorTheme.spaceS)
+                    }
+                }
+                .overlay(alignment: .topTrailing) {
+                    HStack(spacing: CursorTheme.spaceS) {
+                        if hasMultiple {
+                            Text("\(clampedSelectedIndex + 1) / \(screenshots.count)")
+                                .font(.system(size: CursorTheme.fontSecondary, weight: .semibold))
+                                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                                .padding(.horizontal, CursorTheme.spaceS)
+                                .padding(.vertical, CursorTheme.spaceXS)
+                                .background(Color.black.opacity(0.45), in: Capsule())
+                        }
+
+                        Button {
+                            onDelete?(selectedScreenshot.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: CursorTheme.fontIconList))
+                                .foregroundStyle(.white.opacity(0.9))
+                                .background(Circle().fill(Color.black.opacity(0.35)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(CursorTheme.spaceS)
+                }
+                .overlay(alignment: .trailing) {
+                    if hasMultiple {
+                        draftGalleryNavButton(systemName: "chevron.right") {
+                            selectedIndex = clampedSelectedIndex == screenshots.count - 1 ? 0 : clampedSelectedIndex + 1
+                        }
+                        .padding(CursorTheme.spaceS)
+                    }
+                }
+
+                if hasMultiple {
+                    HStack(spacing: CursorTheme.spaceS) {
+                        Button("Previous") {
+                            selectedIndex = clampedSelectedIndex == 0 ? screenshots.count - 1 : clampedSelectedIndex - 1
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+
+                        Button("Next") {
+                            selectedIndex = clampedSelectedIndex == screenshots.count - 1 ? 0 : clampedSelectedIndex + 1
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .medium))
+                }
+            }
+            .onChange(of: screenshots.count) { _, newCount in
+                if newCount == 0 {
+                    selectedIndex = 0
+                } else if selectedIndex >= newCount {
+                    selectedIndex = newCount - 1
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func draftGalleryNavButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: CursorTheme.fontTitle, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 36, height: 36)
+                .background(Color.black.opacity(0.30), in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Task row
 
 private struct TaskRowView: View {
@@ -1078,6 +1237,7 @@ private struct TaskRowView: View {
     var isEditing: Bool = false
     @Binding var editDraft: String
     var editScreenshots: [DraftTaskScreenshot] = []
+    @Binding var editSelectedScreenshotIndex: Int
     let onTap: () -> Void
     let onCommitEdit: () -> Void
     let onCancelEdit: () -> Void
@@ -1279,19 +1439,16 @@ private struct TaskRowView: View {
                                 return .handled
                             }
                         if !editScreenshots.isEmpty {
-                            HStack(alignment: .center, spacing: 6) {
-                                ForEach(editScreenshots) { item in
-                                    ScreenshotThumbnailView(
-                                        image: item.image,
-                                        size: CGSize(width: 56, height: 56),
-                                        cornerRadius: 6,
-                                        onTapPreview: { onPreviewEditScreenshot?(item.id) },
-                                        onDelete: {
-                                            onRemoveEditScreenshot?(item.id)
-                                        }
-                                    )
+                            DraftScreenshotGalleryView(
+                                screenshots: editScreenshots,
+                                selectedIndex: $editSelectedScreenshotIndex,
+                                onOpenPreview: { screenshotID in
+                                    onPreviewEditScreenshot?(screenshotID)
+                                },
+                                onDelete: { screenshotID in
+                                    onRemoveEditScreenshot?(screenshotID)
                                 }
-                            }
+                            )
                             .padding(.top, CursorTheme.spaceXS)
                         }
                         if !models.isEmpty {
@@ -1593,6 +1750,7 @@ private struct EditTaskStoryPreview: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var editDraft = "Audit the spacing and hierarchy in the account settings screen."
     @State private var editScreenshots = TasksStorybookData.makeDraftScreenshots()
+    @State private var editSelectedScreenshotIndex = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
@@ -1608,6 +1766,7 @@ private struct EditTaskStoryPreview: View {
                 isEditing: true,
                 editDraft: $editDraft,
                 editScreenshots: editScreenshots,
+                editSelectedScreenshotIndex: $editSelectedScreenshotIndex,
                 onTap: {},
                 onCommitEdit: {},
                 onCancelEdit: {},
@@ -1646,6 +1805,7 @@ private struct TaskRowScreenshotStatesPreview: View {
                 ],
                 isEditing: false,
                 editDraft: $editDraft,
+                editSelectedScreenshotIndex: .constant(0),
                 onTap: {},
                 onCommitEdit: {},
                 onCancelEdit: {},
@@ -1660,6 +1820,7 @@ private struct TaskRowScreenshotStatesPreview: View {
                 agentTaskState: .none,
                 isEditing: false,
                 editDraft: $editDraft,
+                editSelectedScreenshotIndex: .constant(0),
                 onTap: {},
                 onCommitEdit: {},
                 onCancelEdit: {},
@@ -1674,6 +1835,7 @@ private struct TaskRowScreenshotStatesPreview: View {
                 agentTaskState: .none,
                 isEditing: false,
                 editDraft: $editDraft,
+                editSelectedScreenshotIndex: .constant(0),
                 onTap: {},
                 onCommitEdit: {},
                 onCancelEdit: {},

@@ -467,9 +467,28 @@ private func inferredRepositoryFolderName(from repositoryURL: String) -> String?
     return lastComponent?.isEmpty == false ? lastComponent : nil
 }
 
-/// Returns the GitHub repository web URL (https://github.com/owner/repo) if the workspace has a GitHub remote; nil otherwise.
+enum RepositoryHostingProvider {
+    case github
+    case azureDevOps
+
+    var menuTitle: String {
+        switch self {
+        case .github:
+            return "GitHub"
+        case .azureDevOps:
+            return "Azure DevOps"
+        }
+    }
+}
+
+struct RepositoryHostingDestination {
+    let provider: RepositoryHostingProvider
+    let url: URL
+}
+
+/// Returns a supported repository hosting destination for the workspace's `origin` remote.
 /// Reads .git/config directly to avoid spawning a subprocess (which can SIGABRT under sandbox/main-thread).
-func gitHubRepositoryURL(workspacePath: String) -> URL? {
+func repositoryHostingDestination(workspacePath: String) -> RepositoryHostingDestination? {
     let dir = URL(fileURLWithPath: workspacePath)
     guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
     var gitDir = dir.appendingPathComponent(".git", isDirectory: false)
@@ -490,20 +509,64 @@ func gitHubRepositoryURL(workspacePath: String) -> URL? {
           let config = try? String(contentsOf: configURL, encoding: .utf8) else { return nil }
     let urlString = gitRemoteOriginURL(from: config)
     guard !urlString.isEmpty else { return nil }
-    if urlString.hasPrefix("https://github.com/") {
-        var path = String(urlString.dropFirst("https://github.com/".count))
+    return repositoryHostingDestination(remoteURLString: urlString)
+}
+
+/// Returns the GitHub repository web URL (https://github.com/owner/repo) if the workspace has a GitHub remote; nil otherwise.
+func gitHubRepositoryURL(workspacePath: String) -> URL? {
+    guard let destination = repositoryHostingDestination(workspacePath: workspacePath),
+          destination.provider == .github else { return nil }
+    return destination.url
+}
+
+private func repositoryHostingDestination(remoteURLString: String) -> RepositoryHostingDestination? {
+    if let url = githubRepositoryURL(from: remoteURLString) {
+        return RepositoryHostingDestination(provider: .github, url: url)
+    }
+    if let url = azureDevOpsRepositoryURL(from: remoteURLString) {
+        return RepositoryHostingDestination(provider: .azureDevOps, url: url)
+    }
+    return nil
+}
+
+private func githubRepositoryURL(from remoteURLString: String) -> URL? {
+    if remoteURLString.hasPrefix("https://github.com/") {
+        var path = String(remoteURLString.dropFirst("https://github.com/".count))
         if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
         return URL(string: "https://github.com/\(path)")
     }
-    if urlString.hasPrefix("git@github.com:") {
-        var path = String(urlString.dropFirst("git@github.com:".count))
+    if remoteURLString.hasPrefix("git@github.com:") {
+        var path = String(remoteURLString.dropFirst("git@github.com:".count))
         if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
         return URL(string: "https://github.com/\(path)")
     }
-    if urlString.hasPrefix("ssh://git@github.com/") {
-        var path = String(urlString.dropFirst("ssh://git@github.com/".count))
+    if remoteURLString.hasPrefix("ssh://git@github.com/") {
+        var path = String(remoteURLString.dropFirst("ssh://git@github.com/".count))
         if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
         return URL(string: "https://github.com/\(path)")
+    }
+    return nil
+}
+
+private func azureDevOpsRepositoryURL(from remoteURLString: String) -> URL? {
+    let trimmed = remoteURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasPrefix("https://dev.azure.com/") || trimmed.contains(".visualstudio.com/") {
+        let browserURL = trimmed.hasSuffix(".git") ? String(trimmed.dropLast(4)) : trimmed
+        return URL(string: browserURL)
+    }
+    if trimmed.hasPrefix("git@ssh.dev.azure.com:v3/") {
+        var path = String(trimmed.dropFirst("git@ssh.dev.azure.com:v3/".count))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count >= 3 else { return nil }
+        return URL(string: "https://dev.azure.com/\(components[0])/\(components[1])/_git/\(components[2])")
+    }
+    if trimmed.hasPrefix("ssh://git@vs-ssh.visualstudio.com:22/v3/") {
+        var path = String(trimmed.dropFirst("ssh://git@vs-ssh.visualstudio.com:22/v3/".count))
+        if path.hasSuffix(".git") { path = String(path.dropLast(4)) }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count >= 3 else { return nil }
+        return URL(string: "https://\(components[0]).visualstudio.com/\(components[1])/_git/\(components[2])")
     }
     return nil
 }

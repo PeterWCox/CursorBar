@@ -227,11 +227,8 @@ private var minExpandedPanelWidth: CGFloat {
     let expandedSidebarWidth = max(CGFloat(storedSidebarWidth), 300)
     return expandedSidebarWidth + 11 + minExpandedMainColumnWidth + CursorTheme.paddingChrome
 }
-/// Preferred width when Cmd+O restores the full workspace layout.
-private let preferredOpenPanelWidth: CGFloat = 980
-
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem!
     var panel: FloatingPanel!
     let appState = AppState()
@@ -246,7 +243,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var savedExpandedPanelWidth: CGFloat = 720
     private var savedExpandedPanelHeight: CGFloat?
     private var pendingPanelDockOnRight: Bool?
-    private var pendingCenterExpandedPanel: Bool = false
+    private var statusItemLayoutMenu: NSMenu?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard appState.tabManager.runningAgentCount > 0 else {
@@ -282,12 +279,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         image.accessibilityDescription = "Cursor Metro"
 
         let menu = NSMenu()
+        menu.delegate = self
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
-        let centerPanelItem = NSMenuItem(title: "Center Popup", action: #selector(centerPanelFromMenu), keyEquivalent: "0")
+        let centerPanelItem = NSMenuItem(title: "Center Popup", action: #selector(centerPanelFromMenu), keyEquivalent: "")
         centerPanelItem.target = self
         menu.addItem(centerPanelItem)
+        menu.addItem(makeViewLayoutMenuItem())
         menu.addItem(NSMenuItem.separator())
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
@@ -363,7 +362,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         sidebarShortcutObserver = NotificationCenter.default.addObserver(
             forName: FloatingPanel.sidebarShortcutNotification,
-            object: panel,
+            object: nil,
             queue: .main
         ) { [weak self] notification in
             guard
@@ -379,23 +378,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sidebarLayoutKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            guard mods == .command else { return event }
+            let allowedModifiers: [NSEvent.ModifierFlags] = [.command, [.command, .shift]]
+            guard allowedModifiers.contains(mods) else { return event }
+            let action: FloatingPanel.SidebarShortcutAction = mods.contains(.shift) ? .cycleLayoutsReverse : .cycleLayouts
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "l":
-                self.handleSidebarShortcut(.collapseLeft)
-                return nil
-            case "r":
-                self.handleSidebarShortcut(.collapseRight)
-                return nil
-            case "o":
-                self.handleSidebarShortcut(.expandOrFlip)
-                return nil
             case "`":
-                self.handleSidebarShortcut(.cycleLayouts)
+                self.handleSidebarShortcut(action)
                 return nil
             default:
                 if event.keyCode == UInt16(kVK_ANSI_Grave) {
-                    self.handleSidebarShortcut(.cycleLayouts)
+                    self.handleSidebarShortcut(action)
                     return nil
                 }
                 return event
@@ -424,40 +416,158 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         applySidebarShortcut(action)
     }
 
+    private var selectedWindowLayoutAction: FloatingPanel.SidebarShortcutAction {
+        let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+        switch (appState.isMainContentCollapsed, isSidebarOnRight) {
+        case (true, false):
+            return .collapseLeft
+        case (false, false):
+            return .expandLeft
+        case (false, true):
+            return .expandRight
+        case (true, true):
+            return .collapseRight
+        }
+    }
+
+    private func makeViewLayoutMenuItem() -> NSMenuItem {
+        let submenu = NSMenu(title: "View Layout")
+        submenu.delegate = self
+
+        submenu.addItem(makeLayoutMenuActionItem(
+            title: "Dock Left",
+            keyEquivalent: "1",
+            action: .collapseLeft
+        ))
+        submenu.addItem(makeLayoutMenuActionItem(
+            title: "Expanded Left",
+            keyEquivalent: "2",
+            action: .expandLeft
+        ))
+        submenu.addItem(makeLayoutMenuActionItem(
+            title: "Expanded Right",
+            keyEquivalent: "3",
+            action: .expandRight
+        ))
+        submenu.addItem(makeLayoutMenuActionItem(
+            title: "Dock Right",
+            keyEquivalent: "4",
+            action: .collapseRight
+        ))
+        submenu.addItem(NSMenuItem.separator())
+        let cycleItem = makeLayoutMenuActionItem(
+            title: "Cycle Layouts",
+            keyEquivalent: "`",
+            action: .cycleLayouts
+        )
+        submenu.addItem(cycleItem)
+
+        statusItemLayoutMenu = submenu
+
+        let item = NSMenuItem(title: "View Layout", action: nil, keyEquivalent: "")
+        item.submenu = submenu
+        return item
+    }
+
+    private func makeLayoutMenuActionItem(
+        title: String,
+        keyEquivalent: String,
+        action: FloatingPanel.SidebarShortcutAction
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(applySidebarShortcutFromMenu(_:)), keyEquivalent: keyEquivalent)
+        item.target = self
+        item.representedObject = action.rawValue
+        if !keyEquivalent.isEmpty {
+            item.keyEquivalentModifierMask = [.command]
+        }
+        return item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu === statusItemLayoutMenu else { return }
+        let selectedAction = selectedWindowLayoutAction
+        for item in menu.items {
+            guard
+                let rawAction = item.representedObject as? String,
+                let action = FloatingPanel.SidebarShortcutAction(rawValue: rawAction)
+            else {
+                item.state = .off
+                continue
+            }
+            item.state = action == selectedAction ? .on : .off
+        }
+    }
+
+    @objc private func applySidebarShortcutFromMenu(_ sender: NSMenuItem) {
+        guard
+            let rawAction = sender.representedObject as? String,
+            let action = FloatingPanel.SidebarShortcutAction(rawValue: rawAction)
+        else {
+            return
+        }
+        handleSidebarShortcut(action)
+    }
+
     private func applySidebarShortcut(_ action: FloatingPanel.SidebarShortcutAction) {
         switch action {
         case .collapseLeft:
             UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
             pendingPanelDockOnRight = false
             appState.isMainContentCollapsed = true
+        case .expandLeft:
+            UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+            appState.isMainContentCollapsed = false
+            dockExpandedPanelToScreenSide(sidebarOnRight: false, animated: true)
+        case .expandRight:
+            UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+            appState.isMainContentCollapsed = false
+            dockExpandedPanelToScreenSide(sidebarOnRight: true, animated: true)
         case .collapseRight:
             UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
             pendingPanelDockOnRight = true
             appState.isMainContentCollapsed = true
         case .expandOrFlip:
             if appState.isMainContentCollapsed {
-                pendingCenterExpandedPanel = true
                 appState.isMainContentCollapsed = false
             } else {
                 let newSidebarOnRight = !UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
                 UserDefaults.standard.set(newSidebarOnRight, forKey: AppPreferences.sidebarOnRightKey)
+                dockExpandedPanelToScreenSide(sidebarOnRight: newSidebarOnRight, animated: true)
             }
         case .cycleLayouts:
-            let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
-            switch (appState.isMainContentCollapsed, isSidebarOnRight) {
-            case (true, false):
-                pendingCenterExpandedPanel = true
-                appState.isMainContentCollapsed = false
-            case (false, false):
-                UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
-            case (false, true):
-                pendingPanelDockOnRight = true
-                appState.isMainContentCollapsed = true
-            case (true, true):
-                UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
-                pendingPanelDockOnRight = false
-                appState.isMainContentCollapsed = true
-            }
+            cycleSidebarLayouts(reverse: false)
+        case .cycleLayoutsReverse:
+            cycleSidebarLayouts(reverse: true)
+        }
+    }
+
+    private func cycleSidebarLayouts(reverse: Bool) {
+        let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+        switch (appState.isMainContentCollapsed, isSidebarOnRight, reverse) {
+        case (true, false, false):
+            appState.isMainContentCollapsed = false
+        case (false, false, false):
+            UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+            dockExpandedPanelToScreenSide(sidebarOnRight: true, animated: true)
+        case (false, true, false):
+            pendingPanelDockOnRight = true
+            appState.isMainContentCollapsed = true
+        case (true, true, false):
+            UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+            pendingPanelDockOnRight = false
+            appState.isMainContentCollapsed = true
+        case (true, false, true):
+            UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+            pendingPanelDockOnRight = true
+            appState.isMainContentCollapsed = true
+        case (false, false, true):
+            pendingPanelDockOnRight = false
+            appState.isMainContentCollapsed = true
+        case (false, true, true):
+            UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+            dockExpandedPanelToScreenSide(sidebarOnRight: false, animated: true)
+        case (true, true, true):
+            appState.isMainContentCollapsed = false
         }
     }
 
@@ -471,14 +581,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         PanelFrameStorage.save(frame)
     }
 
-    private func centerExpandedPanel(animated: Bool) {
+    private func dockExpandedPanelToScreenSide(sidebarOnRight: Bool, animated: Bool) {
         guard let screen = bestScreenForPanelFrame() ?? preferredPanelScreen() else { return }
         let visibleFrame = screen.visibleFrame
         var frame = panel.frame
-        frame.size.width = min(visibleFrame.width, max(frame.width, preferredOpenPanelWidth))
+        frame.size.width = expandedWidthTarget(for: visibleFrame)
         frame.size.height = min(frame.height, visibleFrame.height)
-        frame.origin.x = visibleFrame.midX - frame.width / 2
-        frame.origin.y = visibleFrame.midY - frame.height / 2
+        frame.origin.x = sidebarOnRight ? (visibleFrame.maxX - frame.width) : visibleFrame.minX
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
         panel.setFrame(frame, display: true, animate: animated)
         PanelFrameStorage.save(frame)
     }
@@ -538,9 +648,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let dockOnRight = pendingPanelDockOnRight {
             pendingPanelDockOnRight = nil
             dockPanelToScreenEdge(sidebarOnRight: dockOnRight, animated: true)
-        } else if pendingCenterExpandedPanel, !collapsed {
-            pendingCenterExpandedPanel = false
-            centerExpandedPanel(animated: true)
         }
     }
 
@@ -725,9 +832,12 @@ private enum PanelFrameStorage {
 class FloatingPanel: NSPanel {
     enum SidebarShortcutAction: String {
         case collapseLeft
+        case expandLeft
+        case expandRight
         case collapseRight
         case expandOrFlip
         case cycleLayouts
+        case cycleLayoutsReverse
     }
 
     private static let defaultWidth: CGFloat = 720
@@ -780,40 +890,20 @@ class FloatingPanel: NSPanel {
     /// So Cmd+T always creates/focuses a new task when the panel is key (SwiftUI shortcuts can miss when focus is in list/text). Cmd+Shift+T is left for Reopen Closed Tab.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        guard mods.contains(.command), !mods.contains(.shift) else { return super.performKeyEquivalent(with: event) }
         let key = event.charactersIgnoringModifiers?.lowercased()
-        if key == "l" {
+        if mods == .command || mods == [.command, .shift],
+           key == "`" || event.keyCode == UInt16(kVK_ANSI_Grave) {
             NotificationCenter.default.post(
                 name: FloatingPanel.sidebarShortcutNotification,
                 object: self,
-                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.collapseLeft.rawValue]
+                userInfo: [
+                    FloatingPanel.sidebarShortcutActionUserInfoKey:
+                        (mods.contains(.shift) ? SidebarShortcutAction.cycleLayoutsReverse : .cycleLayouts).rawValue
+                ]
             )
             return true
         }
-        if key == "r" {
-            NotificationCenter.default.post(
-                name: FloatingPanel.sidebarShortcutNotification,
-                object: self,
-                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.collapseRight.rawValue]
-            )
-            return true
-        }
-        if key == "o" {
-            NotificationCenter.default.post(
-                name: FloatingPanel.sidebarShortcutNotification,
-                object: self,
-                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.expandOrFlip.rawValue]
-            )
-            return true
-        }
-        if key == "`" || event.keyCode == UInt16(kVK_ANSI_Grave) {
-            NotificationCenter.default.post(
-                name: FloatingPanel.sidebarShortcutNotification,
-                object: self,
-                userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: SidebarShortcutAction.cycleLayouts.rawValue]
-            )
-            return true
-        }
+        guard mods.contains(.command), !mods.contains(.shift) else { return super.performKeyEquivalent(with: event) }
         if key == "t" {
             NotificationCenter.default.post(name: FloatingPanel.requestNewTaskNotification, object: self)
             return true

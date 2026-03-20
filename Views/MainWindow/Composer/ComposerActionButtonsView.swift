@@ -46,6 +46,7 @@ private let contextWheelBlue = CursorTheme.spinnerBlue
 
 struct ContextUsageView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var showDetails = false
     var contextUsed: Int
     var contextLimit: Int
 
@@ -60,7 +61,9 @@ struct ContextUsageView: View {
             let limitK = contextLimit / 1000
             let pct = Int(round(contextFraction * 100))
             let tooltip = "~\(usedK)k / \(limitK)k tokens (\(pct)% used)"
-            HStack(spacing: 6) {
+            Button {
+                showDetails.toggle()
+            } label: {
                 ZStack {
                     Circle()
                         .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 3)
@@ -73,11 +76,22 @@ struct ContextUsageView: View {
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 20, height: 20)
-                Text("\(usedK)k / \(limitK)k")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .contentShape(Circle())
             }
+            .buttonStyle(.plain)
             .help(tooltip)
+            .appKitToolTip(tooltip)
+            .popover(isPresented: $showDetails, arrowEdge: .bottom) {
+                Text(tooltip)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .padding(CursorTheme.paddingCard)
+                    .frame(width: 220, alignment: .leading)
+                    .background(CursorTheme.surface(for: colorScheme))
+                    .presentationBackground(CursorTheme.surface(for: colorScheme))
+            }
+            .accessibilityLabel("Context usage")
+            .accessibilityValue(tooltip)
         }
     }
 }
@@ -85,30 +99,30 @@ struct ContextUsageView: View {
 // MARK: - Usage (API/billing placeholder; CLI does not expose usage)
 struct UsageView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var showUsagePopover = false
+    @State private var showDetails = false
+    private let tooltip = "The Cursor Agent CLI does not currently support showing usage."
 
     var body: some View {
         Button {
-            showUsagePopover = true
+            showDetails.toggle()
         } label: {
-            HStack(spacing: 6) {
-                Text("Usage")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                Text("$???")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-            }
+            Text("$???")
+                .font(.system(size: CursorTheme.fontSmall, weight: .medium))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showUsagePopover, arrowEdge: .bottom) {
-            Text("The Cursor Agent CLI does not currently support showing usage.")
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                .padding(12)
-                .frame(width: 240)
-                .background(CursorTheme.surface(for: colorScheme))
-                .presentationBackground(CursorTheme.surface(for: colorScheme))
-        }
+        .help(tooltip)
+            .appKitToolTip(tooltip)
+            .popover(isPresented: $showDetails, arrowEdge: .bottom) {
+                Text(tooltip)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+                    .padding(CursorTheme.paddingCard)
+                    .frame(width: 240, alignment: .leading)
+                    .background(CursorTheme.surface(for: colorScheme))
+                    .presentationBackground(CursorTheme.surface(for: colorScheme))
+            }
+            .accessibilityLabel("Usage")
+            .accessibilityValue(tooltip)
     }
 }

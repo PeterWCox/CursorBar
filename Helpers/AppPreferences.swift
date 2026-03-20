@@ -32,6 +32,8 @@ enum AppPreferences {
     static let projectScanRootsKey = "projectScanRoots"
     static let preferredTerminalAppKey = "preferredTerminalApp"
     static let preferredAppearanceKey = "preferredAppearance"
+    static let createProjectPreferredTypeKey = "createProjectPreferredType"
+    static let createProjectTypeUsageKey = "createProjectTypeUsage"
     /// Key for placing the agent tabs sidebar and logo on the right (mirrored layout). Persisted via UserDefaults.
     static let sidebarOnRightKey = "sidebarOnRight"
     /// Popout window: project list sidebar width (points). Persisted via UserDefaults.
@@ -51,6 +53,8 @@ enum AppPreferences {
     static let defaultHiddenProjectPathsRaw: String = ""
     /// Default appearance: follow system light/dark.
     static let defaultPreferredAppearance: String = PreferredAppearance.system.rawValue
+    static let defaultCreateProjectPreferredTypeRaw: String = ""
+    static let defaultCreateProjectTypeUsageRaw: String = ""
 
     static var defaultProjectsRootPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -141,6 +145,31 @@ enum AppPreferences {
     /// Serializes a set of hidden project paths to the stored string format (normalized).
     static func rawFrom(hiddenPaths: Set<String>) -> String {
         hiddenPaths.map(normalizedProjectPath).filter { !$0.isEmpty }.sorted().joined(separator: ",")
+    }
+
+    /// Parses stored project-type usage data from a comma-separated `type:count` list.
+    static func createProjectTypeUsage(from raw: String) -> [String: Int] {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [:] }
+
+        var usage: [String: Int] = [:]
+        for pair in trimmed.split(separator: ",") {
+            let parts = pair.split(separator: ":", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, let count = Int(parts[1]), count > 0 else { continue }
+            usage[key] = count
+        }
+        return usage
+    }
+
+    /// Serializes project-type usage data back to the stored string format.
+    static func rawFrom(createProjectTypeUsage usage: [String: Int]) -> String {
+        usage
+            .filter { !$0.key.isEmpty && $0.value > 0 }
+            .sorted { lhs, rhs in lhs.key < rhs.key }
+            .map { "\($0.key):\($0.value)" }
+            .joined(separator: ",")
     }
 
     /// Persists a path so folder discovery does not re-add it after the user removes it from the sidebar.

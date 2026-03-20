@@ -14,7 +14,6 @@ struct KeyboardShortcutsContentView: View {
     private static let sections: [(title: String, rows: [ShortcutRow])] = [
         ("App", [
             ShortcutRow(keys: ["⌘,"], action: "Open Settings"),
-            ShortcutRow(keys: ["⌘0"], action: "Center popup (menu bar only)"),
             ShortcutRow(keys: ["⌘Q"], action: "Quit"),
             ShortcutRow(keys: ["⎋ Esc"], action: "Dismiss modal / Cancel"),
         ]),
@@ -40,10 +39,11 @@ struct KeyboardShortcutsContentView: View {
         ]),
         ("Window", [
             ShortcutRow(keys: ["⌘B", "⌘S"], action: "Collapse/expand main content"),
-            ShortcutRow(keys: ["⌘L"], action: "Collapse with sidebar on the left"),
-            ShortcutRow(keys: ["⌘R"], action: "Collapse with sidebar on the right"),
-            ShortcutRow(keys: ["⌘O"], action: "Expand; press again to flip sidebar sides"),
-            ShortcutRow(keys: ["⌘`"], action: "Cycle layouts: left collapsed -> left expanded -> right expanded -> right collapsed"),
+            ShortcutRow(keys: ["⌘1"], action: "Dock left"),
+            ShortcutRow(keys: ["⌘2"], action: "Expanded left"),
+            ShortcutRow(keys: ["⌘3"], action: "Expanded right"),
+            ShortcutRow(keys: ["⌘4"], action: "Dock right"),
+            ShortcutRow(keys: ["⌘`", "⌘⇧`"], action: "Cycle layouts forward or backward"),
         ]),
     ]
 
