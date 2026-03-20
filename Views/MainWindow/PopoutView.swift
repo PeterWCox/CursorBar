@@ -204,6 +204,47 @@ private struct TerminalTabChip: View {
     }
 }
 
+/// Shared sidebar page chip used by project-level pages (Tasks, Preview).
+private struct SidebarPageChip: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: CursorTheme.spaceS) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                    .frame(width: 16, height: 16, alignment: .center)
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
+            .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
+            .background(
+                isSelected
+                    ? CursorTheme.surfaceRaised(for: colorScheme)
+                    : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
+                in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
+                    .stroke(
+                        isSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
+                        lineWidth: 1
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Sidebar chip that observes its tab so only this chip re-renders when that tab's state changes (e.g. isRunning).
 private struct ObservedTabChip: View {
     @ObservedObject var tab: AgentTab
@@ -1218,7 +1259,9 @@ struct PopoutView: View {
         if appState.isMainContentCollapsed {
             withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
         }
-        tabManager.addTerminalTab(workspacePath: targetWorkspacePath)
+        if tabManager.addTerminalTab(workspacePath: targetWorkspacePath) != nil {
+            tabManager.selectedDashboardViewPath = targetWorkspacePath
+        }
     }
     private var preferredTerminalApp: PreferredTerminalApp {
         PreferredTerminalApp(rawValue: preferredTerminalAppRawValue) ?? .automatic
@@ -1432,6 +1475,17 @@ struct PopoutView: View {
         return tabManager.terminalTabs.first { $0.id == tid }?.workspacePath
     }
 
+    private func isTasksPageSelected(for path: String) -> Bool {
+        tabManager.selectedTabID == nil && tabManager.selectedTasksViewPath == path
+    }
+
+    private func isPreviewPageSelected(for path: String) -> Bool {
+        guard tabManager.selectedTabID == nil else { return false }
+        guard tabManager.selectedTasksViewPath != path else { return false }
+        if tabManager.selectedDashboardViewPath == path { return true }
+        return terminalWorkspaceForSelectedTerminal() == path
+    }
+
     private func destinationMatchesCurrentSelection(_ dest: SidebarCycleDestination) -> Bool {
         switch dest {
         case .tasks(let path):
@@ -1639,6 +1693,13 @@ struct PopoutView: View {
                         style: .primary
                     )
                 }
+                ActionButton(
+                    title: "Add Terminal",
+                    icon: "plus",
+                    action: { addNewTerminalTab(lastWorkspacePath: path) },
+                    help: "Open a manual terminal tab in Preview",
+                    style: .secondary
+                )
                 ActionButton(
                     title: isConfigured ? "Regenerate Setup" : "Configure Setup",
                     icon: "gearshape",
@@ -2109,6 +2170,13 @@ struct PopoutView: View {
                     )
                 }
             }
+            ActionButton(
+                title: "Add Terminal",
+                icon: "plus",
+                action: { addNewTerminalTab(lastWorkspacePath: path) },
+                help: "Open a manual terminal tab in Preview",
+                style: .secondary
+            )
             Spacer(minLength: 0)
         }
         .padding(.horizontal, CursorTheme.paddingChrome)
@@ -2359,74 +2427,28 @@ struct PopoutView: View {
                             }
                             .padding(.horizontal, CursorTheme.paddingSidebarGroupHeaderHorizontal)
                             .padding(.vertical, CursorTheme.paddingSidebarGroupHeaderVertical)
-                            let isTasksSelected = tabManager.selectedTasksViewPath == group.path
-                            Button {
-                                tabManager.showTasksView(workspacePath: group.path)
-                                if appState.isMainContentCollapsed {
-                                    withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+                            let isTasksSelected = isTasksPageSelected(for: group.path)
+                            SidebarPageChip(
+                                title: "Tasks",
+                                icon: "checklist",
+                                isSelected: isTasksSelected,
+                                onSelect: {
+                                    tabManager.showTasksView(workspacePath: group.path)
+                                    if appState.isMainContentCollapsed {
+                                        withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
+                                    }
                                 }
-                            } label: {
-                                HStack(spacing: CursorTheme.spaceS) {
-                                    Image(systemName: "checklist")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        .frame(width: 16, height: 16, alignment: .center)
-                                    Text("Tasks")
-                                        .font(.system(size: 12, weight: isTasksSelected ? .semibold : .medium))
-                                        .foregroundStyle(isTasksSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
-                                .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
-                                .background(
-                                    isTasksSelected
-                                        ? CursorTheme.surfaceRaised(for: colorScheme)
-                                        : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
-                                    in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
-                                        .stroke(
-                                            isTasksSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
-                                            lineWidth: 1
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            )
                             .help("View tasks for this project")
-                            let isDashboardSelected = tabManager.selectedDashboardViewPath == group.path
-                            Button {
+                            let isDashboardSelected = isPreviewPageSelected(for: group.path)
+                            SidebarPageChip(
+                                title: "Preview",
+                                icon: "eye",
+                                isSelected: isDashboardSelected,
+                                onSelect: {
                                     openDashboard(workspacePath: group.path)
-                            } label: {
-                                HStack(spacing: CursorTheme.spaceS) {
-                                    Image(systemName: "eye")
-                                        .font(.system(size: 12))
-                                        .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        .frame(width: 16, height: 16, alignment: .center)
-                                    Text("Preview")
-                                        .font(.system(size: 12, weight: isDashboardSelected ? .semibold : .medium))
-                                        .foregroundStyle(isDashboardSelected ? CursorTheme.textPrimary(for: colorScheme) : CursorTheme.textSecondary(for: colorScheme))
-                                        .lineLimit(1)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .padding(.horizontal, CursorTheme.paddingSidebarRowHorizontal)
-                                .padding(.vertical, CursorTheme.paddingSidebarRowVertical)
-                                .background(
-                                    isDashboardSelected
-                                        ? CursorTheme.surfaceRaised(for: colorScheme)
-                                        : CursorTheme.surfaceMuted(for: colorScheme).opacity(0.58),
-                                    in: RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: CursorTheme.radiusSidebarRow, style: .continuous)
-                                        .stroke(
-                                            isDashboardSelected ? CursorTheme.borderStrong(for: colorScheme) : Color.clear,
-                                            lineWidth: 1
-                                        )
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            )
                             .help("Preview: run startup scripts in tabs")
                             ForEach(group.tabs) { t in
                                 ObservedTabChip(
@@ -2465,6 +2487,7 @@ struct PopoutView: View {
                 )
                 .frame(maxWidth: .infinity)
             }
+            .padding(.top, CursorTheme.spaceM)
         }
         .frame(maxWidth: .infinity)
         .clipped()
