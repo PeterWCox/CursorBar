@@ -1561,21 +1561,30 @@ struct PopoutView: View {
             }
         }
 
-        var icon: String {
+        var shortcutSymbolName: String {
             switch self {
             case .dockLeft:
-                return "rectangle.leadinghalf.inset.filled"
+                return "1.circle"
             case .expandedLeft:
-                return "sidebar.leading"
+                return "2.circle"
             case .expandedRight:
-                return "sidebar.leading"
+                return "3.circle"
             case .dockRight:
-                return "rectangle.trailinghalf.inset.filled"
+                return "4.circle"
             }
         }
 
-        var mirrorsIconHorizontally: Bool {
-            self == .expandedRight
+        var selectedShortcutSymbolName: String {
+            switch self {
+            case .dockLeft:
+                return "1.circle.fill"
+            case .expandedLeft:
+                return "2.circle.fill"
+            case .expandedRight:
+                return "3.circle.fill"
+            case .dockRight:
+                return "4.circle.fill"
+            }
         }
 
         var shortcutKey: KeyEquivalent {
@@ -1643,21 +1652,21 @@ struct PopoutView: View {
 
     @ViewBuilder
     private func layoutMenuIcon(_ layout: WindowLayoutOption, isSelected: Bool = false) -> some View {
-        if isSelected {
-            Image(systemName: "checkmark")
-        } else {
-            Image(systemName: layout.icon)
-                .scaleEffect(x: layout.mirrorsIconHorizontally ? -1 : 1, y: 1)
-        }
+        Image(systemName: isSelected ? layout.selectedShortcutSymbolName : layout.shortcutSymbolName)
+    }
+
+    private var layoutCycleIcon: some View {
+        Image(systemName: "arrow.left.arrow.right.circle")
+            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+            .frame(width: CursorTheme.spaceL, height: CursorTheme.spaceL)
     }
 
     private var layoutCycleHintRow: some View {
         Button {} label: {
             HStack(spacing: CursorTheme.spaceS) {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                    .frame(width: CursorTheme.spaceL)
-                Text("Cycle (cmd+`)")
+                layoutCycleIcon
+                Text("Cycle")
                 Spacer(minLength: 0)
             }
             .font(.system(size: CursorTheme.fontBody, weight: .regular))
@@ -2737,7 +2746,8 @@ struct PopoutView: View {
                     icon: "folder.badge.plus",
                     action: addProject,
                     help: "Open an existing project folder",
-                    style: .primary
+                    style: .primary,
+                    fillsAvailableWidth: true
                 )
                 .frame(maxWidth: .infinity)
                 ActionButton(
@@ -2745,7 +2755,8 @@ struct PopoutView: View {
                     icon: "wand.and.stars",
                     action: openCreateProjectPage,
                     help: "Create or clone a project and run setup",
-                    style: .secondary
+                    style: .secondary,
+                    fillsAvailableWidth: true
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -2785,7 +2796,7 @@ struct PopoutView: View {
     }
 
     private var suggestedFolderNameFromIdea: String {
-        let sanitized = sanitizedProjectName(createProjectIdea)
+        let sanitized = suggestedProjectFolderName(from: createProjectIdea)
         if !sanitized.isEmpty {
             return sanitized
         }

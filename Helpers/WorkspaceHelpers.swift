@@ -369,6 +369,17 @@ func sanitizedProjectName(_ name: String) -> String {
         .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
 }
 
+/// Creates a short default folder name from a free-form idea by keeping only the first few words.
+func suggestedProjectFolderName(from idea: String, maxWords: Int = 4) -> String {
+    guard maxWords > 0 else { return "" }
+    let words = idea
+        .components(separatedBy: .whitespacesAndNewlines)
+        .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+        .filter { !$0.isEmpty }
+
+    return sanitizedProjectName(words.prefix(maxWords).joined(separator: " "))
+}
+
 /// Creates the given project directory inside the parent directory if it doesn't already exist.
 /// Returns the created directory path on success or an error message on failure.
 func createProjectDirectory(parentPath: String, folderName: String) -> Result<String, WorkspaceOperationError> {

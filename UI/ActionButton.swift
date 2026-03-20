@@ -12,6 +12,7 @@ struct ActionButton: View {
     var isDisabled: Bool = false
     var help: String? = nil
     var style: Style = .primary
+    var fillsAvailableWidth: Bool = false
 
     enum Style {
         case primary   // textPrimary, surfaceMuted
@@ -36,7 +37,11 @@ struct ActionButton: View {
             .foregroundStyle(foregroundColor)
             .padding(.horizontal, CursorTheme.paddingCard)
             .padding(.vertical, CursorTheme.spaceS)
-            .frame(minWidth: CursorTheme.actionButtonMinWidth, alignment: .center)
+            .frame(
+                minWidth: CursorTheme.actionButtonMinWidth,
+                maxWidth: fillsAvailableWidth ? .infinity : nil,
+                alignment: .center
+            )
             .background(backgroundFill, in: Capsule())
             .overlay(Capsule().stroke(borderColor, lineWidth: 1))
         }

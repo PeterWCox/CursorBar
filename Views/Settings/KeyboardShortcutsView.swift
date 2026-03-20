@@ -43,7 +43,7 @@ struct KeyboardShortcutsContentView: View {
             ShortcutRow(keys: ["⌘2"], action: "Expanded left"),
             ShortcutRow(keys: ["⌘3"], action: "Expanded right"),
             ShortcutRow(keys: ["⌘4"], action: "Dock right"),
-            ShortcutRow(keys: ["⌘`", "⌘⇧`"], action: "Cycle layouts forward or backward"),
+            ShortcutRow(keys: ["⌥←", "⌥→"], action: "Cycle layouts backward or forward"),
         ]),
     ]
 
