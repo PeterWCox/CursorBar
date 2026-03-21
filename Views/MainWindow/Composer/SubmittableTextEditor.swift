@@ -317,13 +317,18 @@ struct SubmittableTextEditor: NSViewRepresentable {
             updateHeightIfNeeded(for: tv)
         }
 
+        private func currentEventHasShiftModifier() -> Bool {
+            NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift) == true
+        }
+
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertLineBreak(_:)) || currentEventHasShiftModifier() {
+                textView.insertNewlineIgnoringFieldEditor(nil)
+                return true
+            }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                if NSEvent.modifierFlags.contains(.shift) {
-                    textView.insertNewlineIgnoringFieldEditor(nil)
-                } else if !parent.isDisabled {
-                    parent.onSubmit()
-                }
+                guard !parent.isDisabled else { return true }
+                parent.onSubmit()
                 return true
             }
             return false

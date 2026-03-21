@@ -23,11 +23,11 @@ struct KeyboardShortcutsContentView: View {
             ShortcutRow(keys: ["⌘."], action: "Open current project in Cursor"),
             ShortcutRow(keys: ["⌘W"], action: "Close tab or terminal"),
             ShortcutRow(keys: ["⌘⇧T"], action: "Reopen closed tab"),
+            ShortcutRow(keys: ["⌘+"], action: "Cycle forward (Tasks → Preview → agent tabs, then next project)"),
+            ShortcutRow(keys: ["⌘−"], action: "Cycle backward"),
         ]),
         ("Navigation", [
             ShortcutRow(keys: ["⇥ Tab"], action: "Focus prompt input"),
-            ShortcutRow(keys: ["⌘["], action: "Previous in sidebar (Tasks → Preview → agents, then next project)"),
-            ShortcutRow(keys: ["⌘]"], action: "Next in sidebar (Tasks → Preview → agents, then next project)"),
         ]),
         ("Composer", [
             ShortcutRow(keys: ["↵ Return"], action: "Send message"),
@@ -37,12 +37,9 @@ struct KeyboardShortcutsContentView: View {
         ("Agent", [
             ShortcutRow(keys: ["⌃C"], action: "Stop"),
         ]),
-        ("Window", [
-            ShortcutRow(keys: ["⌘B", "⌘S"], action: "Collapse/expand main content"),
-            ShortcutRow(keys: ["⌘L"], action: "Dock left"),
-            ShortcutRow(keys: ["⌘O"], action: "Expand or flip layout"),
-            ShortcutRow(keys: ["⌘R"], action: "Dock right"),
-            ShortcutRow(keys: ["⌘`", "⌘⇧`"], action: "Cycle layouts forward or backward"),
+        ("Layout", [
+            ShortcutRow(keys: ["⌘["], action: "Left: dock on left → expand agent → dock again (repeats)"),
+            ShortcutRow(keys: ["⌘]"], action: "Right: dock on right → expand agent → dock again (repeats)"),
         ]),
     ]
 

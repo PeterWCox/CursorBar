@@ -151,6 +151,10 @@ enum CursorTheme {
     static let radiusTabBarPill: CGFloat = 6
     /// Compact square chip size used in collapsed sidebar states.
     static let sizeSidebarCompactChip: CGFloat = 32
+    /// Larger avatar size used in the active agent header.
+    static let sizeAgentHeaderAvatar: CGFloat = 40
+    /// Centered status badge size used inside the active agent header avatar.
+    static let sizeAgentHeaderStatusBadge: CGFloat = 22
     /// Small padding for badges and tags (horizontal).
     static let paddingBadgeHorizontal: CGFloat = 5
     /// Small padding for badges and tags (vertical).

@@ -34,7 +34,7 @@ enum WorkspaceInitials {
     }
 }
 
-/// Square avatar: repo logo when present, otherwise initials on a tinted background.
+/// Square avatar: repo logo when present, otherwise initials (or a blank tinted tile) on a tinted background.
 struct WorkspaceAvatarView: View {
     @Environment(\.colorScheme) private var colorScheme
     let workspacePath: String
@@ -42,6 +42,8 @@ struct WorkspaceAvatarView: View {
     var size: CGFloat
     /// Corner radius as a fraction of `size` (default ~20% for a soft square).
     var cornerRadiusFraction: CGFloat = 0.22
+    /// When false and there is no repo logo, shows only the tinted tile (no letter glyphs).
+    var showsInitialsWhenNoLogo: Bool = true
 
     @State private var repoImage: NSImage?
 
@@ -68,10 +70,14 @@ struct WorkspaceAvatarView: View {
                 Image(nsImage: repoImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-            } else {
+            } else if showsInitialsWhenNoLogo {
                 Text(initialsShown)
                     .font(.system(size: max(6, size * (size <= 14 ? 0.45 : 0.38)), weight: .semibold, design: .rounded))
                     .foregroundStyle(workspaceTint)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(workspaceTint.opacity(colorScheme == .dark ? 0.28 : 0.2))
+            } else {
+                Color.clear
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(workspaceTint.opacity(colorScheme == .dark ? 0.28 : 0.2))
             }

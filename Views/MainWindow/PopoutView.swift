@@ -537,6 +537,7 @@ struct PopoutView: View {
     @State private var createProjectFolderName = ""
     @State private var createProjectFolderNameEditedByUser = false
     @State private var createProjectIdea = ""
+    @State private var createProjectModelId: String = AppPreferences.defaultModelId
     @State private var createProjectSelectedTypeRaw = ""
     @State private var createProjectInitialGitCommit = false
     @State private var createProjectBusy = false
@@ -706,6 +707,40 @@ struct PopoutView: View {
         } else {
             stopStreaming(for: tabToClose)
             tabManager.closeTab(tabToClose.id)
+        }
+    }
+
+    /// Move linked task between columns; same rules as the Tasks list row (including disabled while processing).
+    @ViewBuilder
+    private func agentTabLinkedTaskMoveMenu(for tab: AgentTab) -> some View {
+        if let taskID = tab.linkedTaskID,
+           let task = projectTasksStore.task(for: tab.workspacePath, id: taskID) {
+            let agentState = linkedTaskState(for: tab) ?? .none
+            let isProcessing = agentState == .processing
+            let canMoveToBacklog = task.taskState == .inProgress && (agentState == .none || agentState == .todo)
+            Menu("Move to…", systemImage: "arrow.right.square") {
+                if canMoveToBacklog {
+                    Button("Backlog", systemImage: "tray.full") {
+                        projectTasksStore.updateTask(workspacePath: tab.workspacePath, id: taskID, taskState: .backlog)
+                    }
+                }
+                if task.taskState == .backlog || task.taskState == .completed {
+                    Button("In Progress", systemImage: "arrow.right.circle") {
+                        projectTasksStore.updateTask(workspacePath: tab.workspacePath, id: taskID, taskState: .inProgress)
+                    }
+                }
+                if task.taskState != .completed {
+                    Button("Completed", systemImage: "checkmark.circle") {
+                        projectTasksStore.updateTask(workspacePath: tab.workspacePath, id: taskID, taskState: .completed)
+                    }
+                }
+                if task.taskState != .deleted {
+                    Button("Deleted", systemImage: "trash", role: .destructive) {
+                        projectTasksStore.updateTask(workspacePath: tab.workspacePath, id: taskID, taskState: .deleted)
+                    }
+                }
+            }
+            .disabled(isProcessing)
         }
     }
 
@@ -1085,6 +1120,9 @@ struct PopoutView: View {
         if createProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             createProjectParentPath = preferredProjectBrowserRoot
         }
+        if appState.model(for: createProjectModelId, providerID: .cursor) == nil {
+            createProjectModelId = appState.defaultModelID(for: .cursor)
+        }
         if createProjectSelectedTypeRaw.isEmpty {
             createProjectSelectedTypeRaw = createProjectPreferredTypeRaw
         }
@@ -1124,7 +1162,11 @@ struct PopoutView: View {
         if appState.isMainContentCollapsed {
             withAnimation(.easeInOut(duration: 0.2)) { appState.isMainContentCollapsed = false }
         }
-        _ = addNewAgentTab(initialPrompt: prompt, lastWorkspacePath: path)
+        _ = addNewAgentTab(
+            initialPrompt: prompt,
+            lastWorkspacePath: path,
+            modelId: effectiveCreateProjectModelID()
+        )
     }
 
     private func submitCreateProject() {
@@ -1303,53 +1345,29 @@ struct PopoutView: View {
                 }
             }
 
-            hiddenShortcutButton("Toggle main window", key: "b") {
-                toggleMainContentCollapsed()
-            }
-
-            hiddenShortcutButton("Toggle main window", key: "s") {
-                toggleMainContentCollapsed()
-            }
-
-            hiddenShortcutButton("Dock left", key: "l") {
-                applyWindowLayout(.dockLeft)
-            }
-
-            hiddenShortcutButton("Expand or flip layout", key: "o") {
-                NotificationCenter.default.post(
-                    name: FloatingPanel.sidebarShortcutNotification,
-                    object: nil,
-                    userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: FloatingPanel.SidebarShortcutAction.expandOrFlip.rawValue]
-                )
-            }
-
-            hiddenShortcutButton("Dock right", key: "r") {
-                applyWindowLayout(.dockRight)
-            }
-
-            hiddenShortcutButton("Cycle layouts forward", key: "`") {
-                NotificationCenter.default.post(
-                    name: FloatingPanel.sidebarShortcutNotification,
-                    object: nil,
-                    userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: FloatingPanel.SidebarShortcutAction.cycleLayouts.rawValue]
-                )
-            }
-
-            hiddenShortcutButton("Cycle layouts backward", key: "`", modifiers: [.command, .shift]) {
-                NotificationCenter.default.post(
-                    name: FloatingPanel.sidebarShortcutNotification,
-                    object: nil,
-                    userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: FloatingPanel.SidebarShortcutAction.cycleLayoutsReverse.rawValue]
-                )
-            }
-
             if sidebarCycleDestinations().count > 1 {
-                hiddenShortcutButton("Previous in sidebar", key: "[", modifiers: .command) {
-                    cycleSidebarWorkspace(direction: -1)
-                }
-                hiddenShortcutButton("Next in sidebar", key: "]", modifiers: .command) {
+                hiddenShortcutButton("Cycle tabs forward", key: "=") {
                     cycleSidebarWorkspace(direction: 1)
                 }
+                hiddenShortcutButton("Cycle tabs backward", key: "-") {
+                    cycleSidebarWorkspace(direction: -1)
+                }
+            }
+
+            hiddenShortcutButton("Cycle left-dock layout", key: "[", modifiers: .command) {
+                NotificationCenter.default.post(
+                    name: FloatingPanel.sidebarShortcutNotification,
+                    object: nil,
+                    userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: FloatingPanel.SidebarShortcutAction.cycleLeftAnchor.rawValue]
+                )
+            }
+
+            hiddenShortcutButton("Cycle right-dock layout", key: "]", modifiers: .command) {
+                NotificationCenter.default.post(
+                    name: FloatingPanel.sidebarShortcutNotification,
+                    object: nil,
+                    userInfo: [FloatingPanel.sidebarShortcutActionUserInfoKey: FloatingPanel.SidebarShortcutAction.cycleRightAnchor.rawValue]
+                )
             }
         }
         .allowsHitTesting(false)
@@ -1472,6 +1490,13 @@ struct PopoutView: View {
     private func effectiveSelectedModel(for providerID: AgentProviderID) -> String {
         if appState.model(for: selectedModel, providerID: providerID) != nil {
             return selectedModel
+        }
+        return appState.defaultModelID(for: providerID)
+    }
+
+    private func effectiveCreateProjectModelID(for providerID: AgentProviderID = .cursor) -> String {
+        if appState.model(for: createProjectModelId, providerID: providerID) != nil {
+            return createProjectModelId
         }
         return appState.defaultModelID(for: providerID)
     }
@@ -1615,14 +1640,10 @@ struct PopoutView: View {
 
         var shortcutDisplay: String {
             switch self {
-            case .dockLeft:
-                return "⌘L"
-            case .expandedLeft:
-                return "⌘O"
-            case .expandedRight:
-                return "⌘O"
-            case .dockRight:
-                return "⌘R"
+            case .dockLeft, .expandedLeft:
+                return "⌘["
+            case .expandedRight, .dockRight:
+                return "⌘]"
             }
         }
 
@@ -1668,29 +1689,6 @@ struct PopoutView: View {
         Image(systemName: isSelected ? layout.selectedShortcutSymbolName : layout.shortcutSymbolName)
     }
 
-    private var layoutCycleIcon: some View {
-        Text("`")
-            .font(.system(size: CursorTheme.fontSmall, weight: .semibold, design: .rounded))
-            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-            .frame(width: CursorTheme.spaceL, height: CursorTheme.spaceL)
-            .overlay(
-                Circle()
-                    .stroke(CursorTheme.textSecondary(for: colorScheme), lineWidth: 1)
-            )
-    }
-
-    private var layoutCycleHintRow: some View {
-        Button {} label: {
-            HStack(spacing: CursorTheme.spaceS) {
-                layoutCycleIcon
-                Text("Cycle")
-                Spacer(minLength: 0)
-            }
-            .font(.system(size: CursorTheme.fontBody, weight: .regular))
-        }
-        .disabled(true)
-    }
-
     private var layoutMenuButton: some View {
         Menu {
             ForEach(WindowLayoutOption.allCases) { layout in
@@ -1707,8 +1705,6 @@ struct PopoutView: View {
                     }
                 }
             }
-            Divider()
-            layoutCycleHintRow
         } label: {
             layoutMenuIcon(selectedWindowLayout)
                 .font(.system(size: IconButton.Size.medium.iconFontSize, weight: .semibold))
@@ -1863,9 +1859,11 @@ struct PopoutView: View {
         } else if !hasOpenProjects {
             splashContentArea()
         } else {
+            // Hide when any Preview terminal exists (manual or Run); empty state is only for no terminals yet.
             let showingDashboardEmpty = selectedProjectPath != nil
                 && tabManager.selectedDashboardViewPath == selectedProjectPath
                 && tabManager.dashboardTabs(for: selectedProjectPath!).isEmpty
+                && dashboardPanelTerminals(for: selectedProjectPath!).isEmpty
             ZStack {
                 if !tabManager.terminalTabs.isEmpty {
                     MultiTerminalHostView(
@@ -2182,6 +2180,10 @@ struct PopoutView: View {
     private var bodyWithShortcuts: some View {
         bodyWithDashboardPersistence
             .onKeyPress(.tab) {
+                // Let the embedded SwiftTerm terminal receive Tab for shell completion (readline/zsh).
+                if tabManager.selectedTerminalID != nil {
+                    return .ignored
+                }
                 if isPromptFirstResponder?() == true {
                     return .ignored
                 }
@@ -2567,21 +2569,34 @@ struct PopoutView: View {
         let isExpanded = expandedPromptTabID.wrappedValue == tab.id
         let displayTitle = (isExpanded && hasExpandablePrompt) ? userPromptDisplayText(from: fullPrompt) : tab.title
         let agentProjectDisplay = appState.workspaceDisplayName(for: tab.workspacePath)
+        let showsCenteredStatusIcon = status.isProcessing || status.isPendingReview || status.isStopped || status.isCompleted
         return HStack(alignment: .top, spacing: CursorTheme.spaceM) {
             WorkspaceAvatarView(
                 workspacePath: tab.workspacePath,
                 displayName: agentProjectDisplay.isEmpty ? nil : agentProjectDisplay,
-                size: 32
+                size: CursorTheme.sizeAgentHeaderAvatar,
+                showsInitialsWhenNoLogo: false
             )
-            .overlay(alignment: .topTrailing) {
-                agentStatusIcon(tab: tab, status: status, compact: true)
-                    .frame(width: 16, height: 16)
-                    .background(Circle().fill(CursorTheme.surfaceRaised(for: colorScheme)))
-                    .overlay(
-                        Circle()
-                            .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
-                    )
-                    .offset(x: CursorTheme.spaceXS, y: -CursorTheme.spaceXS)
+            .overlay {
+                if showsCenteredStatusIcon {
+                    Circle()
+                        .fill(CursorTheme.surfaceRaised(for: colorScheme).opacity(0.96))
+                        .frame(
+                            width: CursorTheme.sizeAgentHeaderStatusBadge,
+                            height: CursorTheme.sizeAgentHeaderStatusBadge
+                        )
+                        .overlay {
+                            agentStatusIcon(tab: tab, status: status)
+                                .frame(
+                                    width: CursorTheme.sizeAgentHeaderStatusBadge,
+                                    height: CursorTheme.sizeAgentHeaderStatusBadge
+                                )
+                        }
+                        .overlay(
+                            Circle()
+                                .stroke(CursorTheme.borderStrong(for: colorScheme), lineWidth: 1)
+                        )
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
@@ -2617,21 +2632,17 @@ struct PopoutView: View {
                             ? (isExpanded ? "Double-click to collapse prompt" : "Double-click to show full prompt")
                             : ""
                     )
-                HStack(spacing: CursorTheme.spaceXS) {
-                    let projectColor = tab.workspacePath.isEmpty
-                        ? CursorTheme.textTertiary(for: colorScheme)
-                        : CursorTheme.colorForWorkspace(path: tab.workspacePath)
-                    WorkspaceAvatarView(
-                        workspacePath: tab.workspacePath,
-                        displayName: agentProjectDisplay.isEmpty ? nil : agentProjectDisplay,
-                        size: 14
-                    )
-                    Text((tab.workspacePath as NSString).lastPathComponent)
-                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
-                        .foregroundStyle(projectColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
+                let projectColor = tab.workspacePath.isEmpty
+                    ? CursorTheme.textTertiary(for: colorScheme)
+                    : CursorTheme.colorForWorkspace(path: tab.workspacePath)
+                let projectSubtitle = agentProjectDisplay.isEmpty
+                    ? (tab.workspacePath as NSString).lastPathComponent
+                    : agentProjectDisplay
+                Text(projectSubtitle)
+                    .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                    .foregroundStyle(projectColor)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
             .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
@@ -2728,6 +2739,11 @@ struct PopoutView: View {
                                 }
                             )
                             .help("View tasks for this project")
+                            .contextMenu {
+                                Button("Add Task", systemImage: "plus.circle.fill") {
+                                    showTasksComposer(workspacePath: group.path, startNewTask: true)
+                                }
+                            }
                             let isDashboardSelected = isPreviewPageSelected(for: group.path)
                             SidebarPageChip(
                                 title: "Preview",
@@ -2749,6 +2765,20 @@ struct PopoutView: View {
                                     onClose: { requestCloseTab(t) }
                                 )
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                .contextMenu {
+                                    if t.isRunning {
+                                        Button("Stop", systemImage: "stop.fill") {
+                                            stopStreaming(for: t)
+                                        }
+                                    }
+                                    agentTabLinkedTaskMoveMenu(for: t)
+                                    if t.isRunning || t.linkedTaskID != nil {
+                                        Divider()
+                                    }
+                                    Button("Close Tab", systemImage: "xmark", role: .destructive) {
+                                        requestCloseTab(t)
+                                    }
+                                }
                             }
                         }
                     }
@@ -3135,6 +3165,23 @@ struct PopoutView: View {
                         }
                     }
 
+                    VStack(alignment: .leading, spacing: CursorTheme.spaceXS) {
+                        Text("Model")
+                            .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
+                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        ModelPickerView(
+                            selectedModelId: effectiveCreateProjectModelID(),
+                            models: modelPickerModels(
+                                for: .cursor,
+                                including: effectiveCreateProjectModelID()
+                            ),
+                            onSelect: { createProjectModelId = $0 }
+                        )
+                        Text("Used for the project setup agent.")
+                            .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                            .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                    }
+
                     Toggle(isOn: $createProjectInitialGitCommit) {
                         Text("Create initial git commit after setup")
                             .font(.system(size: CursorTheme.fontBodySmall, weight: .medium))
@@ -3383,9 +3430,9 @@ struct PopoutView: View {
             tab: tab,
             scrollToken: tab.scrollToken
         ) {
-            // Keep only a small recent slice mounted by default, and let rows realize lazily so
-            // switching between tabs does not eagerly rebuild every markdown-heavy turn.
-            LazyVStack(alignment: .leading, spacing: 18) {
+            // Keep only a small recent slice mounted by default for very long threads; within that
+            // window, use a plain VStack so every row lays out up front (avoids lazy-stack blank/refocus quirks).
+            VStack(alignment: .leading, spacing: 18) {
                 if tab.turns.isEmpty {
                     emptyStateContent(tab: tab)
                 } else {
