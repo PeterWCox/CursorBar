@@ -1439,11 +1439,7 @@ struct PopoutView: View {
             select: select
         ) else { return nil }
         if let snapshot = gitBranchSnapshotsByWorkspace[newTab.workspacePath] {
-            currentBranch = snapshot.current
-            gitBranches = snapshot.branches
             newTab.currentBranch = snapshot.current
-        } else {
-            refreshGitState(for: newTab.workspacePath)
         }
         if let prompt = initialPrompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             sendPrompt(tab: newTab)
@@ -1549,8 +1545,8 @@ struct PopoutView: View {
         if let cached = gitBranchSnapshotsByWorkspace[normalizedPath] {
             currentBranch = cached.current
             gitBranches = cached.branches
-            if let active = tabManager.activeTab, active.workspacePath == normalizedPath {
-                active.currentBranch = cached.current
+            for tab in tabManager.tabs where tab.workspacePath == normalizedPath {
+                tab.currentBranch = cached.current
             }
             if !force {
                 return
@@ -1569,12 +1565,41 @@ struct PopoutView: View {
             let snapshot = GitBranchSnapshot(current: result.current, branches: result.branches)
             await MainActor.run {
                 gitBranchSnapshotsByWorkspace[normalizedPath] = snapshot
+                for tab in tabManager.tabs where tab.workspacePath == normalizedPath {
+                    tab.currentBranch = snapshot.current
+                }
                 guard currentWorkspacePath == normalizedPath else { return }
                 currentBranch = snapshot.current
                 gitBranches = snapshot.branches
-                tabManager.activeTab?.currentBranch = snapshot.current
             }
         }
+    }
+
+    /// Applies cached git snapshot (or the active tab’s remembered branch) to picker state without running `git`.
+    private func syncGitPickerUIFromCache(for workspacePath: String) {
+        let normalizedPath = workspacePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedPath.isEmpty else {
+            currentBranch = ""
+            gitBranches = []
+            return
+        }
+        if let cached = gitBranchSnapshotsByWorkspace[normalizedPath] {
+            currentBranch = cached.current
+            gitBranches = cached.branches
+            return
+        }
+        if let active = tabManager.activeTab, active.workspacePath == normalizedPath, !active.currentBranch.isEmpty {
+            currentBranch = active.currentBranch
+        } else {
+            currentBranch = ""
+        }
+        gitBranches = []
+    }
+
+    private func displayedGitBranch(for tab: AgentTab) -> String {
+        let fromTab = tab.currentBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fromTab.isEmpty { return fromTab }
+        return currentBranch.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private enum SidebarEdge: Equatable {
@@ -2234,7 +2259,7 @@ struct PopoutView: View {
         }
         .onChange(of: tabManager.selectedTabID) { _, _ in
             dismissCreateProjectPageIfNeeded()
-            refreshGitState(for: currentWorkspacePath)
+            syncGitPickerUIFromCache(for: currentWorkspacePath)
             updateHangDiagnosticsSnapshot()
         }
         .onChange(of: tabManager.selectedProjectPath) { _, _ in
@@ -3583,9 +3608,9 @@ struct PopoutView: View {
 
                 GitBranchPickerView(
                     branches: gitBranches,
-                    currentBranch: currentBranch,
+                    currentBranch: displayedGitBranch(for: tab),
                     onSelectBranch: { branch in
-                        if branch != currentBranch {
+                        if branch != displayedGitBranch(for: tab) {
                             if let err = gitCheckout(branch: branch, workspacePath: tab.workspacePath) {
                                 tab.errorMessage = err
                             } else {
@@ -3606,8 +3631,9 @@ struct PopoutView: View {
                         return nil
                     }
                 )
+                .disabled(tab.workspacePath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .onChange(of: tab.workspacePath) { _, _ in
-                    refreshGitState(for: tab.workspacePath)
+                    refreshGitState(for: tab.workspacePath, force: true)
                 }
 
                 Spacer()

@@ -111,10 +111,12 @@ struct GitBranchPickerView: View {
                 icon: "arrow.triangle.branch",
                 title: currentBranch.isEmpty ? "No branch" : currentBranch
             )
+        } primaryAction: {
+            // Runs when the control is activated to open the menu (macOS 15+ / iOS 17+).
+            onOpenMenu()
         }
         .menuStyle(.borderlessButton)
         .foregroundColor(.white)
-        .disabled(branches.isEmpty)
         .sheet(isPresented: $showNewBranchSheet) {
             NewBranchSheet(currentBranch: currentBranch) { name in
                 onCreateBranch?(name) ?? nil
