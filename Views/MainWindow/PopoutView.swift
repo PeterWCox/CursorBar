@@ -3200,6 +3200,7 @@ struct PopoutView: View {
                                 for: .cursor,
                                 including: effectiveCreateProjectModelID()
                             ),
+                            providerID: .cursor,
                             onSelect: { createProjectModelId = $0 }
                         )
                         Text("Used for the project setup agent.")
@@ -3603,6 +3604,7 @@ struct PopoutView: View {
                         for: tab.providerID,
                         including: effectiveModelForTab(tab)
                     ),
+                    providerID: tab.providerID,
                     onSelect: { tab.modelId = $0 }
                 )
 
@@ -3765,21 +3767,32 @@ struct PopoutView: View {
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
 
             ForEach(Array(tab.followUpQueue.enumerated()), id: \.element.id) { index, item in
-                HStack(alignment: .center, spacing: CursorTheme.spaceS) {
+                HStack(alignment: .top, spacing: CursorTheme.spaceS) {
                     Text(userPromptDisplayText(from: item.text))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .multilineTextAlignment(.leading)
                         .font(.system(size: CursorTheme.fontBodySmall, weight: .regular, design: .monospaced))
                         .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
 
-                    Button(action: { removeQueuedFollowUp(tab: tab, at: index) }) {
-                        Image(systemName: "trash")
-                            .font(.system(size: CursorTheme.fontIconList))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                    HStack(spacing: CursorTheme.spaceXS) {
+                        Button(action: { editQueuedFollowUp(tab: tab, at: index) }) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: CursorTheme.fontIconList))
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Edit in composer")
+
+                        Button(action: { removeQueuedFollowUp(tab: tab, at: index) }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: CursorTheme.fontIconList))
+                                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Remove from queue")
                     }
-                    .buttonStyle(.plain)
-                    .help("Remove from queue")
                 }
                 .padding(.horizontal, CursorTheme.spaceM)
                 .padding(.vertical, CursorTheme.spaceS)
@@ -3795,6 +3808,20 @@ struct PopoutView: View {
     private func removeQueuedFollowUp(tab: AgentTab, at index: Int) {
         guard index >= 0, index < tab.followUpQueue.count else { return }
         tab.followUpQueue.remove(at: index)
+    }
+
+    /// Load a queued message into the composer for editing and remove it from the queue.
+    /// Any non-empty draft in the composer is appended to the end of the queue first.
+    private func editQueuedFollowUp(tab: AgentTab, at index: Int) {
+        guard index >= 0, index < tab.followUpQueue.count else { return }
+        let queued = tab.followUpQueue[index]
+        let draft = tab.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !draft.isEmpty {
+            tab.followUpQueue.append(QueuedFollowUp(text: tab.prompt))
+        }
+        tab.prompt = queued.text
+        tab.followUpQueue.remove(at: index)
+        tab.hasAttachedScreenshot = !screenshotPaths(from: queued.text).isEmpty
     }
 
     /// Submit the current prompt: send immediately if idle, or queue to send when agent finishes if running.

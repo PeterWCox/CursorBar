@@ -47,6 +47,12 @@ enum AppPreferences {
     static let defaultModelIdKey = "defaultModelId"
     /// Default value for default model: "auto" (Auto model).
     static let defaultDefaultModelId: String = "auto"
+    /// Model ID for the "Quick" shortcut in the model picker (empty = not configured).
+    static let quickModelIdKey = "quickModelId"
+    /// Model ID for the "Thinking" shortcut in the model picker (empty = not configured).
+    static let thinkingModelIdKey = "thinkingModelId"
+    static let defaultQuickModelId: String = ""
+    static let defaultThinkingModelId: String = ""
     /// Key for project paths to hide from the agent sidebar. Persisted via UserDefaults when used with @AppStorage.
     static let hiddenProjectPathsKey = "hiddenProjectPaths"
     /// Default value: no projects hidden, so all projects are shown in the sidebar.

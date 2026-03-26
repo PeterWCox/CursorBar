@@ -239,6 +239,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var sidebarShortcutObserver: NSObjectProtocol?
     private var tasksStorageObserver: NSObjectProtocol?
     private var openInCursorKeyMonitor: Any?
+    private var centerPanelShortcutObserver: NSObjectProtocol?
     private var savedExpandedPanelWidth: CGFloat = 720
     private var savedExpandedPanelHeight: CGFloat?
     private var pendingPanelDockOnRight: Bool?
@@ -282,7 +283,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
-        let centerPanelItem = NSMenuItem(title: "Center Popup", action: #selector(centerPanelFromMenu), keyEquivalent: "")
+        let centerPanelItem = NSMenuItem(title: "Center on Screen", action: #selector(centerPanelFromMenu), keyEquivalent: "0")
+        centerPanelItem.keyEquivalentModifierMask = .command
         centerPanelItem.target = self
         menu.addItem(centerPanelItem)
         menu.addItem(makeViewLayoutMenuItem())
@@ -374,12 +376,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             self.applySidebarShortcut(action)
         }
 
+        centerPanelShortcutObserver = NotificationCenter.default.addObserver(
+            forName: FloatingPanel.centerPanelNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.centerPanelFromMenu()
+        }
+
         openInCursorKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let isCmdPeriod = mods == .command && event.charactersIgnoringModifiers == "."
-            if isCmdPeriod {
+            if mods == .option {
+                if let layoutShortcut = self.sidebarShortcutForLayoutDigit(event) {
+                    self.handleSidebarShortcut(layoutShortcut)
+                    return nil
+                }
+            }
+            guard mods == .command else { return event }
+            if event.charactersIgnoringModifiers == "." {
                 self.handleOpenInCursor()
+                return nil
+            }
+            let isCmdCenterPanel = event.charactersIgnoringModifiers == "0"
+                || event.keyCode == UInt16(kVK_ANSI_0)
+                || event.keyCode == UInt16(kVK_ANSI_Keypad0)
+                || event.charactersIgnoringModifiers?.lowercased() == "o"
+                || event.keyCode == UInt16(kVK_ANSI_O)
+            if isCmdCenterPanel {
+                NotificationCenter.default.post(name: FloatingPanel.centerPanelNotification, object: self.panel)
                 return nil
             }
             return event
@@ -387,6 +412,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
         appState.loadModelsFromCLI()
         refreshDockBadge()
+    }
+
+    /// ⌥1–⌥4: fixed layouts (dock left, expanded left, expanded right, dock right). Numpad 1–4 included.
+    private func sidebarShortcutForLayoutDigit(_ event: NSEvent) -> FloatingPanel.SidebarShortcutAction? {
+        let ch = event.charactersIgnoringModifiers
+        let kc = event.keyCode
+        if ch == "1" || kc == UInt16(kVK_ANSI_1) || kc == UInt16(kVK_ANSI_Keypad1) { return .collapseLeft }
+        if ch == "2" || kc == UInt16(kVK_ANSI_2) || kc == UInt16(kVK_ANSI_Keypad2) { return .expandLeft }
+        if ch == "3" || kc == UInt16(kVK_ANSI_3) || kc == UInt16(kVK_ANSI_Keypad3) { return .expandRight }
+        if ch == "4" || kc == UInt16(kVK_ANSI_4) || kc == UInt16(kVK_ANSI_Keypad4) { return .collapseRight }
+        return nil
     }
 
     private func handleSidebarShortcut(_ action: FloatingPanel.SidebarShortcutAction) {
@@ -416,23 +452,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
         submenu.addItem(makeLayoutMenuActionItem(
             title: "Dock Left",
-            keyEquivalent: "",
-            action: .collapseLeft
+            keyEquivalent: "1",
+            action: .collapseLeft,
+            modifiers: .option
         ))
         submenu.addItem(makeLayoutMenuActionItem(
             title: "Expanded Left",
-            keyEquivalent: "",
-            action: .expandLeft
+            keyEquivalent: "2",
+            action: .expandLeft,
+            modifiers: .option
         ))
         submenu.addItem(makeLayoutMenuActionItem(
             title: "Expanded Right",
-            keyEquivalent: "",
-            action: .expandRight
+            keyEquivalent: "3",
+            action: .expandRight,
+            modifiers: .option
         ))
         submenu.addItem(makeLayoutMenuActionItem(
             title: "Dock Right",
-            keyEquivalent: "",
-            action: .collapseRight
+            keyEquivalent: "4",
+            action: .collapseRight,
+            modifiers: .option
         ))
         submenu.addItem(NSMenuItem.separator())
         submenu.addItem(makeLayoutMenuActionItem(
@@ -691,8 +731,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     @objc func centerPanelFromMenu() {
         NSApp.activate(ignoringOtherApps: true)
+        if !panel.isVisible {
+            restoreOrPositionPanel()
+        }
         centerPanelOnPreferredScreen()
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    /// Dock tile context menu while the app is running (`applicationDockMenu` replaces the default menu, so we include common actions).
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let centerItem = NSMenuItem(title: "Center on Screen", action: #selector(centerPanelFromMenu), keyEquivalent: "0")
+        centerItem.keyEquivalentModifierMask = .command
+        centerItem.target = self
+        menu.addItem(centerItem)
+        menu.addItem(.separator())
+        let hideItem = NSMenuItem(title: "Hide", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        hideItem.target = NSApp
+        menu.addItem(hideItem)
+        let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quitItem.target = NSApp
+        menu.addItem(quitItem)
+        return menu
     }
 
     @objc func quitApp() {
@@ -957,6 +1017,8 @@ class FloatingPanel: NSPanel {
         return super.performKeyEquivalent(with: event)
     }
 
+    /// Posted when the user requests centering the panel (⌘0 or ⌘O via app-wide key monitor in `AppDelegate`).
+    static let centerPanelNotification = Notification.Name("FloatingPanelCenterPanel")
     static let requestNewTaskNotification = Notification.Name("FloatingPanelRequestNewTask")
     static let cycleSidebarWorkspaceNotification = Notification.Name("FloatingPanelCycleSidebarWorkspace")
     static let cycleSidebarDirectionUserInfoKey = "direction"

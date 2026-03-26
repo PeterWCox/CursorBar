@@ -972,6 +972,7 @@ struct TasksListView: View {
                 ModelPickerView(
                     selectedModelId: store.newTaskModelId,
                     models: models(for: newTaskProviderID),
+                    providerID: newTaskProviderID,
                     onSelect: { store.newTaskModelId = $0 }
                 )
             }
@@ -1457,6 +1458,7 @@ private struct TaskRowView: View {
                                     ModelPickerView(
                                         selectedModelId: task.modelId,
                                         models: models,
+                                        providerID: task.providerID,
                                         onSelect: { onModelChange?($0) }
                                     )
                                 } else {
@@ -1488,6 +1490,7 @@ private struct TaskRowView: View {
                                 ModelPickerView(
                                     selectedModelId: task.modelId,
                                     models: models,
+                                    providerID: task.providerID,
                                     onSelect: { onModelChange?($0) }
                                 )
                             } else {

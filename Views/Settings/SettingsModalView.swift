@@ -136,6 +136,8 @@ private struct ModelsSettingsPaneContent: View {
     @EnvironmentObject var appState: AppState
     @AppStorage(AppPreferences.disabledModelIdsKey) private var disabledModelIdsRaw: String = AppPreferences.defaultDisabledModelIdsRaw
     @AppStorage(AppPreferences.defaultModelIdKey) private var defaultModelId: String = AppPreferences.defaultDefaultModelId
+    @AppStorage(AppPreferences.quickModelIdKey) private var quickModelId: String = AppPreferences.defaultQuickModelId
+    @AppStorage(AppPreferences.thinkingModelIdKey) private var thinkingModelId: String = AppPreferences.defaultThinkingModelId
     @State private var modelSearchText: String = ""
     @State private var showAllModels: Bool = false
 
@@ -161,6 +163,22 @@ private struct ModelsSettingsPaneContent: View {
         return [auto] + visible
     }
 
+    /// Non-Auto models enabled for the picker; used for Quick / Thinking assignment.
+    private var shortcutPickerBaseOptions: [ModelOption] {
+        let disabled = effectiveDisabled()
+        return appState.visibleModels(for: .cursor, disabledIds: disabled)
+            .filter { $0.id != AvailableModels.autoID }
+    }
+
+    private func shortcutPickerOptions(storedId: String) -> [ModelOption] {
+        var list = shortcutPickerBaseOptions
+        if !storedId.isEmpty, !list.contains(where: { $0.id == storedId }),
+           let orphan = appState.model(for: storedId, providerID: .cursor) {
+            list.append(orphan)
+        }
+        return list
+    }
+
     private var displayedModels: [ModelOption] {
         var list = showAllModels
             ? appState.availableModels
@@ -181,6 +199,22 @@ private struct ModelsSettingsPaneContent: View {
                 colorScheme: colorScheme,
                 defaultModelId: $defaultModelId,
                 options: defaultModelOptions
+            )
+
+            ModelsSettingsPaneContent.shortcutModelSectionView(
+                colorScheme: colorScheme,
+                title: "Quick Model",
+                footer: "Shortcut row in the model picker below Auto. Right-click a model in the picker to assign quickly.",
+                modelId: $quickModelId,
+                options: shortcutPickerOptions(storedId: quickModelId)
+            )
+
+            ModelsSettingsPaneContent.shortcutModelSectionView(
+                colorScheme: colorScheme,
+                title: "Thinking Model",
+                footer: "Shortcut row in the model picker below Quick. Right-click a model in the picker to assign quickly.",
+                modelId: $thinkingModelId,
+                options: shortcutPickerOptions(storedId: thinkingModelId)
             )
 
             // Available Models section
@@ -206,30 +240,7 @@ private struct ModelsSettingsPaneContent: View {
             // Model list with native macOS toggles
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(displayedModels, id: \.id) { model in
-                    HStack(spacing: 12) {
-                        Image(systemName: "brain.head.profile")
-                            .font(.system(size: 14))
-                            .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
-                            .symbolRenderingMode(.hierarchical)
-                        Text(model.label)
-                            .font(.system(size: 14))
-                            .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
-                        Spacer(minLength: 8)
-                        Toggle("", isOn: Binding(
-                            get: { !effectiveDisabled().contains(model.id) },
-                            set: { enabled in
-                                var disabled = effectiveDisabled()
-                                if enabled { disabled.remove(model.id) } else { disabled.insert(model.id) }
-                                disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: disabled)
-                            }
-                        ))
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .labelsHidden()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-
+                    modelSettingsRow(model: model)
                     if model.id != displayedModels.last?.id {
                         Divider()
                             .background(CursorTheme.border(for: colorScheme))
@@ -260,6 +271,70 @@ private struct ModelsSettingsPaneContent: View {
             if !defaultModelOptions.isEmpty && !defaultModelOptions.contains(where: { $0.id == defaultModelId }) {
                 defaultModelId = AppPreferences.defaultDefaultModelId
             }
+        }
+    }
+
+    @ViewBuilder
+    private func modelSettingsRow(model: ModelOption) -> some View {
+        Group {
+            if model.id != AvailableModels.autoID {
+                modelRowChrome(model: model)
+                    .contextMenu {
+                        Button("Set as Quick model") {
+                            quickModelId = model.id
+                        }
+                        Button("Set as Thinking model") {
+                            thinkingModelId = model.id
+                        }
+                    }
+            } else {
+                modelRowChrome(model: model)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private func modelRowChrome(model: ModelOption) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 14))
+                .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                .symbolRenderingMode(.hierarchical)
+            Text(model.label)
+                .font(.system(size: CursorTheme.fontBody, weight: .regular))
+                .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            Spacer(minLength: 8)
+            if model.id != AvailableModels.autoID {
+                Menu {
+                    Button("Set as Quick model") {
+                        quickModelId = model.id
+                    }
+                    Button("Set as Thinking model") {
+                        thinkingModelId = model.id
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: CursorTheme.fontIconList, weight: .medium))
+                        .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
+                .help("Model shortcuts")
+            }
+            Toggle("", isOn: Binding(
+                get: { !effectiveDisabled().contains(model.id) },
+                set: { enabled in
+                    var disabled = effectiveDisabled()
+                    if enabled { disabled.remove(model.id) } else { disabled.insert(model.id) }
+                    disabledModelIdsRaw = AppPreferences.rawFrom(disabledIds: disabled)
+                }
+            ))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .labelsHidden()
         }
     }
 
@@ -300,6 +375,67 @@ private struct ModelsSettingsPaneContent: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    /// Quick / Thinking: label above dropdown; empty string = None.
+    fileprivate static func shortcutModelSectionView(
+        colorScheme: ColorScheme,
+        title: String,
+        footer: String,
+        modelId: Binding<String>,
+        options: [ModelOption]
+    ) -> some View {
+        let resolvedId = modelId.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayLabel: String = {
+            if resolvedId.isEmpty { return "None" }
+            return options.first { $0.id == resolvedId }?.label ?? resolvedId
+        }()
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .textCase(.uppercase)
+                .tracking(0.6)
+
+            Menu {
+                Button {
+                    modelId.wrappedValue = ""
+                } label: {
+                    HStack(spacing: 8) {
+                        if resolvedId.isEmpty {
+                            Image(systemName: "checkmark")
+                        }
+                        Text("None")
+                    }
+                }
+                if !options.isEmpty {
+                    Divider()
+                }
+                ForEach(options, id: \.id) { model in
+                    Button {
+                        modelId.wrappedValue = model.id
+                    } label: {
+                        HStack(spacing: 8) {
+                            if model.id == resolvedId {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(model.label)
+                        }
+                    }
+                }
+            } label: {
+                Text(displayLabel)
+                    .font(.system(size: CursorTheme.fontBody, weight: .medium))
+                    .foregroundStyle(CursorTheme.textPrimary(for: colorScheme))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
+
+            Text(footer)
+                .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

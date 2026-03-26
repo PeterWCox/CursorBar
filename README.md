@@ -34,6 +34,16 @@ It also has a simple terminal emulator, allowing you to build the project from w
 
 ![Cursor Metro screenshot 5](docs/img5.jpg)
 
+📥 Downloaded releases
+
+macOS may block the app the first time you open it (Gatekeeper), because the release is not notarized. If you trust the source, you can clear the **quarantine** flag Apple applies to downloaded files, then open the app normally:
+
+```bash
+xattr -cr "/path/to/Cursor Metro.app"
+```
+
+Replace `/path/to/Cursor Metro.app` with the real path (for example, the app inside your Downloads folder after unzipping). Alternatively, you can **right-click the app in Finder → Open** and confirm once.
+
 🏗️ Building
 
 It is not quite ready yet, but you are welcome to build it yourself. You will to download:
