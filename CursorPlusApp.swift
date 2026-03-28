@@ -542,6 +542,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private func applySidebarShortcut(_ action: FloatingPanel.SidebarShortcutAction) {
         switch action {
         case .collapseLeft:
+            let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+            if appState.isMainContentCollapsed, !isSidebarOnRight {
+                // ⌘] again: undock (expanded left).
+                UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
+                appState.isMainContentCollapsed = false
+                dockExpandedPanelToScreenSide(sidebarOnRight: false, animated: true)
+                return
+            }
             UserDefaults.standard.set(false, forKey: AppPreferences.sidebarOnRightKey)
             pendingPanelDockOnRight = false
             appState.isMainContentCollapsed = true
@@ -554,6 +562,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             appState.isMainContentCollapsed = false
             dockExpandedPanelToScreenSide(sidebarOnRight: true, animated: true)
         case .collapseRight:
+            let isSidebarOnRight = UserDefaults.standard.bool(forKey: AppPreferences.sidebarOnRightKey)
+            if appState.isMainContentCollapsed, isSidebarOnRight {
+                // ⌘\ again: undock (expanded right).
+                UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
+                appState.isMainContentCollapsed = false
+                dockExpandedPanelToScreenSide(sidebarOnRight: true, animated: true)
+                return
+            }
             UserDefaults.standard.set(true, forKey: AppPreferences.sidebarOnRightKey)
             pendingPanelDockOnRight = true
             appState.isMainContentCollapsed = true
@@ -965,7 +981,7 @@ class FloatingPanel: NSPanel {
             )
             return true
         }
-        // ⌘] — dock left (sidebar only); ⌘\ — dock right. Match ANSI key codes when layout changes charactersIgnoringModifiers.
+        // ⌘] / ⌘\ — dock to that side; repeat the same shortcut to expand. Match ANSI key codes when layout changes charactersIgnoringModifiers.
         if key == "]" || event.keyCode == UInt16(kVK_ANSI_RightBracket) {
             NotificationCenter.default.post(
                 name: FloatingPanel.sidebarShortcutNotification,

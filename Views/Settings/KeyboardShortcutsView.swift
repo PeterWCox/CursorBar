@@ -43,8 +43,8 @@ struct KeyboardShortcutsContentView: View {
             ShortcutRow(keys: ["⌥2"], action: "Expanded left (with agent window)"),
             ShortcutRow(keys: ["⌥3"], action: "Expanded right (with agent window)"),
             ShortcutRow(keys: ["⌥4"], action: "Dock right (sidebar only)"),
-            ShortcutRow(keys: ["⌘]"], action: "Dock left (sidebar only)"),
-            ShortcutRow(keys: ["⌘\\"], action: "Dock right (sidebar only)"),
+            ShortcutRow(keys: ["⌘]"], action: "Dock left (sidebar only); press again to expand"),
+            ShortcutRow(keys: ["⌘\\"], action: "Dock right (sidebar only); press again to expand"),
         ]),
     ]
 
