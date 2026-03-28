@@ -1,62 +1,81 @@
+# Cursor Metro
+
+## 1. What is it?
+
+**Cursor Metro** is a lightweight, open-source macOS app that wraps the [Cursor Agent CLI](https://cursor.com) for fast, focused “vibe coding.”
+
+The name *Metro* is a nod to small convenience stores or quick transit: you drop in, get the essentials, and move on—without full-screen Cursor windows and scattered terminals.
+
+It is meant to stay on screen (or collapsed to a slim side panel) so you can track agent progress across projects without losing context in a maze of tabs.
 
 ![Cursor Metro screenshot 1](docs/img1.jpeg)
 
-**Cursor Metro** is a light-weight, open-source UX wrapper around the Cursor Agent CLI built for ‘Vibe Coding’
+## 2. Features
 
+- **Tasks and agents** — Create tasks, delegate them to agents, and watch status in the sidebar until you are ready to review and complete them.
+- **Integrated terminal** — Run builds and shell commands next to your tasks; the app can help wire this up if you are unsure how.
+- **Always-on, low-footprint UX** — Designed for multiple projects and fewer distractions than juggling many Cursor windows and terminals.
 
-The name ‘Metro’ is inspired by small convenience stores like Tesco Metro, where you just want to pop in for a quick shop to pick up the basics, or perhaps a Subway or Metro getting from A-B quickly.
+**Planned**
 
-It addresses limitations and frustrations I have with coding in 2026:
-
-1. Working with multiple projects and having multiple Cursor Windows and Terminals open.
-2. Getting distracted with the code / Cursor taking up a lot of space on my screen requiring multiple monitors.
-3. Losing track of what I was working on / getting lost in Agent Tabs.
-4. Not being able to do some casual browsing yet wanting to remain productive, without Cursor taking up half my screen
-5. Not being able to (easily) do everything in a single app for multiple projects.
-6. Overcoming intertia being able to just create a new project and manage it from one single place. 
-7. Having to type a prompt or command to do basic things like just commit and push / fix build
-
-It is designed to be on your screen at all times unless you specifically minimize it. It can be  collapsed to a handy side panel that shows the progress of each of your agents.
-
+- Creating and scaffolding new projects  
+- Remote agents  
+- Claude Code interoperability  
 
 ![Cursor Metro screenshot 2](docs/im2.jpg)
 
 ![Cursor Metro screenshot 3](docs/img3.jpg)
 
-
-It uses a simple Task based system.  Simply put, you create a bunch of tasks and delegate them to agents which you can track the status of in the sidebar until ready to review. Once happy enough you can complete those tasks to close out the issues.
-
-
 ![Cursor Metro screenshot 4](docs/img4.jpg)
-
-It also has a simple terminal emulator, allowing you to build the project from within the same place as where you manage the agents and even this up for you if you don’t know how.
-
 
 ![Cursor Metro screenshot 5](docs/img5.jpg)
 
-📥 Downloaded releases
+## 3. Get started
 
-macOS may block the app the first time you open it (Gatekeeper), because the release is not notarized. If you trust the source, you can clear the **quarantine** flag Apple applies to downloaded files, then open the app normally:
+**Requirements:** macOS 15 or later. To run agents, you need the **Cursor Agent CLI** installed and available on your `PATH` (commonly `~/.local/bin` after install). This applies to both options below.
+
+---
+
+### Option 1 — Release artifact (downloaded `.app`)
+
+1. Download and unzip the release, then move **Cursor Metro.app** where you want it (for example **Applications**).
+
+2. **First launch and permissions (Gatekeeper)**  
+   Unsigned or non-notarized builds may be blocked the first time you open them.
+
+   - **Finder:** Control-click (right-click) **Cursor Metro.app** → **Open** → confirm **Open** when macOS asks.  
+   - **Terminal:** Remove the quarantine flag, then open the app as usual:
+
+     ```bash
+     xattr -cr "/path/to/Cursor Metro.app"
+     ```
+
+     Replace `/path/to/Cursor Metro.app` with the real path (for example the copy in your Downloads folder or **Applications**).
+
+3. If macOS still refuses to open the app, open **System Settings** → **Privacy & Security**, scroll to the message about **Cursor Metro** being blocked, and choose **Open Anyway** (you may need a failed open attempt first for this button to appear).
+
+---
+
+### Option 2 — Build with Xcode
+
+1. Install **Xcode** from the Mac App Store (or Apple’s developer tools) and open it once to accept the license and install components.
+
+2. Install the **Cursor Agent CLI** so Metro can spawn agents (same requirement as Option 1).
+
+3. From the **repository root**, build and run without opening Xcode:
+
+   ```bash
+   ./build-and-run.sh
+   ```
+
+   This produces a Debug build and launches **Cursor Metro.app**.
+
+4. **Alternatively**, open `CursorMetro.xcodeproj` in Xcode, select the **CursorMetro** scheme, then **Product** → **Run** (⌘R).
+
+**Release-style build from the command line** (optimized output under `build/`):
 
 ```bash
-xattr -cr "/path/to/Cursor Metro.app"
+xcodebuild -project "CursorMetro.xcodeproj" -scheme "CursorMetro" -configuration Release -derivedDataPath build clean build
 ```
 
-Replace `/path/to/Cursor Metro.app` with the real path (for example, the app inside your Downloads folder after unzipping). Alternatively, you can **right-click the app in Finder → Open** and confirm once.
-
-🏗️ Building
-
-It is not quite ready yet, but you are welcome to build it yourself. You will to download:
-
-* Cursor Agent CLI 
-* XCode
-
-You can run the shell script build-and-run.sh once XCode has been installed without having to open XCode
-
-🧭 Road Map
-
-* Creating/scaffolding new projects
-* Remote Agents
-* Claude Code interopability
-
-
+The built app is at `build/Build/Products/Release/Cursor Metro.app`.
