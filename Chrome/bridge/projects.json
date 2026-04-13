@@ -1,0 +1,6 @@
+{
+  "projects": [
+    { "label": "SideQuest", "path": "~/dev/SideQuest" },
+    { "label": "Cursor Metro", "path": "~/dev/CursorMetro" }
+  ]
+}

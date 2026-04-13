@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "I'd Like To Make",
+  "description": "Inject a Cursor Agent launcher and chat panel directly into the current tab.",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:4317/*",
+    "http://localhost:4317/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Toggle in-tab Cursor Agent"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/cursor-metro-logo.png"],
+      "matches": [
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://*.localhost/*",
+        "https://*.localhost/*",
+        "http://127.0.0.1/*",
+        "https://127.0.0.1/*",
+        "http://[::1]/*",
+        "https://[::1]/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "https://localhost/*",
+        "http://*.localhost/*",
+        "https://*.localhost/*",
+        "http://127.0.0.1/*",
+        "https://127.0.0.1/*",
+        "http://[::1]/*",
+        "https://[::1]/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

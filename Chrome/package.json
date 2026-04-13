@@ -1,0 +1,18 @@
+{
+  "name": "id-like-to-make",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension plus local bridge for running Cursor Agent from inside tabs.",
+  "scripts": {
+    "start": "node bridge/server.js",
+    "watch:bridge": "nodemon --watch bridge --ext js --exec \"node bridge/server.js\"",
+    "watch:extension": "nodemon --watch extension --ext js,css,json --exec \"node scripts/build-extension.js\"",
+    "concurrently": "concurrently -n bridge,ext -c cyan,magenta \"npm run watch:bridge\" \"npm run watch:extension\"",
+    "dev": "npm run concurrently",
+    "build": "node scripts/build-extension.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14"
+  }
+}

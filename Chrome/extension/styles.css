@@ -1,0 +1,888 @@
+@media all {
+  #iltm-root {
+    all: initial;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 2147483647;
+    color: #f5f7fb;
+  }
+
+  #iltm-root *,
+  #iltm-root *::before,
+  #iltm-root *::after {
+    box-sizing: border-box;
+    font-family: inherit;
+  }
+
+  .iltm-hidden {
+    display: none !important;
+  }
+
+  .iltm-launcher {
+    width: 52px;
+    height: 52px;
+    border: 0;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #5b7cff, #8f5bff);
+    color: white;
+    font-size: 32px;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 18px 42px rgba(10, 15, 40, 0.36);
+  }
+
+  /* Metro-style wide panel: main | sidebar */
+  .iltm-panel {
+    position: absolute;
+    right: 0;
+    bottom: 68px;
+    width: min(960px, calc(100vw - 24px));
+    height: min(85vh, 900px);
+    max-height: min(85vh, 900px);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 28px;
+    background: linear-gradient(165deg, rgba(18, 22, 34, 0.98) 0%, rgba(10, 12, 20, 0.99) 100%);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .iltm-shell {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .iltm-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 18px;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .iltm-main-header {
+    flex-shrink: 0;
+  }
+
+  .iltm-main-title-block .iltm-title {
+    font-size: 17px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: -0.02em;
+  }
+
+  .iltm-main-title-block .iltm-subtle {
+    margin-top: 4px;
+    font-size: 13px;
+    color: rgba(219, 226, 255, 0.72);
+  }
+
+  .iltm-sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .iltm-sidebar-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 14px 14px 8px;
+    gap: 8px;
+  }
+
+  .iltm-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .iltm-brand-mark {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .iltm-beta {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: rgba(255, 220, 40, 0.95);
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(255, 220, 40, 0.2);
+  }
+
+  .iltm-sidebar-actions {
+    display: flex;
+    gap: 4px;
+  }
+
+  .iltm-icon-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .iltm-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .iltm-sidebar-heading {
+    padding: 0 16px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(180, 190, 220, 0.65);
+  }
+
+  .iltm-sidebar-scroll {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 0 10px 8px;
+    min-height: 0;
+  }
+
+  .iltm-sidebar-empty {
+    padding: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(219, 226, 255, 0.65);
+  }
+
+  .iltm-project-group {
+    margin-bottom: 14px;
+    padding: 8px 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+  }
+
+  .iltm-project-group--selected {
+    border-color: rgba(91, 124, 255, 0.35);
+    background: rgba(91, 124, 255, 0.06);
+  }
+
+  .iltm-project-head {
+    margin-bottom: 6px;
+  }
+
+  .iltm-project-select {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 4px 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .iltm-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: hsl(var(--h, 220), 42%, 28%);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .iltm-avatar--logo {
+    display: block;
+    padding: 3px;
+    box-sizing: border-box;
+    object-fit: contain;
+    background: rgba(20, 28, 48, 0.95);
+  }
+
+  .iltm-project-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .iltm-project-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .iltm-project-branch {
+    font-size: 11px;
+    font-style: italic;
+    color: rgba(180, 190, 220, 0.55);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .iltm-project-pages {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+  }
+
+  .iltm-page-chip {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(219, 226, 255, 0.88);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .iltm-page-chip:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .iltm-page-chip--on {
+    border-color: rgba(91, 124, 255, 0.5);
+    background: rgba(91, 124, 255, 0.15);
+    color: #fff;
+  }
+
+  .iltm-page-chip--disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .iltm-project-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .iltm-sidebar-task {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    font-size: 11px;
+    color: rgba(219, 226, 255, 0.9);
+  }
+
+  .iltm-sidebar-task:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .iltm-sidebar-task--active {
+    border-color: rgba(91, 124, 255, 0.4);
+  }
+
+  .iltm-sidebar-task--run {
+    border-color: rgba(255, 180, 80, 0.45);
+  }
+
+  .iltm-sidebar-task-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .iltm-sidebar-task-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .iltm-sidebar-task-x {
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .iltm-sidebar-task-x:hover {
+    color: #f88;
+    background: rgba(255, 80, 80, 0.12);
+  }
+
+  .iltm-sidebar-footer {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .iltm-sidebar-import,
+  .iltm-sidebar-create {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .iltm-sidebar-import {
+    background: linear-gradient(135deg, #5b7cff, #8f5bff);
+    border: 0;
+    color: #fff;
+  }
+
+  .iltm-sidebar-create {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(219, 226, 255, 0.88);
+  }
+
+  .iltm-sidebar-create:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .iltm-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .iltm-row--stretch > * {
+    flex: 1;
+  }
+
+  .iltm-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .iltm-subtle {
+    font-size: 12px;
+    color: rgba(219, 226, 255, 0.72);
+  }
+
+  .iltm-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(180, 190, 220, 0.65);
+    margin-bottom: 6px;
+  }
+
+  .iltm-button,
+  .iltm-input,
+  .iltm-select,
+  .iltm-textarea {
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+  }
+
+  .iltm-input,
+  .iltm-select,
+  .iltm-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 13px;
+    outline: none;
+  }
+
+  .iltm-textarea {
+    min-height: 88px;
+    max-height: 200px;
+    resize: vertical;
+  }
+
+  .iltm-button--small {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .iltm-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .iltm-pill {
+    min-width: 112px;
+    box-sizing: border-box;
+    padding: 8px 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.028);
+    color: rgba(219, 226, 255, 0.88);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.25;
+    text-align: center;
+    cursor: pointer;
+    outline: none;
+  }
+
+  .iltm-pill:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  .iltm-pill:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .iltm-button {
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .iltm-button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .iltm-button--primary {
+    background: linear-gradient(135deg, #5b7cff, #8f5bff);
+    border: 0;
+  }
+
+  .iltm-button--ghost {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .iltm-main-agent {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .iltm-stream-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-top: 4px;
+  }
+
+  .iltm-stream {
+    flex: 1;
+    min-height: 140px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 8px 4px 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    scroll-behavior: smooth;
+  }
+
+  .iltm-stream-placeholder {
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(180, 190, 220, 0.55);
+    padding: 20px 8px;
+    text-align: center;
+  }
+
+  /* Metro-like segment cards (ConversationViews / SegmentBlockContainer) */
+  .iltm-seg-card {
+    border-radius: 12px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .iltm-seg-thinking-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .iltm-seg-thinking-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(200, 210, 240, 0.85);
+    flex: 1;
+  }
+
+  .iltm-seg-chevron {
+    font-size: 11px;
+    color: rgba(180, 190, 220, 0.55);
+  }
+
+  .iltm-seg-icon {
+    width: 22px;
+    display: inline-flex;
+    justify-content: center;
+    font-size: 11px;
+  }
+
+  .iltm-seg-icon--done {
+    color: rgba(120, 220, 160, 0.95);
+  }
+
+  .iltm-thinking-dots {
+    display: inline-flex;
+    gap: 3px;
+    align-items: center;
+    width: 22px;
+    justify-content: center;
+  }
+
+  .iltm-thinking-dots span {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(200, 210, 240, 0.75);
+    animation: iltm-dot 1s ease-in-out infinite;
+  }
+
+  .iltm-thinking-dots span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .iltm-thinking-dots span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes iltm-dot {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.9);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+  }
+
+  .iltm-seg-thinking-body {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(190, 200, 230, 0.88);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow: auto;
+  }
+
+  .iltm-seg-tool-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .iltm-seg-tool-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+    line-height: 1.3;
+  }
+
+  .iltm-seg-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .iltm-seg-badge--done {
+    background: rgba(80, 200, 140, 0.18);
+    color: #b8ffd8;
+    border: 1px solid rgba(80, 200, 140, 0.35);
+  }
+
+  .iltm-seg-badge--fail {
+    background: rgba(255, 100, 100, 0.15);
+    color: #ffc8c8;
+    border: 1px solid rgba(255, 100, 100, 0.35);
+  }
+
+  .iltm-seg-badge--run {
+    background: rgba(91, 124, 255, 0.2);
+    color: #c8d4ff;
+    border: 1px solid rgba(91, 124, 255, 0.35);
+  }
+
+  .iltm-seg-tool-detail {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: rgba(210, 220, 250, 0.82);
+    word-break: break-word;
+  }
+
+  .iltm-seg-assistant pre {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: #f2f5ff;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: inherit;
+  }
+
+  .iltm-composer {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .iltm-composer-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .iltm-composer-footer-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .iltm-composer-footer-row--buttons {
+    justify-content: flex-start;
+  }
+
+  .iltm-select--footer {
+    flex: 1;
+    min-width: 140px;
+    max-width: 260px;
+  }
+
+  .iltm-footer-refresh {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(220, 226, 255, 0.85);
+    font-size: 15px;
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .iltm-footer-refresh:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .iltm-footer-branch {
+    font-size: 11px;
+    color: rgba(160, 170, 200, 0.75);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .iltm-footer-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.12);
+    border-top-color: rgba(91, 124, 255, 0.9);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .iltm-footer-spinner--on {
+    opacity: 1;
+    animation: iltm-spin 0.8s linear infinite;
+  }
+
+  @keyframes iltm-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .iltm-footer-cost {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(180, 190, 220, 0.55);
+    margin-left: auto;
+  }
+
+  .iltm-pill--ghost {
+    opacity: 0.85;
+    border-style: dashed;
+  }
+
+  .iltm-main-tasks {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .iltm-tasks-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .iltm-task-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-right: 4px;
+  }
+
+  .iltm-task-card {
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .iltm-task-card-title {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: #fff;
+  }
+
+  .iltm-task-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .iltm-tasks-empty {
+    font-size: 13px;
+    color: rgba(219, 226, 255, 0.72);
+    padding: 24px 8px;
+    text-align: center;
+  }
+
+  .iltm-status {
+    padding: 8px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.05);
+    flex-shrink: 0;
+  }
+
+  .iltm-status[data-tone="error"] {
+    background: rgba(255, 77, 77, 0.15);
+    color: #ffd6d6;
+  }
+
+  .iltm-status[data-tone="success"] {
+    background: rgba(62, 196, 121, 0.16);
+    color: #d7ffe7;
+  }
+
+  /* Settings overlay */
+  .iltm-settings {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 28px;
+  }
+
+  .iltm-settings-card {
+    width: min(400px, calc(100% - 32px));
+    padding: 20px;
+    border-radius: 16px;
+    background: rgba(13, 17, 28, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.42);
+  }
+
+  .iltm-settings-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  .iltm-settings-card .iltm-subtle {
+    margin-top: 8px;
+    margin-bottom: 6px;
+  }
+
+  .iltm-settings-card code {
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+}
