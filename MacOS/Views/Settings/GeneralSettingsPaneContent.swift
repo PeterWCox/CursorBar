@@ -8,6 +8,7 @@ struct GeneralSettingsPaneContent: View {
     @AppStorage(AppPreferences.projectsRootPathKey) private var projectsRootPath: String = AppPreferences.defaultProjectsRootPath
     @AppStorage("workspacePath") private var workspacePath: String = FileManager.default.homeDirectoryForCurrentUser.path
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
+    @AppStorage(AppPreferences.selectedAgentProviderIDKey) private var selectedAgentProviderIDRawValue: String = AgentProviderID.claudeCode.rawValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: CursorTheme.spaceXL) {
@@ -45,6 +46,21 @@ struct GeneralSettingsPaneContent: View {
                             Button("Browse…") { selectWorkspaceFolder() }
                         }
                     }
+                }
+            }
+
+            settingsSection(title: "Agent") {
+                VStack(alignment: .leading, spacing: CursorTheme.spaceM) {
+                    Picker("Backend", selection: $selectedAgentProviderIDRawValue) {
+                        ForEach(AgentProviderID.allCases, id: \.self) { provider in
+                            Text(provider.displayName).tag(provider.rawValue)
+                        }
+                    }
+
+                    Text("Choose between Cursor Agent or Claude Code CLI. New tasks and tabs will use the selected backend. Existing tasks are locked to their creation-time backend.")
+                        .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
+                        .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 

@@ -12,8 +12,12 @@ struct ModelPickerView: View {
     var selectedModelId: String
     var models: [ModelOption]
     /// Used to resolve shortcut labels when a model is hidden from the picker but still assigned.
-    var providerID: AgentProviderID = .cursor
+    var providerID: AgentProviderID? = nil
     var onSelect: (String) -> Void
+
+    private var resolvedProviderID: AgentProviderID {
+        providerID ?? appState.selectedAgentProviderID
+    }
 
     private var selectedModel: ModelOption {
         models.first { $0.id == selectedModelId } ?? AvailableModels.autoOption
@@ -30,7 +34,7 @@ struct ModelPickerView: View {
     private func resolvedModel(forStoredId id: String) -> ModelOption? {
         guard !id.isEmpty else { return nil }
         if let m = models.first(where: { $0.id == id }) { return m }
-        return appState.model(for: id, providerID: providerID)
+        return appState.model(for: id, providerID: resolvedProviderID)
     }
 
     var body: some View {

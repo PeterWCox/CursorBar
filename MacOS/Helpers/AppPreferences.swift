@@ -56,6 +56,8 @@ enum AppPreferences {
     static let hiddenProjectPathsKey = "hiddenProjectPaths"
     /// Default value: no projects hidden, so all projects are shown in the sidebar.
     static let defaultHiddenProjectPathsRaw: String = ""
+    /// Key for the selected agent provider backend (Cursor or Claude Code). Persisted via UserDefaults when used with @AppStorage.
+    static let selectedAgentProviderIDKey = "selectedAgentProviderID"
     /// Default appearance: follow system light/dark.
     static let defaultPreferredAppearance: String = PreferredAppearance.system.rawValue
     static let defaultAskCompletionNotificationsEnabled: Bool = true

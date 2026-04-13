@@ -992,8 +992,8 @@ struct PopoutView: View {
         if createProjectParentPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             createProjectParentPath = preferredProjectBrowserRoot
         }
-        if appState.model(for: createProjectModelId, providerID: .cursor) == nil {
-            createProjectModelId = appState.defaultModelID(for: .cursor)
+        if appState.model(for: createProjectModelId, providerID: appState.selectedAgentProviderID) == nil {
+            createProjectModelId = appState.defaultModelID(for: appState.selectedAgentProviderID)
         }
         if createProjectMode == .newWithAgent {
             syncFolderNameFromIdeaIfNeeded()
@@ -1035,7 +1035,7 @@ struct PopoutView: View {
             taskContent: taskContent,
             agentPrompt: prompt,
             workspacePath: path,
-            providerID: .cursor,
+            providerID: appState.selectedAgentProviderID,
             modelId: effectiveCreateProjectModelID(),
             selectAgent: true
         )
@@ -1323,18 +1323,19 @@ struct PopoutView: View {
     }
 
     /// Models to show in the picker (respects "disabled" preference; uses provider defaults when never set). Includes effectiveSelection if it was hidden so the UI stays consistent.
-    private func modelPickerModels(for providerID: AgentProviderID = .cursor, including effectiveSelection: String? = nil) -> [ModelOption] {
-        let allIds = Set(appState.availableModels(for: providerID).map(\.id))
+    private func modelPickerModels(for providerID: AgentProviderID? = nil, including effectiveSelection: String? = nil) -> [ModelOption] {
+        let resolvedProviderID = providerID ?? appState.selectedAgentProviderID
+        let allIds = Set(appState.availableModels(for: resolvedProviderID).map(\.id))
         let disabled = AppPreferences.effectiveDisabledModelIds(
             allIds: allIds,
             raw: disabledModelIdsRaw,
-            defaultEnabledModelIds: AgentProviders.defaultEnabledModelIds(for: providerID),
-            defaultModelID: AgentProviders.defaultModelID(for: providerID)
+            defaultEnabledModelIds: AgentProviders.defaultEnabledModelIds(for: resolvedProviderID),
+            defaultModelID: AgentProviders.defaultModelID(for: resolvedProviderID)
         )
-        var visible = appState.visibleModels(for: providerID, disabledIds: disabled)
+        var visible = appState.visibleModels(for: resolvedProviderID, disabledIds: disabled)
         let currentId = effectiveSelection ?? selectedModel
         if !visible.contains(where: { $0.id == currentId }),
-           let current = appState.model(for: currentId, providerID: providerID) {
+           let current = appState.model(for: currentId, providerID: resolvedProviderID) {
             visible = visible + [current]
         }
         if !visible.contains(where: { $0.id == AvailableModels.autoID }) {
@@ -1350,11 +1351,12 @@ struct PopoutView: View {
         return appState.defaultModelID(for: providerID)
     }
 
-    private func effectiveCreateProjectModelID(for providerID: AgentProviderID = .cursor) -> String {
-        if appState.model(for: createProjectModelId, providerID: providerID) != nil {
+    private func effectiveCreateProjectModelID(for providerID: AgentProviderID? = nil) -> String {
+        let resolvedProviderID = providerID ?? appState.selectedAgentProviderID
+        if appState.model(for: createProjectModelId, providerID: resolvedProviderID) != nil {
             return createProjectModelId
         }
-        return appState.defaultModelID(for: providerID)
+        return appState.defaultModelID(for: resolvedProviderID)
     }
 
     /// Effective model for a tab: tab's explicit model, or app default from Settings, sanitized against available models.
