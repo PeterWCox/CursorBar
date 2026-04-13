@@ -450,16 +450,34 @@ private struct ModelsSettingsPaneContent: View {
 
 private struct AboutPaneContent: View {
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(AppPreferences.selectedAgentProviderIDKey) private var selectedAgentProviderIDRawValue: String = AgentProviderID.claudeCode.rawValue
     private let githubURL = "https://github.com/cursor-macosapp/cursor-macosapp"
+
+    private var providerId: AgentProviderID {
+        AgentProviderID(rawValue: selectedAgentProviderIDRawValue) ?? .claudeCode
+    }
+
+    private var logoImageName: String {
+        switch providerId {
+        case .cursor:
+            return "CursorMetroLogo"
+        case .claudeCode:
+            return "ClaudeMetroLogo"
+        }
+    }
+
+    private var providerName: String {
+        providerId.displayName
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Image("CursorMetroLogo")
+            Image(logoImageName)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(height: 44)
 
-            Text("Cursor Metro is a native macOS menu bar app for Claude Code. It gives you quick access to projects, asks, and streaming output from the menu bar so you can keep an eye on agent work without living in a terminal.")
+            Text("Cursor Metro is a native macOS menu bar app for \(providerName). It gives you quick access to projects, asks, and streaming output from the menu bar so you can keep an eye on agent work without living in a terminal.")
                 .font(.system(size: 14))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
