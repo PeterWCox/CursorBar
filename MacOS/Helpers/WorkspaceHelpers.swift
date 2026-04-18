@@ -897,7 +897,8 @@ func launchStartupScript(workspacePath: String, preferredTerminal: PreferredTerm
 func previewWindowTitlePrefix(workspacePath: String) -> String {
     let root = projectRootForTerminal(workspacePath: workspacePath)
     let name = (root as NSString).lastPathComponent
-    return "Cursor Metro Preview - \(name)"
+    let appName = AgentProviderID.resolvedFromStorage().metroAppMarketingName
+    return "\(appName) Preview - \(name)"
 }
 
 /// Window title for one preview terminal (scriptIndex is 0-based). Uses scriptLabels when set (e.g. "backend"), otherwise " - 1", " - 2", or no suffix for a single script.

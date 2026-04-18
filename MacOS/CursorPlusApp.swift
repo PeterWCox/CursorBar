@@ -141,7 +141,7 @@ enum TasksInReviewCount {
 }
 
 enum BrandStatusIcon {
-    /// Menubar icon: uses the dedicated branded icon asset for crisp small-size rendering.
+    /// Menubar icon: uses the dedicated app icon asset for crisp small-size rendering (wordmarks are a poor fit at ~22pt).
     static func makeImage(size: CGFloat = 22) -> NSImage {
         let source = NSImage(named: "AppIconImage") ?? CursorAppIcon.load()
         let target = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
@@ -244,6 +244,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var savedExpandedPanelHeight: CGFloat?
     private var pendingPanelDockOnRight: Bool?
     private var statusItemLayoutMenu: NSMenu?
+    private weak var statusItemView: StatusItemView?
+    private var lastStatusItemProviderRaw: String?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard appState.tabManager.runningAgentCount > 0 else {
@@ -275,8 +277,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
+        let provider = appState.selectedAgentProviderID
         let image = BrandStatusIcon.makeImage(size: 22)
-        image.accessibilityDescription = "Cursor Metro"
+        image.accessibilityDescription = provider.metroAppMarketingName
 
         let menu = NSMenu()
         menu.delegate = self
@@ -296,12 +299,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let iconSize: CGFloat = 22
         let view = StatusItemView(frame: NSRect(x: 0, y: 0, width: iconSize, height: iconSize))
         view.image = image
-        view.toolTip = "Cursor Metro"
+        view.toolTip = provider.metroAppMarketingName
         view.contextMenu = menu
         view.onLeftClick = { [weak self] in
             self?.togglePanel()
         }
         statusItem.view = view
+        statusItemView = view
+        lastStatusItemProviderRaw = provider.rawValue
 
         panel = FloatingPanel()
         panel.delegate = self
@@ -412,6 +417,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
         appState.loadModelsFromCLI()
         refreshDockBadge()
+
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.syncStatusItemWithAgentProviderIfNeeded()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func syncStatusItemWithAgentProviderIfNeeded() {
+        let raw = UserDefaults.standard.string(forKey: AppPreferences.selectedAgentProviderIDKey)
+            ?? AgentProviderID.claudeCode.rawValue
+        guard raw != lastStatusItemProviderRaw else { return }
+        lastStatusItemProviderRaw = raw
+        let provider = AgentProviderID(rawValue: raw) ?? .claudeCode
+        let image = BrandStatusIcon.makeImage(size: 22)
+        image.accessibilityDescription = provider.metroAppMarketingName
+        statusItemView?.image = image
+        statusItemView?.toolTip = provider.metroAppMarketingName
+        statusItemView?.needsDisplay = true
     }
 
     /// ⌥1–⌥4: fixed layouts (dock left, expanded left, expanded right, dock right). Numpad 1–4 included.

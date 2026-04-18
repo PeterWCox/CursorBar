@@ -18,11 +18,11 @@ private final class TasksViewShortcutCoordinator: ObservableObject {
 }
 
 private let projectSetupAgentPrompt = """
-Set up Cursor Metro for this project from scratch and make it fully runnable for the user without extra manual terminal steps.
+Set up Metro for this project from scratch and make it fully runnable for the user without extra manual terminal steps.
 
 1) Create or update `.metro/project.json` with a `"scripts"` array. Each element must be a **shell command string** to run (for example `"npm run dev"` or `"cd backend && npm run dev"`), NOT a filename. Do not put `"startup.sh"` or any file path in the scripts array. Do not create or reference `.metro/startup.sh`. **Always** add a `"scriptLabels"` array of the same length as `scripts` so Preview terminal tabs show clear names: for multiple scripts use descriptive names like `["backend", "frontend"]` or `["api", "web"]`; for a single script use `["Preview"]` or the app name. Tabs without scriptLabels fall back to "1", "2", etc.
 
-2) Commands are run with the shell's current working directory set to the **project root** (the directory that contains `.metro`), and Cursor Metro executes each script via `/bin/bash -c`. Use commands like `npm run dev` if `package.json` is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into `.metro`.
+2) Commands are run with the shell's current working directory set to the **project root** (the directory that contains `.metro`), and Metro executes each script via `/bin/bash -c`. Use commands like `npm run dev` if `package.json` is in the project root, or `cd budget && npm run dev` if the app lives in a subfolder. Do not cd into `.metro`.
 
 3) If this is a web app, add or update the `"debugUrl"` field in `.metro/project.json` with the URL where the app is served (for example `http://localhost:3000`).
 
@@ -328,12 +328,12 @@ private struct PopoutTasksListContent: View {
 }
 
 /// Sidebar logo: loads from bundle so we can fall back when asset is missing (avoids green placeholder). Uses original rendering so the logo art shows.
-private struct CursorMetroLogoView: View {
+private struct MetroLogoImageView: View {
+    let assetName: String
     let height: CGFloat
-    let projectColor: Color
 
     var body: some View {
-        if let nsImage = NSImage(named: "CursorMetroLogo") {
+        if let nsImage = NSImage(named: assetName) {
             Image(nsImage: nsImage)
                 .resizable()
                 .renderingMode(.original)
@@ -348,11 +348,11 @@ private struct CursorMetroLogoView: View {
     }
 }
 private struct SidebarLogoView: View {
+    let providerID: AgentProviderID
     let height: CGFloat
-    let projectColor: Color
 
     var body: some View {
-        CursorMetroLogoView(height: height, projectColor: projectColor)
+        MetroLogoImageView(assetName: providerID.metroLogoAssetName, height: height)
     }
 }
 
@@ -2283,13 +2283,10 @@ struct PopoutView: View {
         }
     }
 
-    /// Logo + BETA/DEBUG in sidebar column; when sidebar on right, header is mirrored (expand/menu on leading edge). Logo uses active project color.
+    /// Logo + BETA/DEBUG in sidebar column; when sidebar on right, header is mirrored (expand/menu on leading edge).
     private var leftColumnHeader: some View {
-        let projectColor = currentWorkspacePath.isEmpty
-            ? CursorTheme.textPrimary(for: colorScheme)
-            : CursorTheme.colorForWorkspace(path: currentWorkspacePath)
-        return HStack(spacing: 14) {
-            SidebarLogoView(height: 36, projectColor: projectColor)
+        HStack(spacing: 14) {
+            SidebarLogoView(providerID: appState.selectedAgentProviderID, height: 36)
 
             if !isMainContentCollapsed {
                 VStack(alignment: .leading, spacing: 4) {
@@ -2400,7 +2397,7 @@ struct PopoutView: View {
     }
 
     private func welcomeTitleContent() -> some View {
-        PanelHeaderView(title: "Cursor Metro") {
+        PanelHeaderView(title: appState.selectedAgentProviderID.metroAppMarketingName) {
             Image(systemName: "folder.badge.plus")
                 .font(.system(size: CursorTheme.fontIconList, weight: .medium))
                 .foregroundStyle(CursorTheme.textSecondary(for: colorScheme))

@@ -10,6 +10,14 @@ struct GeneralSettingsPaneContent: View {
     @AppStorage(AppPreferences.preferredTerminalAppKey) private var preferredTerminalAppRawValue: String = PreferredTerminalApp.automatic.rawValue
     @AppStorage(AppPreferences.selectedAgentProviderIDKey) private var selectedAgentProviderIDRawValue: String = AgentProviderID.claudeCode.rawValue
 
+    private var selectedAgentProviderID: AgentProviderID {
+        AgentProviderID(rawValue: selectedAgentProviderIDRawValue) ?? .claudeCode
+    }
+
+    private var metroAppMarketingName: String {
+        selectedAgentProviderID.metroAppMarketingName
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: CursorTheme.spaceXL) {
             settingsSection(title: "Workspace") {
@@ -84,7 +92,7 @@ struct GeneralSettingsPaneContent: View {
                     Toggle("Notify when an ask finishes", isOn: $askCompletionNotificationsEnabled)
                         .toggleStyle(.switch)
 
-                    Text("Shows a macOS notification when Cursor Metro finishes or fails an ask. The notification title uses the task or tab title.")
+                    Text("Shows a macOS notification when \(metroAppMarketingName) finishes or fails an ask. The notification title uses the task or tab title.")
                         .font(.system(size: CursorTheme.fontSecondary, weight: .regular))
                         .foregroundStyle(CursorTheme.textTertiary(for: colorScheme))
                         .fixedSize(horizontal: false, vertical: true)

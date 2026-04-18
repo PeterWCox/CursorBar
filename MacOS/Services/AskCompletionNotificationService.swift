@@ -65,10 +65,11 @@ final class AskCompletionNotificationService: AskCompletionNotifying {
     private static func notificationBody(workspacePath: String, hadError: Bool) -> String {
         let workspaceName = workspaceDisplayName(for: workspacePath)
         let status = hadError ? "failed" : "finished"
+        let appName = AgentProviderID.resolvedFromStorage().metroAppMarketingName
         if workspaceName.isEmpty {
-            return "Cursor Metro ask \(status)."
+            return "\(appName) ask \(status)."
         }
-        return "Cursor Metro ask \(status) in \(workspaceName)."
+        return "\(appName) ask \(status) in \(workspaceName)."
     }
 
     private static func workspaceDisplayName(for path: String) -> String {

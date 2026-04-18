@@ -14,6 +14,32 @@ enum AgentProviderID: String, Codable, CaseIterable, Identifiable {
             return "Claude Code"
         }
     }
+
+    /// In-app product name shown beside the selected agent backend (e.g. sidebar, welcome header).
+    var metroAppMarketingName: String {
+        switch self {
+        case .cursor:
+            return "Cursor Metro"
+        case .claudeCode:
+            return "Claude Metro"
+        }
+    }
+
+    /// Wordmark / logo asset in `Assets.xcassets` for the active backend.
+    var metroLogoAssetName: String {
+        switch self {
+        case .cursor:
+            return "CursorMetroLogo"
+        case .claudeCode:
+            return "ClaudeMetroLogo"
+        }
+    }
+
+    /// Resolves the saved backend from shared `UserDefaults` (same key as Settings → Agent).
+    static func resolvedFromStorage(_ defaults: UserDefaults = .standard) -> AgentProviderID {
+        let raw = defaults.string(forKey: AppPreferences.selectedAgentProviderIDKey) ?? Self.claudeCode.rawValue
+        return AgentProviderID(rawValue: raw) ?? .claudeCode
+    }
 }
 
 struct AgentProviderDescriptor {
