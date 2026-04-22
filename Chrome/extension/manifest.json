@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "I'd Like To Make",
-  "description": "Inject a Cursor Agent launcher and chat panel directly into the current tab.",
+  "description": "Metro-style in-tab panel: run Cursor Agent CLI (`agent`) or Claude Code (`claude`) via the local bridge, aligned with Cursor Metro on macOS.",
   "version": "0.1.0",
   "permissions": [
     "storage",
@@ -15,7 +15,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Toggle in-tab Cursor Agent"
+    "default_title": "Toggle Metro (Cursor or Claude Code)"
   },
   "web_accessible_resources": [
     {

@@ -22,14 +22,14 @@ chrome.action.onClicked.addListener(async (tab) => {
 
   if (!tabIsLocalhost(tab)) {
     console.warn(
-      "In-tab Cursor Agent is only available on http(s)://localhost or http(s)://127.0.0.1 pages.",
+      "Cursor Metro (Chrome) is only injected on http(s)://localhost or http(s)://127.0.0.1 pages.",
     );
     return;
   }
 
   try {
-    await chrome.tabs.sendMessage(tab.id, { type: "cursor-agent-toggle" });
+    await chrome.tabs.sendMessage(tab.id, { type: "metro-agent-toggle" });
   } catch (error) {
-    console.warn("Failed to toggle in-tab agent panel:", error);
+    console.warn("Failed to toggle in-tab Metro panel:", error);
   }
 });

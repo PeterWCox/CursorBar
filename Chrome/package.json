@@ -9,6 +9,7 @@
     "watch:extension": "nodemon --watch extension --ext js,css,json --exec \"node scripts/build-extension.js\"",
     "concurrently": "concurrently -n bridge,ext -c cyan,magenta \"npm run watch:bridge\" \"npm run watch:extension\"",
     "dev": "npm run concurrently",
+    "tmetro": "sh -c 'p=${PORT:-4317}; lsof -nP -tiTCP:$p -sTCP:LISTEN | xargs kill -9 2>/dev/null || true' && npm run dev",
     "build": "node scripts/build-extension.js"
   },
   "devDependencies": {
